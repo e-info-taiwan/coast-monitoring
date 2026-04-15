@@ -1,0 +1,14 @@
+services:
+  pocketbase:
+    build:
+      context: .
+    environment:
+      PB_BOOTSTRAP_ADMIN_EMAIL: ${PB_BOOTSTRAP_ADMIN_EMAIL:-}
+      PB_BOOTSTRAP_ADMIN_NAME: ${PB_BOOTSTRAP_ADMIN_NAME:-}
+      PB_GOOGLE_CLIENT_ID: ${PB_GOOGLE_CLIENT_ID:-}
+      PB_GOOGLE_CLIENT_SECRET: ${PB_GOOGLE_CLIENT_SECRET:-}
+      PB_DEV_PASSWORD_AUTH: ${PB_DEV_PASSWORD_AUTH:-false}
+    ports:
+      - "8090:8090"
+    volumes:
+      - ./pb_data:/pb/pb_data

@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Species Directory</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/species.js"></script>
+  </head>
+  <body class="public-page">
+    <div class="page-glow page-glow-a"></div>
+    <div class="page-glow page-glow-b"></div>
+
+    <main class="public-shell">
+      <section class="public-hero">
+        <p class="eyebrow">Public species directory</p>
+        <h1>生物物種清單</h1>
+        <p class="lede">
+          這是一個不需要登入就能瀏覽的範例頁，會直接讀取 PocketBase 裡的 `species` 資料。
+        </p>
+        <div class="login-notes">
+          <span class="note-pill">Public read-only</span>
+          <span class="note-pill">No login required</span>
+          <span class="note-pill">PocketBase backed</span>
+        </div>
+      </section>
+
+      <section class="public-card">
+        <div class="public-toolbar">
+          <div>
+            <p class="panel-label">Species list</p>
+            <h2>所有物種</h2>
+            <p id="species-summary" class="meta-line">Loading...</p>
+          </div>
+
+          <div class="public-search-wrap">
+            <label class="sr-only" for="species-search">Search species</label>
+            <input id="species-search" class="public-search" type="search" placeholder="搜尋中文或英文名稱" />
+          </div>
+        </div>
+
+        <div id="species-grid" class="species-grid"></div>
+        <p id="species-status" class="status-copy"></p>
+      </section>
+    </main>
+  </body>
+</html>

@@ -1,0 +1,7 @@
+pb_data/
+*.db
+*.db-shm
+*.db-wal
+.env
+.DS_Store
+pocketbase-local
