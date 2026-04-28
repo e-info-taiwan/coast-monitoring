@@ -12,3 +12,5 @@ services:
       - "8090:8090"
     volumes:
       - ./pb_data:/pb/pb_data
+      # 開發時覆蓋映像內建的 pb_public，修改前端後不需 docker compose build
+      - ./pb_public:/pb/pb_public

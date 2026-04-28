@@ -23,9 +23,18 @@
 ### 方式二: 本機 PocketBase binary
 
 1. 安裝 PocketBase 0.36+。
-2. 把 PocketBase binary 放在 repo 根目錄，或用一個會和 `pb_public` 同層的執行路徑。
-3. 在 repo 根目錄執行 `./pocketbase-local serve --dir /path/to/pb_data`。
-4. 打開 `http://127.0.0.1:8090/`。
+2. 建議把 **binary 放在 repo 根目錄**（與 `pb_public/`、`pb_hooks/`、`pb_migrations/` 同層），或改用 **systemd / 腳本設定 WorkingDirectory** 指向 repo 根目錄。
+3. **請一定要在 repo 根目錄執行**（或明確指定各目錄的絕對路徑），因為 PocketBase 會依「目前工作目錄」去找 `./pb_public`、`./pb_hooks`、`./pb_migrations`。若在別的目錄執行 `./…/pocketbase-local serve --dir …/pb_data`，很容易仍載入錯誤路徑下的檔案（例如過期的 `app.js`），REST API 會是新資料，但首頁 admin UI 行為會錯亂。
+4. 範例（在 repo 根目錄）：
+
+```bash
+cd /path/to/coast-monitoring
+./pocketbase-local serve --dir pb_data
+```
+
+若 binary 不在 repo 內，請改用 PocketBase 支援的路徑旗標（見 `./pocketbase-local serve --help`），為 **`--dir`、`--publicDir`、`--hooksDir`、`--migrationsDir`** 分別指定本 repo 底下對應資料夾的**絕對路徑**。
+
+5. 打開 `http://127.0.0.1:8090/`。
 
 PocketBase 會自動套用 `pb_migrations/0001_initial.js`，並提供這個 repo 裡的靜態 admin UI。
 
@@ -240,6 +249,26 @@ https://api.example.com/api/oauth2-redirect
   - 全部 CRUD 都只允許 `admin`
 - `species`
   - 全部 CRUD 都只允許 `admin`
+
+### users/location/species 角色權限矩陣
+
+以下是目前 migration 固化後的規則（superuser 永遠可繞過 collection rules）：
+
+- `users`
+  - `admin`: `list/view/create/update/delete/manage` 全部允許
+  - `volunteer`: 全部不允許（不能直接管理 `users`）
+  - `guest`: 不允許
+  - 特例：`createRule` 允許 `oauth2` context，自動建立首次 Google 登入帳號
+- `location`
+  - `admin`: `create/update/delete` 允許，`list/view` 也可讀
+  - `volunteer`: `list/view` 允許，`create/update/delete` 不允許
+  - `guest`: `list/view` 允許，`create/update/delete` 不允許
+- `species`
+  - `admin`: `create/update/delete` 允許，`list/view` 也可讀
+  - `volunteer`: `list/view` 允許，`create/update/delete` 不允許
+  - `guest`: `list/view` 允許，`create/update/delete` 不允許
+
+對應 migration：`pb_migrations/0005_role_permissions_matrix.js`
 
 ## 我這次假設的資料欄位
 

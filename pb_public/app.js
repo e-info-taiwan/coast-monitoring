@@ -11,6 +11,7 @@ const appView = $("#app-view")
 const providerList = $("#provider-list")
 const passwordLoginForm = $("#password-login-form")
 const loginStatus = $("#login-status")
+const workspaceStatus = $("#workspace-status")
 const resourceNav = $("#resource-nav")
 const overviewPanel = $("#overview-panel")
 const resourcePanel = $("#resource-panel")
@@ -21,7 +22,7 @@ const sectionTitle = $("#section-title")
 const sectionDescription = $("#section-description")
 const sessionBadges = $("#session-badges")
 
-const resourceConfigs = {
+const baseResourceConfigs = {
   users: {
     title: "Users",
     eyebrow: "People",
@@ -123,12 +124,116 @@ const resourceConfigs = {
   },
 }
 
+const resourceConfigs = { ...baseResourceConfigs }
+
+const EXCLUDED_COLLECTIONS = new Set(["_superusers", "_externalAuths", "_mfas", "_otps"])
+
+function toStartCase(value) {
+  return String(value || "")
+    .replaceAll(/[_-]+/g, " ")
+    .trim()
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+}
+
+function isEditableField(field) {
+  if (!field || field.hidden || field.system) {
+    return false
+  }
+  if (["id", "password", "tokenKey"].includes(field.name)) {
+    return false
+  }
+  return ["text", "number", "bool", "email", "url", "date", "select", "editor", "json"].includes(field.type)
+}
+
+function fieldInputConfig(field) {
+  const label = toStartCase(field.name)
+  if (field.type === "select") {
+    return {
+      key: field.name,
+      label,
+      type: "select",
+      required: Boolean(field.required),
+      valueType: "string",
+      options: (field.values || []).map((value) => ({ value, label: String(value) })),
+    }
+  }
+
+  if (field.type === "bool") {
+    return {
+      key: field.name,
+      label,
+      type: "checkbox",
+      required: false,
+      valueType: "boolean",
+    }
+  }
+
+  if (field.type === "number") {
+    return {
+      key: field.name,
+      label,
+      type: "number",
+      required: Boolean(field.required),
+      valueType: "number",
+      placeholder: label,
+    }
+  }
+
+  if (field.type === "editor" || field.type === "json") {
+    return {
+      key: field.name,
+      label,
+      type: "textarea",
+      required: Boolean(field.required),
+      valueType: field.type === "json" ? "json" : "string",
+      placeholder: label,
+    }
+  }
+
+  return {
+    key: field.name,
+    label,
+    type: field.type === "date" ? "date" : "text",
+    required: Boolean(field.required),
+    valueType: "string",
+    placeholder: label,
+  }
+}
+
+function tableColumnsFromFields(fields) {
+  const preferred = fields.filter((field) => !field.hidden && !field.system).slice(0, 5)
+  const columns = preferred.map((field) => ({ key: field.name, label: toStartCase(field.name) }))
+  if (!columns.some((item) => item.key === "id")) {
+    columns.push({ key: "id", label: "Id" })
+  }
+  return columns
+}
+
+function configFromCollection(collection) {
+  const fields = Array.isArray(collection?.fields) ? collection.fields : []
+  const editable = fields.filter(isEditableField).map(fieldInputConfig)
+  return {
+    title: toStartCase(collection.name),
+    eyebrow: collection.type === "auth" ? "Auth" : "Collection",
+    description: `Manage ${collection.name} records.`,
+    collection: collection.name,
+    tableColumns: tableColumnsFromFields(fields),
+    editableFields: editable,
+    note:
+      editable.length > 0
+        ? "Auto-generated from PocketBase schema."
+        : "This collection has no editable primitive fields in the generated UI.",
+    canCreate: editable.length > 0,
+  }
+}
+
 const state = {
   activeKey: "users",
   records: {},
   draft: null,
   authMethods: null,
   auth: null,
+  collectionFields: {},
 }
 
 function escapeHtml(value) {
@@ -146,8 +251,40 @@ function showView(mode) {
   appView.classList.toggle("hidden", mode !== "app")
 }
 
-function setStatus(message) {
-  loginStatus.textContent = message || ""
+function activeStatusElement() {
+  if (appView && !appView.classList.contains("hidden")) {
+    return workspaceStatus || loginStatus
+  }
+  return loginStatus
+}
+
+function clearWorkspaceBanner() {
+  if (!workspaceStatus) {
+    return
+  }
+  workspaceStatus.textContent = ""
+  workspaceStatus.classList.add("hidden")
+  workspaceStatus.classList.remove("is-error", "is-hint")
+}
+
+function setStatus(message, tone = "neutral") {
+  const el = activeStatusElement()
+  if (!el) {
+    return
+  }
+
+  el.textContent = message || ""
+  el.classList.remove("is-error", "is-hint")
+
+  if (tone === "error") {
+    el.classList.add("is-error")
+  } else if (tone === "hint") {
+    el.classList.add("is-hint")
+  }
+
+  if (el === workspaceStatus) {
+    workspaceStatus.classList.toggle("hidden", !message)
+  }
 }
 
 function readAuth() {
@@ -161,6 +298,19 @@ function readAuth() {
 function saveAuth(auth) {
   state.auth = auth
   localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(auth))
+}
+
+function normalizeAuthResponse(data, fallbackCollection) {
+  if (!data?.record || !fallbackCollection) {
+    return data
+  }
+  return {
+    ...data,
+    record: {
+      ...data.record,
+      collectionName: data.record.collectionName || fallbackCollection,
+    },
+  }
 }
 
 function clearAuth() {
@@ -224,6 +374,31 @@ async function loadAuthMethods() {
   state.authMethods = await apiFetch("/collections/users/auth-methods", { auth: false })
 }
 
+async function loadDynamicCollections() {
+  let collections = []
+  try {
+    const data = await apiFetch("/collections?page=1&perPage=200&sort=name")
+    collections = data?.items || []
+  } catch (_) {
+    // This endpoint is usually superuser-only. Keep static collections for regular admin accounts.
+    return
+  }
+
+  collections.forEach((collection) => {
+    if (!collection?.name || EXCLUDED_COLLECTIONS.has(collection.name)) {
+      return
+    }
+
+    if (resourceConfigs[collection.name]) {
+      state.collectionFields[collection.name] = Array.isArray(collection.fields) ? collection.fields : []
+      return
+    }
+
+    resourceConfigs[collection.name] = configFromCollection(collection)
+    state.collectionFields[collection.name] = Array.isArray(collection.fields) ? collection.fields : []
+  })
+}
+
 function providerItems() {
   return state.authMethods?.oauth2?.providers || state.authMethods?.authProviders || []
 }
@@ -260,7 +435,7 @@ function renderProviderList(providers) {
     button.className = "provider-button"
     button.innerHTML = `<span class="session-pill">${escapeHtml(getProviderLabel(provider).slice(0, 1).toUpperCase())}</span><span>Sign in with ${escapeHtml(getProviderLabel(provider))}</span>`
     button.addEventListener("click", () => {
-      setStatus("Opening Google sign-in...")
+      setStatus("正在開啟 Google 登入…", "hint")
       beginOAuth(provider)
     })
     providerList.appendChild(button)
@@ -287,15 +462,21 @@ async function ensureSession() {
     return false
   }
 
-  try {
-    const collectionName = currentUser()?.collectionName || "users"
-    const data = await apiFetch(`/collections/${collectionName}/auth-refresh`, { method: "POST" })
-    saveAuth(data)
-    return true
-  } catch (_) {
-    clearAuth()
-    return false
+  const preferred = currentUser()?.collectionName
+  const candidates = [...new Set([...(preferred ? [preferred] : []), "_superusers", "users"])]
+
+  for (const collectionName of candidates) {
+    try {
+      const data = await apiFetch(`/collections/${collectionName}/auth-refresh`, { method: "POST" })
+      saveAuth(normalizeAuthResponse(data, collectionName))
+      return true
+    } catch (_) {
+      // Try next candidate (e.g. cached auth missing collectionName, or legacy localStorage).
+    }
   }
+
+  clearAuth()
+  return false
 }
 
 async function authWithPassword(collectionName, identity, password) {
@@ -312,7 +493,8 @@ async function authWithPasswordAuto(identity, password) {
   let lastError = null
   for (const collectionName of attempts) {
     try {
-      return await authWithPassword(collectionName, identity, password)
+      const data = await authWithPassword(collectionName, identity, password)
+      return normalizeAuthResponse(data, collectionName)
     } catch (error) {
       lastError = error
     }
@@ -393,6 +575,49 @@ function valueForRecord(record, key) {
   return value
 }
 
+function parseFieldValue(field, rawValue) {
+  if (field.type === "checkbox") {
+    return Boolean(rawValue)
+  }
+
+  if (field.valueType === "number") {
+    if (rawValue === "" || rawValue == null) {
+      return null
+    }
+    const parsed = Number(rawValue)
+    return Number.isFinite(parsed) ? parsed : rawValue
+  }
+
+  if (field.valueType === "json") {
+    if (!rawValue) {
+      return null
+    }
+    try {
+      return JSON.parse(rawValue)
+    } catch (_) {
+      throw new Error(`${field.label} 需要有效的 JSON 格式。`)
+    }
+  }
+
+  return rawValue
+}
+
+function payloadFromEditorForm(editorForm, config) {
+  const formData = new FormData(editorForm)
+  const payload = {}
+
+  config.editableFields.forEach((field) => {
+    if (field.type === "checkbox") {
+      payload[field.key] = editorForm.querySelector(`[name="${field.key}"]`)?.checked || false
+      return
+    }
+    const raw = formData.get(field.key)
+    payload[field.key] = parseFieldValue(field, raw)
+  })
+
+  return payload
+}
+
 function renderTableRows(resourceKey) {
   const config = resourceConfigs[resourceKey]
   const rows = state.records[resourceKey] || []
@@ -428,7 +653,7 @@ function renderEditor(resourceKey) {
   const draft = state.draft
   const isUsers = resourceKey === "users"
   const title = isUsers ? (draft ? "Edit Users" : "User details") : draft ? `Edit ${config.title}` : `New ${config.title}`
-  const submitDisabled = isUsers && !draft
+  const submitDisabled = (isUsers && !draft) || config.editableFields.length === 0
   const submitLabel = draft ? "Save changes" : isUsers ? "Select a user" : "Create"
 
   const fields = config.editableFields
@@ -436,12 +661,14 @@ function renderEditor(resourceKey) {
       const currentValue = draft ? draft[field.key] ?? "" : ""
       const control =
         field.type === "textarea"
-          ? `<textarea id="${field.key}" name="${field.key}" placeholder="${escapeHtml(field.placeholder || "")}">${escapeHtml(currentValue)}</textarea>`
+          ? `<textarea id="${field.key}" name="${field.key}" placeholder="${escapeHtml(field.placeholder || "")}" ${field.required ? "required" : ""}>${escapeHtml(currentValue)}</textarea>`
           : field.type === "select"
-            ? `<select id="${field.key}" name="${field.key}">${field.options
+            ? `<select id="${field.key}" name="${field.key}" ${field.required ? "required" : ""}>${field.options
                 .map((option) => `<option value="${escapeHtml(option.value)}" ${currentValue === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`)
                 .join("")}</select>`
-            : `<input id="${field.key}" name="${field.key}" type="text" value="${escapeHtml(currentValue)}" placeholder="${escapeHtml(field.placeholder || "")}" />`
+            : field.type === "checkbox"
+              ? `<input id="${field.key}" name="${field.key}" type="checkbox" ${currentValue ? "checked" : ""} />`
+              : `<input id="${field.key}" name="${field.key}" type="${field.type === "number" ? "number" : "text"}" value="${escapeHtml(currentValue)}" placeholder="${escapeHtml(field.placeholder || "")}" ${field.required ? "required" : ""} />`
 
       return `
         <div class="form-field">
@@ -526,15 +753,15 @@ function renderResource(resourceKey) {
 
   editorForm.addEventListener("submit", async (event) => {
     event.preventDefault()
-    const formData = new FormData(editorForm)
-    const payload = Object.fromEntries(formData.entries())
     const authUser = currentUser()
+    let payload = {}
 
     try {
+      payload = payloadFromEditorForm(editorForm, config)
       if (resourceKey === "users") {
         const id = state.draft?.id
         if (!id) {
-          setStatus("User records are created automatically from Google login.")
+          setStatus("使用者帳號是由 Google 登入自動建立的，無法在此新增。", "error")
           return
         }
         if (authUser?.collectionName === "users") {
@@ -555,9 +782,10 @@ function renderResource(resourceKey) {
 
       state.draft = null
       await loadResource(resourceKey)
+      clearWorkspaceBanner()
       renderWorkspace()
     } catch (error) {
-      setStatus(error?.message || "Unable to save record.")
+      setStatus(error?.message || "無法儲存。", "error")
     }
   })
 
@@ -589,9 +817,10 @@ function renderResource(resourceKey) {
         try {
           await apiFetch(`/collections/${config.collection}/records/${record.id}`, { method: "DELETE" })
           await loadResource(resourceKey)
+          clearWorkspaceBanner()
           renderWorkspace()
         } catch (error) {
-          setStatus(error?.message || "Unable to delete record.")
+          setStatus(error?.message || "無法刪除。", "error")
         }
       }
     })
@@ -602,12 +831,13 @@ async function loadResource(resourceKey) {
   const config = resourceConfigs[resourceKey]
   try {
     const data = await apiFetch(
-      `/collections/${config.collection}/records?page=1&perPage=200&sort=-created&expand=createUser,updateUser`,
+      `/collections/${config.collection}/records?page=1&perPage=200&sort=-updateDate&expand=createUser,updateUser`,
     )
     state.records[resourceKey] = data.items || []
   } catch (error) {
     state.records[resourceKey] = []
-    setStatus(`Unable to load ${config.title.toLowerCase()} records.`)
+    const detail = error?.message ? `（${error.message}）` : ""
+    setStatus(`無法載入「${config.title}」資料${detail}`, "error")
   }
 }
 
@@ -639,39 +869,55 @@ function attachGlobalHandlers() {
 
 async function boot() {
   showView("login")
-  setStatus("Checking session...")
+  setStatus("正在確認登入狀態…")
   attachGlobalHandlers()
 
-  const storedAuth = readAuth()
-  if (storedAuth) {
-    state.auth = storedAuth
+  const pwdSubmit = passwordLoginForm?.querySelector('button[type="submit"]')
+  if (pwdSubmit) {
+    pwdSubmit.disabled = true
   }
 
-  const hasSession = await ensureSession()
-  await loadAuthMethods()
-  renderProviderList(providerItems())
-  renderPasswordLogin(Boolean(state.authMethods?.password?.enabled))
-
-  if (!hasSession || !state.auth?.record) {
-    showView("login")
-    if (state.authMethods?.password?.enabled) {
-      setStatus("You can use the local superuser login for development.")
-    } else if (providerItems().length) {
-      setStatus("Choose a provider to sign in.")
-    } else {
-      setStatus("No sign-in method is currently enabled.")
+  try {
+    const storedAuth = readAuth()
+    if (storedAuth) {
+      state.auth = storedAuth
     }
-    return
-  }
 
-  if (!isAdmin()) {
-    showView("access")
-    return
-  }
+    const hasSession = await ensureSession()
+    await loadAuthMethods()
+    renderProviderList(providerItems())
+    renderPasswordLogin(Boolean(state.authMethods?.password?.enabled))
 
-  showView("app")
-  await loadWorkspace()
-  renderWorkspace()
+    if (!hasSession || !state.auth?.record) {
+      showView("login")
+      if (state.authMethods?.password?.enabled) {
+        setStatus("請使用下方的 Email／密碼登入（本機預設見說明）。", "hint")
+      } else if (providerItems().length) {
+        setStatus("請選擇上方的登入方式。", "hint")
+      } else {
+        setStatus("目前未啟用任何登入方式，請檢查 PocketBase users 與環境變數。", "error")
+      }
+      return
+    }
+
+    if (!isAdmin()) {
+      showView("access")
+      return
+    }
+
+    await loadDynamicCollections()
+    showView("app")
+    await loadWorkspace()
+    renderWorkspace()
+  } catch (error) {
+    console.error(error)
+    showView("login")
+    setStatus(String(error?.message || "無法載入登入設定，請重新整理頁面後再試。"), "error")
+  } finally {
+    if (pwdSubmit) {
+      pwdSubmit.disabled = false
+    }
+  }
 }
 
 if (passwordLoginForm) {
@@ -687,12 +933,18 @@ if (passwordLoginForm) {
       saveAuth(auth)
       window.location.reload()
     } catch (error) {
-      const message = String(error?.message || "")
-      if (message.toLowerCase().includes("invalid login credentials")) {
-        setStatus("請使用本機 superuser 帳號 hcchien@gmail.com / Test1234!。")
-        return
+      const raw = String(error?.message || "").trim()
+      const base = raw || "登入失敗。"
+      const lower = raw.toLowerCase()
+      let hint = ""
+      if (
+        lower.includes("invalid login") ||
+        lower.includes("failed to authenticate") ||
+        lower.includes("authenticate")
+      ) {
+        hint = " 請確認帳密正確；本機請設定 PB_DEV_PASSWORD_AUTH=true（依 README）並使用設定的 superuser／users 帳號。"
       }
-      setStatus(message || "Unable to sign in.")
+      setStatus(`${base}${hint}`, "error")
     }
   })
 }

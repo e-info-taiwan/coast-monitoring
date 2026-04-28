@@ -277,7 +277,45 @@ h1 {
 
 .status-copy {
   min-height: 1.5em;
+  margin: 0;
+  font-size: 0.95rem;
+  line-height: 1.45;
   color: var(--muted);
+  border-radius: var(--radius-sm);
+}
+
+.status-copy.is-error {
+  color: var(--danger);
+  background: rgba(246, 124, 124, 0.1);
+  border: 1px solid rgba(246, 124, 124, 0.35);
+  padding: 12px 14px;
+}
+
+.status-copy.is-hint {
+  color: var(--muted);
+  background: rgba(114, 216, 196, 0.06);
+  border: 1px solid rgba(114, 216, 196, 0.16);
+  padding: 12px 14px;
+}
+
+.workspace-status {
+  margin: 0 0 16px;
+  font-size: 0.95rem;
+  line-height: 1.45;
+  border-radius: var(--radius-sm);
+}
+
+.workspace-status.is-error {
+  color: var(--danger);
+  background: rgba(246, 124, 124, 0.1);
+  border: 1px solid rgba(246, 124, 124, 0.35);
+  padding: 12px 14px;
+}
+
+.workspace-status.is-hint {
+  color: var(--muted);
+  border: 1px solid var(--border);
+  padding: 12px 14px;
 }
 
 .access-view {

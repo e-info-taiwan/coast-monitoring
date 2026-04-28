@@ -42,6 +42,8 @@
             <p>本機開發時請用 superuser 登入；正式環境才會改回 Google login。</p>
           </div>
 
+          <p id="login-status" class="status-copy" aria-live="polite" role="status"></p>
+
           <div id="provider-list" class="provider-list"></div>
 
           <form id="password-login-form" class="dev-login hidden">
@@ -56,8 +58,6 @@
             <p class="form-help">預設本機 superuser 帳號是 <code>hcchien@gmail.com</code> / <code>Test1234!</code>。</p>
             <button type="submit" class="primary-button">Sign in</button>
           </form>
-
-          <p id="login-status" class="status-copy"></p>
         </div>
       </section>
 
@@ -103,6 +103,8 @@
             </div>
             <div id="session-badges" class="session-badges"></div>
           </header>
+
+          <p id="workspace-status" class="workspace-status hidden" aria-live="polite" role="status"></p>
 
           <section id="overview-panel" class="overview-panel"></section>
 
