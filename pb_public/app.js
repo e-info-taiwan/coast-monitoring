@@ -28,6 +28,7 @@ const baseResourceConfigs = {
     eyebrow: "People",
     description: "Google login users, their display name, and role.",
     collection: "users",
+    expandFields: ["createUser", "updateUser"],
     tableColumns: [
       { key: "email", label: "Email" },
       { key: "name", label: "Name" },
@@ -63,6 +64,7 @@ const baseResourceConfigs = {
     eyebrow: "Places",
     description: "Location names in Chinese and English.",
     collection: "location",
+    expandFields: ["createUser", "updateUser"],
     tableColumns: [
       { key: "chineseName", label: "Chinese name" },
       { key: "englishName", label: "English name" },
@@ -95,6 +97,7 @@ const baseResourceConfigs = {
     eyebrow: "Biodiversity",
     description: "Species names in Chinese and English.",
     collection: "species",
+    expandFields: ["createUser", "updateUser"],
     tableColumns: [
       { key: "chineseName", label: "Chinese name" },
       { key: "englishName", label: "English name" },
@@ -122,11 +125,30 @@ const baseResourceConfigs = {
     note: "Keep canonical species names here so other workflows can reference them cleanly.",
     canCreate: true,
   },
+  audit_logs: {
+    title: "Audit Logs",
+    eyebrow: "Operations",
+    description: "System-generated operation history.",
+    collection: "audit_logs",
+    expandFields: [],
+    tableColumns: [
+      { key: "loggedAt", label: "Logged at" },
+      { key: "action", label: "Action" },
+      { key: "targetCollection", label: "Collection" },
+      { key: "targetRecordId", label: "Record id" },
+      { key: "actorLabel", label: "Actor" },
+      { key: "actorType", label: "Actor type" },
+    ],
+    editableFields: [],
+    note: "Read-only trail of create, update, and delete operations.",
+    canCreate: false,
+    readOnly: true,
+  },
 }
 
 const resourceConfigs = { ...baseResourceConfigs }
 
-const EXCLUDED_COLLECTIONS = new Set(["_superusers", "_externalAuths", "_mfas", "_otps"])
+const EXCLUDED_COLLECTIONS = new Set(["_superusers", "_externalAuths", "_mfas", "_otps", "_authOrigins", "AuthOrigins", "event"])
 
 function toStartCase(value) {
   return String(value || "")
@@ -209,6 +231,20 @@ function tableColumnsFromFields(fields) {
   return columns
 }
 
+function defaultSortFieldFromFields(fields) {
+  const names = new Set((Array.isArray(fields) ? fields : []).map((field) => field?.name))
+  if (names.has("updateDate")) {
+    return "updateDate"
+  }
+  if (names.has("created")) {
+    return "created"
+  }
+  if (names.has("loggedAt")) {
+    return "loggedAt"
+  }
+  return "id"
+}
+
 function configFromCollection(collection) {
   const fields = Array.isArray(collection?.fields) ? collection.fields : []
   const editable = fields.filter(isEditableField).map(fieldInputConfig)
@@ -219,6 +255,7 @@ function configFromCollection(collection) {
     collection: collection.name,
     tableColumns: tableColumnsFromFields(fields),
     editableFields: editable,
+    sortField: defaultSortFieldFromFields(fields),
     note:
       editable.length > 0
         ? "Auto-generated from PocketBase schema."
@@ -234,6 +271,8 @@ const state = {
   authMethods: null,
   auth: null,
   collectionFields: {},
+  history: {},
+  selectedIds: {},
 }
 
 function escapeHtml(value) {
@@ -328,6 +367,228 @@ function isAdmin() {
   return record?.role === "admin" || record?.collectionName === "_superusers"
 }
 
+function supportsBatchDelete(resourceKey) {
+  return ["users", "location", "species"].includes(resourceKey)
+}
+
+function selectionSet(resourceKey) {
+  if (!state.selectedIds[resourceKey]) {
+    state.selectedIds[resourceKey] = new Set()
+  }
+  return state.selectedIds[resourceKey]
+}
+
+function selectedCount(resourceKey) {
+  return selectionSet(resourceKey).size
+}
+
+function selectedIds(resourceKey) {
+  return [...selectionSet(resourceKey)]
+}
+
+function clearSelection(resourceKey) {
+  selectionSet(resourceKey).clear()
+}
+
+function invalidateHistory(resourceKey, recordId) {
+  if (!recordId) {
+    return
+  }
+  delete state.history[historyCacheKey(resourceKey, recordId)]
+}
+
+function setSelected(resourceKey, id, checked) {
+  const set = selectionSet(resourceKey)
+  if (checked) {
+    set.add(id)
+  } else {
+    set.delete(id)
+  }
+}
+
+function isSelected(resourceKey, id) {
+  return selectionSet(resourceKey).has(id)
+}
+
+function setPageSelection(resourceKey, ids, checked) {
+  const set = selectionSet(resourceKey)
+  ids.forEach((id) => {
+    if (checked) {
+      set.add(id)
+    } else {
+      set.delete(id)
+    }
+  })
+}
+
+function selectedLabelForRecord(resourceKey, record) {
+  if (!record) {
+    return ""
+  }
+
+  if (resourceKey === "users") {
+    return record.email || record.name || record.id
+  }
+
+  return record.chineseName || record.englishName || record.id
+}
+
+function batchDeleteTitle(resourceKey) {
+  return resourceKey === "users" ? "users" : resourceKey
+}
+
+function historyCacheKey(collectionName, recordId) {
+  return `${collectionName}:${recordId}`
+}
+
+function historyFields(entry, side) {
+  return entry?.[side]?.fields || {}
+}
+
+function formatHistoryValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return "—"
+  }
+  if (Array.isArray(value)) {
+    return value.length ? value.map((item) => formatHistoryValue(item)).join(", ") : "—"
+  }
+  if (typeof value === "object") {
+    return JSON.stringify(value)
+  }
+  return String(value)
+}
+
+function diffHistoryFields(beforeFields, afterFields) {
+  const ignored = new Set(["id", "createDate", "updateDate"])
+  const keys = new Set([...Object.keys(beforeFields || {}), ...Object.keys(afterFields || {})])
+  const diffs = []
+
+  keys.forEach((key) => {
+    if (ignored.has(key)) {
+      return
+    }
+    const beforeValue = beforeFields?.[key]
+    const afterValue = afterFields?.[key]
+    if (JSON.stringify(beforeValue ?? null) === JSON.stringify(afterValue ?? null)) {
+      return
+    }
+    diffs.push({ key, beforeValue, afterValue })
+  })
+
+  return diffs
+}
+
+function summarizeHistoryAction(entry) {
+  if (!entry) {
+    return ""
+  }
+  if (entry.action === "create") {
+    return "Created record"
+  }
+  if (entry.action === "delete") {
+    return "Deleted record"
+  }
+  const diffs = diffHistoryFields(historyFields(entry, "before"), historyFields(entry, "after"))
+  if (!diffs.length) {
+    return "Updated record"
+  }
+  const keys = diffs.slice(0, 3).map((diff) => diff.key)
+  const suffix = diffs.length > 3 ? ` +${diffs.length - 3} more` : ""
+  return `Updated ${keys.join(", ")}${suffix}`
+}
+
+async function loadRecordHistory(collectionName, recordId, force = false) {
+  if (!collectionName || !recordId) {
+    return []
+  }
+
+  const key = historyCacheKey(collectionName, recordId)
+  if (!force && Array.isArray(state.history[key])) {
+    return state.history[key]
+  }
+
+  try {
+    const filter = encodeURIComponent(`targetCollection = '${collectionName}' && targetRecordId = '${recordId}'`)
+    const data = await apiFetch(`/collections/audit_logs/records?page=1&perPage=50&sort=-loggedAt&filter=${filter}`)
+    const items = Array.isArray(data.items) ? data.items : []
+    state.history[key] = items
+    return items
+  } catch (error) {
+    state.history[key] = []
+    throw error
+  }
+}
+
+function renderHistoryEntry(entry) {
+  const timestamp = entry.loggedAt || entry.created || ""
+  const actor = entry.actorLabel || entry.actorType || "anonymous"
+  const diffs = diffHistoryFields(historyFields(entry, "before"), historyFields(entry, "after"))
+  const diffBlock =
+    entry.action === "update" && diffs.length
+      ? `
+        <div class="history-diff-list">
+          ${diffs
+            .map(
+              (diff) => `
+                <div class="history-diff">
+                  <div class="history-diff-field">${escapeHtml(diff.key)}</div>
+                  <div class="history-diff-values">
+                    <span>Before: ${escapeHtml(formatHistoryValue(diff.beforeValue))}</span>
+                    <span>After: ${escapeHtml(formatHistoryValue(diff.afterValue))}</span>
+                  </div>
+                </div>
+              `,
+            )
+            .join("")}
+        </div>
+      `
+      : ""
+
+  return `
+    <article class="history-entry">
+      <div class="history-entry-top">
+        <div>
+          <strong>${escapeHtml(entry.action || "event")}</strong>
+          <p>${escapeHtml(summarizeHistoryAction(entry))}</p>
+        </div>
+        <div class="history-meta">
+          <span>${escapeHtml(actor)}</span>
+          <span>${escapeHtml(timestamp)}</span>
+        </div>
+      </div>
+      ${diffBlock}
+    </article>
+  `
+}
+
+function renderRecordHistory(resourceKey) {
+  const draft = state.draft
+  if (!draft || resourceKey === "audit_logs") {
+    return ""
+  }
+
+  const key = historyCacheKey(resourceKey, draft.id)
+  const entries = state.history[key] || []
+
+  return `
+    <section class="history-card">
+      <div class="resource-toolbar">
+        <div>
+          <p class="eyebrow">History</p>
+          <h3>Change log</h3>
+          <p class="meta-line">This shows the audit trail for the selected record.</p>
+        </div>
+        <span class="session-pill">${entries.length} entries</span>
+      </div>
+      ${
+        entries.length
+          ? `<div class="history-list">${entries.map((entry) => renderHistoryEntry(entry)).join("")}</div>`
+          : `<div class="empty-state"><p>No history for this record yet.</p></div>`
+      }
+    </section>
+  `
+}
+
 function authToken() {
   return state.auth?.token || ""
 }
@@ -385,7 +646,7 @@ async function loadDynamicCollections() {
   }
 
   collections.forEach((collection) => {
-    if (!collection?.name || EXCLUDED_COLLECTIONS.has(collection.name)) {
+    if (!collection?.name || collection.system || EXCLUDED_COLLECTIONS.has(collection.name)) {
       return
     }
 
@@ -465,10 +726,10 @@ async function ensureSession() {
   const preferred = currentUser()?.collectionName
   const candidates = [...new Set([...(preferred ? [preferred] : []), "_superusers", "users"])]
 
-  for (const collectionName of candidates) {
+  for (const targetCollection of candidates) {
     try {
-      const data = await apiFetch(`/collections/${collectionName}/auth-refresh`, { method: "POST" })
-      saveAuth(normalizeAuthResponse(data, collectionName))
+      const data = await apiFetch(`/collections/${targetCollection}/auth-refresh`, { method: "POST" })
+      saveAuth(normalizeAuthResponse(data, targetCollection))
       return true
     } catch (_) {
       // Try next candidate (e.g. cached auth missing collectionName, or legacy localStorage).
@@ -479,8 +740,8 @@ async function ensureSession() {
   return false
 }
 
-async function authWithPassword(collectionName, identity, password) {
-  return apiFetch(`/collections/${collectionName}/auth-with-password`, {
+async function authWithPassword(targetCollection, identity, password) {
+  return apiFetch(`/collections/${targetCollection}/auth-with-password`, {
     method: "POST",
     auth: false,
     body: { identity, password },
@@ -491,10 +752,10 @@ async function authWithPasswordAuto(identity, password) {
   const attempts = ["_superusers", "users"]
 
   let lastError = null
-  for (const collectionName of attempts) {
+  for (const targetCollection of attempts) {
     try {
-      const data = await authWithPassword(collectionName, identity, password)
-      return normalizeAuthResponse(data, collectionName)
+      const data = await authWithPassword(targetCollection, identity, password)
+      return normalizeAuthResponse(data, targetCollection)
     } catch (error) {
       lastError = error
     }
@@ -555,7 +816,7 @@ function valueForRecord(record, key) {
     return ""
   }
 
-  if (key === "createDate" || key === "updateDate" || key === "created" || key === "updated") {
+  if (key === "createDate" || key === "updateDate" || key === "loggedAt" || key === "created" || key === "updated") {
     const date = new Date(value)
     if (!Number.isNaN(date.getTime())) {
       return date.toLocaleString("zh-TW", {
@@ -634,9 +895,21 @@ function renderTableRows(resourceKey) {
           return `<div>${rendered ? escapeHtml(rendered) : "—"}</div>`
         })
         .join("")
+      const selectionCell = supportsBatchDelete(resourceKey)
+        ? `<div class="cell-select"><input type="checkbox" class="row-select" data-action="select-row" data-id="${escapeHtml(record.id)}" ${isSelected(resourceKey, record.id) ? "checked" : ""} aria-label="Select row ${escapeHtml(record.id)}" /></div>`
+        : ""
+
+      if (config.readOnly) {
+        return `
+          <div class="table-row" style="grid-template-columns: repeat(${config.tableColumns.length}, minmax(0, 1fr));">
+            ${cells}
+          </div>
+        `
+      }
 
       return `
-        <div class="table-row" style="grid-template-columns: repeat(${config.tableColumns.length}, minmax(0, 1fr)) auto;">
+        <div class="table-row" style="grid-template-columns: ${supportsBatchDelete(resourceKey) ? "40px " : ""}repeat(${config.tableColumns.length}, minmax(0, 1fr)) auto;">
+          ${selectionCell}
           ${cells}
           <div class="cell-actions">
             <button class="tiny-button" data-action="edit" data-id="${escapeHtml(record.id)}">Edit</button>
@@ -652,8 +925,24 @@ function renderEditor(resourceKey) {
   const config = resourceConfigs[resourceKey]
   const draft = state.draft
   const isUsers = resourceKey === "users"
+  if (config.readOnly || config.editableFields.length === 0) {
+    return `
+      <div class="editor-card">
+        <div class="resource-toolbar">
+          <div>
+            <p class="eyebrow">${escapeHtml(config.eyebrow)}</p>
+            <h3>${escapeHtml(config.title)}</h3>
+            <p class="meta-line">${escapeHtml(config.note)}</p>
+          </div>
+        </div>
+        <div class="empty-state">
+          <p>This collection is read-only in the custom admin UI.</p>
+        </div>
+      </div>
+    `
+  }
   const title = isUsers ? (draft ? "Edit Users" : "User details") : draft ? `Edit ${config.title}` : `New ${config.title}`
-  const submitDisabled = (isUsers && !draft) || config.editableFields.length === 0
+  const submitDisabled = isUsers && !draft
   const submitLabel = draft ? "Save changes" : isUsers ? "Select a user" : "Create"
 
   const fields = config.editableFields
@@ -713,6 +1002,20 @@ function renderResource(resourceKey) {
   sectionDescription.textContent = config.description
 
   const columns = config.tableColumns.map((column) => `<div>${escapeHtml(column.label)}</div>`).join("")
+  const headColumns = `${supportsBatchDelete(resourceKey) ? '<div class="cell-select cell-select-head"><input type="checkbox" id="select-all-records" aria-label="Select all records" /></div>' : ""}${columns}${config.readOnly ? "" : '<div style="text-align:right">Actions</div>'}`
+  const headTemplate = config.readOnly
+    ? `repeat(${config.tableColumns.length}, minmax(0, 1fr))`
+    : `${supportsBatchDelete(resourceKey) ? "40px " : ""}repeat(${config.tableColumns.length}, minmax(0, 1fr)) auto`
+  const bulkDeleteControls = supportsBatchDelete(resourceKey)
+    ? `
+      <div class="bulk-actions">
+        <button type="button" class="danger-button" id="bulk-delete-button" ${selectedCount(resourceKey) ? "" : "disabled"}>
+          Delete selected${selectedCount(resourceKey) ? ` (${selectedCount(resourceKey)})` : ""}
+        </button>
+        <span class="meta-line">${selectedCount(resourceKey)} selected</span>
+      </div>
+    `
+    : ""
 
   resourcePanel.innerHTML = `
     <div class="panel-header">
@@ -720,18 +1023,23 @@ function renderResource(resourceKey) {
         <h2>${escapeHtml(config.title)}</h2>
         <p class="meta-line">${escapeHtml(config.note)}</p>
       </div>
-      <div class="session-pill">${(state.records[resourceKey]?.length ?? 0)} records</div>
+      <div class="panel-actions">
+        <div class="session-pill">${(state.records[resourceKey]?.length ?? 0)} records</div>
+        ${bulkDeleteControls}
+      </div>
     </div>
 
     <div class="resource-shell">
       <div class="resource-table">
-        <div class="table-head" style="grid-template-columns: repeat(${config.tableColumns.length}, minmax(0, 1fr)) auto;">
-          ${columns}
-          <div style="text-align:right">Actions</div>
+        <div class="table-head" style="grid-template-columns: ${headTemplate};">
+          ${headColumns}
         </div>
         ${renderTableRows(resourceKey)}
       </div>
-      ${renderEditor(resourceKey)}
+      <div class="editor-column">
+        ${renderEditor(resourceKey)}
+        ${renderRecordHistory(resourceKey)}
+      </div>
     </div>
   `
 
@@ -767,20 +1075,38 @@ function renderResource(resourceKey) {
         if (authUser?.collectionName === "users") {
           payload.updateUser = authUser.id
         }
-        await apiFetch(`/collections/users/records/${id}`, { method: "PATCH", body: payload })
+        const updated = await apiFetch(`/collections/users/records/${id}`, { method: "PATCH", body: payload })
+        state.draft = updated
+        invalidateHistory(resourceKey, id)
+        loadRecordHistory(resourceKey, id, true).catch((error) => {
+          console.warn("history refresh failed", error)
+          setStatus("儲存成功，但修改紀錄暫時無法更新。", "hint")
+        })
       } else if (state.draft?.id) {
         if (authUser?.collectionName === "users") {
           payload.updateUser = authUser.id
         }
-        await apiFetch(`/collections/${config.collection}/records/${state.draft.id}`, { method: "PATCH", body: payload })
+        const recordId = state.draft.id
+        const updated = await apiFetch(`/collections/${config.collection}/records/${recordId}`, { method: "PATCH", body: payload })
+        state.draft = updated
+        invalidateHistory(resourceKey, recordId)
+        loadRecordHistory(resourceKey, recordId, true).catch((error) => {
+          console.warn("history refresh failed", error)
+          setStatus("儲存成功，但修改紀錄暫時無法更新。", "hint")
+        })
       } else {
         if (authUser?.collectionName === "users") {
           payload.createUser = authUser.id
         }
-        await apiFetch(`/collections/${config.collection}/records`, { method: "POST", body: payload })
+        const created = await apiFetch(`/collections/${config.collection}/records`, { method: "POST", body: payload })
+        invalidateHistory(resourceKey, created?.id)
+        state.draft = created
+        loadRecordHistory(resourceKey, created?.id, true).catch((error) => {
+          console.warn("history refresh failed", error)
+          setStatus("儲存成功，但修改紀錄暫時無法更新。", "hint")
+        })
       }
 
-      state.draft = null
       await loadResource(resourceKey)
       clearWorkspaceBanner()
       renderWorkspace()
@@ -801,6 +1127,11 @@ function renderResource(resourceKey) {
 
       if (action === "edit") {
         state.draft = record
+        try {
+          await loadRecordHistory(resourceKey, record.id, true)
+        } catch (error) {
+          setStatus(error?.message || "無法載入修改紀錄。", "error")
+        }
         renderWorkspace()
         return
       }
@@ -816,6 +1147,8 @@ function renderResource(resourceKey) {
 
         try {
           await apiFetch(`/collections/${config.collection}/records/${record.id}`, { method: "DELETE" })
+          invalidateHistory(resourceKey, record.id)
+          setSelected(resourceKey, record.id, false)
           await loadResource(resourceKey)
           clearWorkspaceBanner()
           renderWorkspace()
@@ -825,15 +1158,85 @@ function renderResource(resourceKey) {
       }
     })
   })
+
+  resourcePanel.querySelectorAll(".row-select").forEach((checkbox) => {
+    checkbox.addEventListener("change", () => {
+      setSelected(resourceKey, checkbox.dataset.id, checkbox.checked)
+      renderWorkspace()
+    })
+  })
+
+  const selectAll = $("#select-all-records")
+  if (selectAll) {
+    const rows = state.records[resourceKey] || []
+    const selectableIds = rows.map((record) => record.id)
+    selectAll.checked = selectableIds.length > 0 && selectableIds.every((id) => isSelected(resourceKey, id))
+    selectAll.indeterminate = selectableIds.some((id) => isSelected(resourceKey, id)) && !selectAll.checked
+
+    selectAll.addEventListener("change", () => {
+      setPageSelection(resourceKey, selectableIds, selectAll.checked)
+      renderWorkspace()
+    })
+  }
+
+  const bulkDeleteButton = $("#bulk-delete-button")
+  if (bulkDeleteButton) {
+    bulkDeleteButton.addEventListener("click", async () => {
+      const ids = selectedIds(resourceKey)
+      if (!ids.length) {
+        return
+      }
+
+      const sampleLabels = ids
+        .map((id) => state.records[resourceKey].find((item) => item.id === id))
+        .filter(Boolean)
+        .slice(0, 5)
+        .map((record) => `- ${selectedLabelForRecord(resourceKey, record)}`)
+
+      const extra = ids.length > 5 ? `\n- ...and ${ids.length - 5} more` : ""
+      const confirmed = window.confirm(
+        `Delete ${ids.length} selected ${batchDeleteTitle(resourceKey)} record(s)?\n\nThis cannot be undone.\n\n${sampleLabels.join("\n")}${extra}`,
+      )
+
+      if (!confirmed) {
+        return
+      }
+
+      try {
+        for (const recordId of ids) {
+          await apiFetch(`/collections/${config.collection}/records/${recordId}`, { method: "DELETE" })
+          invalidateHistory(resourceKey, recordId)
+        }
+
+        clearSelection(resourceKey)
+        await loadResource(resourceKey)
+        clearWorkspaceBanner()
+        renderWorkspace()
+      } catch (error) {
+        setStatus(error?.message || "無法批次刪除。", "error")
+      }
+    })
+  }
 }
 
 async function loadResource(resourceKey) {
   const config = resourceConfigs[resourceKey]
+  const sortField = config.sortField || (resourceKey === "audit_logs" ? "loggedAt" : "updateDate")
+  const expandFields = Array.isArray(config.expandFields) && config.expandFields.length ? `&expand=${config.expandFields.join(",")}` : ""
   try {
     const data = await apiFetch(
-      `/collections/${config.collection}/records?page=1&perPage=200&sort=-updateDate&expand=createUser,updateUser`,
+      `/collections/${config.collection}/records?page=1&perPage=200&sort=-${sortField}${expandFields}`,
     )
     state.records[resourceKey] = data.items || []
+    if (supportsBatchDelete(resourceKey)) {
+      const validIds = new Set((state.records[resourceKey] || []).map((record) => record.id))
+      const set = selectionSet(resourceKey)
+      ;[...set].forEach((id) => {
+        if (!validIds.has(id)) {
+          set.delete(id)
+        }
+      })
+    }
   } catch (error) {
     state.records[resourceKey] = []
     const detail = error?.message ? `（${error.message}）` : ""

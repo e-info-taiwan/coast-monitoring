@@ -412,6 +412,14 @@ h1 {
   justify-content: space-between;
 }
 
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .workspace-header {
   padding: 30px 32px;
   border: 1px solid var(--border);
@@ -479,6 +487,11 @@ h1 {
   gap: 18px;
 }
 
+.editor-column {
+  display: grid;
+  gap: 18px;
+}
+
 .resource-table,
 .editor-card {
   border: 1px solid var(--border);
@@ -521,6 +534,26 @@ h1 {
   justify-content: flex-end;
 }
 
+.cell-select,
+.cell-select-head {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.row-select,
+.cell-select-head input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.bulk-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .tiny-button {
   min-height: 34px;
   padding: 0 12px;
@@ -536,7 +569,28 @@ h1 {
   background: rgba(246, 124, 124, 0.08);
 }
 
+.danger-button {
+  min-height: 42px;
+  padding: 0 16px;
+  border-radius: 999px;
+  border: 1px solid rgba(246, 124, 124, 0.32);
+  background: rgba(246, 124, 124, 0.14);
+  color: #ffdede;
+}
+
+.danger-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .editor-card {
+  padding: 18px;
+}
+
+.history-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: rgba(255, 255, 255, 0.03);
   padding: 18px;
 }
 
@@ -599,6 +653,69 @@ h1 {
 .meta-line {
   color: var(--muted);
   font-size: 0.92rem;
+}
+
+.history-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.history-entry {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(155, 186, 205, 0.1);
+}
+
+.history-entry-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+}
+
+.history-entry-top p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.history-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  color: var(--muted-2);
+  font-size: 0.84rem;
+  text-align: right;
+}
+
+.history-diff-list {
+  display: grid;
+  gap: 8px;
+}
+
+.history-diff {
+  display: grid;
+  gap: 4px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(155, 186, 205, 0.08);
+}
+
+.history-diff-field {
+  font-weight: 600;
+  color: var(--text);
+}
+
+.history-diff-values {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  word-break: break-word;
 }
 
 .public-page .public-shell {
@@ -745,6 +862,17 @@ h1 {
   .workspace-header,
   .resource-toolbar {
     flex-direction: column;
+  }
+
+  .panel-actions {
+    justify-content: flex-start;
+  }
+
+  .history-entry-top,
+  .history-meta {
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: left;
   }
 
   .session-badges {

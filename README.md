@@ -8,8 +8,10 @@
 - `users`、`location`、`species` 都有 `createUser`、`updateUser`、`createDate`、`updateDate` 這些預設欄位
 - `location` collection
 - `species` collection
+- `audit_logs` collection，記錄 `users` / `location` / `species` 的 create、update、delete
 - `location` 只有 `admin` 能對它做 read/write
 - `species` 預設提供公開 read-only 範例頁，admin 仍可寫入
+- `audit_logs` 只有 `admin` / `superuser` 能檢視，且在自訂管理介面是唯讀
 - `volunteer` 可以有帳號，但不會被允許進入資料管理頁面
 - 自訂的管理介面放在 `pb_public/`，不是 PocketBase 原生 dashboard
 
@@ -240,6 +242,10 @@ https://api.example.com/api/oauth2-redirect
 
 這個頁面不需要登入，會直接讀取 `species` collection 的公開 read 權限。
 
+## Record History
+
+在自訂管理介面裡，打開 `users`、`location` 或 `species` 的某一筆 record 時，右側會顯示對應的 `audit_logs` 歷史紀錄。這個 timeline 是唯讀的，查詢條件是 `targetCollection + targetRecordId`。
+
 ## 權限設計
 
 - `users`
@@ -249,8 +255,11 @@ https://api.example.com/api/oauth2-redirect
   - 全部 CRUD 都只允許 `admin`
 - `species`
   - 全部 CRUD 都只允許 `admin`
+- `audit_logs`
+  - `list/view` 允許 `admin` 與 `superuser`
+  - `create/update/delete` 不提供給前端使用
 
-### users/location/species 角色權限矩陣
+### users/location/species/audit_logs 角色權限矩陣
 
 以下是目前 migration 固化後的規則（superuser 永遠可繞過 collection rules）：
 
@@ -267,6 +276,10 @@ https://api.example.com/api/oauth2-redirect
   - `admin`: `create/update/delete` 允許，`list/view` 也可讀
   - `volunteer`: `list/view` 允許，`create/update/delete` 不允許
   - `guest`: `list/view` 允許，`create/update/delete` 不允許
+- `audit_logs`
+  - `admin`: `list/view` 允許，`create/update/delete` 不允許
+  - `volunteer`: 全部不允許
+  - `guest`: 全部不允許
 
 對應 migration：`pb_migrations/0005_role_permissions_matrix.js`
 
@@ -287,5 +300,19 @@ https://api.example.com/api/oauth2-redirect
   - `englishName`
   - `createUser` / `updateUser`
   - `createDate` / `updateDate`
+- `audit_logs`
+  - `action`
+  - `targetCollection`
+  - `targetRecordId`
+  - `actorType`
+  - `actorUser`
+  - `actorLabel`
+  - `method`
+  - `context`
+  - `ip`
+  - `userAgent`
+  - `before`
+  - `after`
+  - `loggedAt`
 
 如果你想要 `location` 或 `species` 再加更多欄位，我可以直接幫你擴成你實際要用的 schema。
