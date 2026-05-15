@@ -14,7 +14,7 @@ function isAuthNoiseRequest(info) {
 
 
 onRecordCreateRequest((event) => {
-  if (!event.collection || !["users", "location", "species"].includes(event.collection.name)) {
+  if (!event.collection || !["users", "location", "species", "observation"].includes(event.collection.name)) {
     return event.next()
   }
 
@@ -114,7 +114,7 @@ onRecordCreateRequest((event) => {
 })
 
 onRecordUpdateRequest((event) => {
-  if (!event.collection || !["users", "location", "species"].includes(event.collection.name)) {
+  if (!event.collection || !["users", "location", "species", "observation"].includes(event.collection.name)) {
     return event.next()
   }
 
@@ -270,7 +270,7 @@ onRecordUpdateRequest((event) => {
 })
 
 onRecordDeleteRequest((event) => {
-  if (!event.collection || !["users", "location", "species"].includes(event.collection.name)) {
+  if (!event.collection || !["users", "location", "species", "observation"].includes(event.collection.name)) {
     return event.next()
   }
 

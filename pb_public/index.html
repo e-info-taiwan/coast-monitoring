@@ -10,52 +10,74 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=Noto+Sans+TC:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
     <script type="module" src="/app.js"></script>
   </head>
   <body>
-    <div class="page-glow page-glow-a"></div>
-    <div class="page-glow page-glow-b"></div>
-
     <main class="app-shell">
       <section id="login-view" class="login-view">
         <div class="login-copy">
-          <p class="eyebrow">PocketBase admin system</p>
-          <h1>Coast Monitoring 管理後台</h1>
+          <p class="eyebrow">EIC Coast · Admin</p>
+          <h1>海岸生態監測<br />管理後台</h1>
           <p class="lede">
-            用 Google login 或本機測試帳號進入一個給一般使用者使用的管理介面，管理
-            users、location 與生物物種。
+            用 Google login 或本機測試帳號進入管理介面，維護
+            users、location 與 species 資料。
           </p>
           <div class="login-notes">
-            <span class="note-pill">Admin only tables</span>
-            <span class="note-pill">Volunteer login blocked</span>
+            <span class="note-pill">Admin only</span>
+            <span class="note-pill">Volunteer blocked</span>
             <span class="note-pill">PocketBase backed</span>
           </div>
         </div>
 
         <div class="login-panel">
           <div class="panel-top">
-            <span class="panel-label">Sign in</span>
-            <p>本機開發時請用 superuser 登入；正式環境才會改回 Google login。</p>
+            <span class="panel-label">Welcome</span>
+            <h2>Sign in</h2>
+            <p>
+              本機開發時請用 superuser 登入；正式環境才會改回 Google login。
+            </p>
           </div>
 
-          <p id="login-status" class="status-copy" aria-live="polite" role="status"></p>
+          <p
+            id="login-status"
+            class="status-copy"
+            aria-live="polite"
+            role="status"
+          ></p>
 
           <div id="provider-list" class="provider-list"></div>
 
           <form id="password-login-form" class="dev-login hidden">
             <div class="form-field">
               <label for="dev-email">Email *</label>
-              <input id="dev-email" name="email" type="email" autocomplete="email" placeholder="hcchien@gmail.com" required />
+              <input
+                id="dev-email"
+                name="email"
+                type="email"
+                autocomplete="email"
+                placeholder="hcchien@gmail.com"
+                required
+              />
             </div>
             <div class="form-field">
               <label for="dev-password">Password *</label>
-              <input id="dev-password" name="password" type="password" autocomplete="current-password" placeholder="Test1234!" required />
+              <input
+                id="dev-password"
+                name="password"
+                type="password"
+                autocomplete="current-password"
+                placeholder="Test1234!"
+                required
+              />
             </div>
-            <p class="form-help">預設本機 superuser 帳號是 <code>hcchien@gmail.com</code> / <code>Test1234!</code>。</p>
+            <p class="form-help">
+              預設本機 superuser 帳號是 <code>hcchien@gmail.com</code> /
+              <code>Test1234!</code>。
+            </p>
             <button type="submit" class="primary-button">Sign in</button>
           </form>
         </div>
@@ -69,12 +91,16 @@
             這個系統只開放給 <strong>admin</strong>。如果你是 volunteer，
             可以先登出，或請管理員幫你調整 role。
           </p>
-          <button id="sign-out-from-denied" class="ghost-button">Sign out</button>
+          <button id="sign-out-from-denied" class="ghost-button">
+            Sign out
+          </button>
         </div>
       </section>
 
       <section id="app-view" class="app-view hidden">
-        <aside class="sidebar">
+        <div id="sidebar-scrim" class="sidebar-scrim" aria-hidden="true"></div>
+
+        <aside id="sidebar" class="sidebar" aria-label="Primary navigation">
           <div>
             <p class="eyebrow">Coast Monitoring</p>
             <h2>Admin pages</h2>
@@ -93,6 +119,21 @@
         </aside>
 
         <section class="workspace">
+          <div class="mobile-bar">
+            <div class="mobile-bar-title">
+              <strong>EIC Coast</strong>
+              <span id="mobile-section-title" class="meta-line">Admin</span>
+            </div>
+            <button
+              type="button"
+              id="open-sidebar-button"
+              class="menu-button"
+              aria-label="Open navigation"
+            >
+              ☰
+            </button>
+          </div>
+
           <header class="workspace-header">
             <div>
               <p id="section-eyebrow" class="eyebrow">Overview</p>
@@ -104,13 +145,91 @@
             <div id="session-badges" class="session-badges"></div>
           </header>
 
-          <p id="workspace-status" class="workspace-status hidden" aria-live="polite" role="status"></p>
+          <div id="alert-region" aria-live="polite"></div>
 
-          <section id="overview-panel" class="overview-panel"></section>
+          <p
+            id="workspace-status"
+            class="workspace-status hidden"
+            aria-live="polite"
+            role="status"
+          ></p>
 
           <section id="resource-panel" class="resource-panel"></section>
         </section>
       </section>
     </main>
+
+    <div id="drawer-scrim" class="drawer-scrim" aria-hidden="true"></div>
+    <aside
+      id="drawer"
+      class="drawer"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="drawer-title"
+      aria-hidden="true"
+    >
+      <header class="drawer-head">
+        <div>
+          <p id="drawer-eyebrow" class="eyebrow"></p>
+          <h2 id="drawer-title">Record</h2>
+          <p id="drawer-subtitle" class="meta-line"></p>
+        </div>
+        <button
+          type="button"
+          id="drawer-close"
+          class="drawer-close"
+          aria-label="Close drawer"
+        >
+          ×
+        </button>
+      </header>
+      <div id="drawer-body" class="drawer-body"></div>
+    </aside>
+
+    <button
+      type="button"
+      id="demo-fab"
+      class="demo-fab hidden"
+      aria-label="Toggle demo controls"
+      aria-controls="demo-panel"
+      aria-expanded="false"
+      title="Demo controls"
+    >
+      ⚙
+    </button>
+
+    <div
+      id="demo-panel"
+      class="demo-panel hidden"
+      role="dialog"
+      aria-label="Demo controls"
+    >
+      <div class="demo-panel-head">
+        <strong>Demo controls</strong>
+        <button
+          type="button"
+          id="demo-close"
+          class="demo-close"
+          aria-label="Close demo controls"
+        >
+          ×
+        </button>
+      </div>
+      <p class="demo-panel-desc">
+        Review 用：直接觸發 loading 與 error 狀態，不用等真實 API。
+      </p>
+      <button type="button" class="tiny-button" id="demo-loading">
+        模擬載入中（2.5s）
+      </button>
+      <button type="button" class="tiny-button" id="demo-error">
+        模擬連線錯誤
+      </button>
+      <button type="button" class="tiny-button" id="demo-clear">
+        清除模擬狀態
+      </button>
+      <p class="demo-panel-hint">
+        切頁時也會有 ~300ms 的 skeleton 過場。
+      </p>
+    </div>
   </body>
 </html>
