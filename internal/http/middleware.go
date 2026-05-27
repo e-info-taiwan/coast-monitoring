@@ -46,3 +46,27 @@ func (h *AuthHandlers) RequireSession(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r.WithContext(withCurrentUser(r.Context(), user)))
 	})
 }
+
+func (deps Dependencies) RequireSession(next http.Handler) http.Handler {
+	if deps.AuthHandlers == nil {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			writeError(w, http.StatusServiceUnavailable, "auth is not configured")
+		})
+	}
+	return deps.AuthHandlers.RequireSession(next)
+}
+
+func (deps Dependencies) RequireAdmin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, ok := currentUser(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if !policy.CanUseAdminAPI(user) {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}

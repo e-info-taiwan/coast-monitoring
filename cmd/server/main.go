@@ -57,6 +57,9 @@ func main() {
 func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider httpx.GoogleOAuthProvider) http.Handler {
 	userRepo := repository.NewUserRepository(pool)
 	sessionRepo := repository.NewSessionRepository(pool)
+	catalogRepo := repository.NewCatalogRepository(pool)
+	observationRepo := repository.NewObservationRepository(pool)
+	auditLogRepo := repository.NewAuditLogRepository(pool)
 	authService := service.AuthService{
 		Sessions: sessionRepo,
 		Users:    userRepo,
@@ -75,6 +78,12 @@ func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider http
 				SecureCookies:       &secureCookies,
 				BootstrapAdminEmail: cfg.BootstrapAdminEmail,
 			},
+		},
+		AdminHandlers: &httpx.AdminHandlers{
+			Users:        service.UserService{Users: userRepo},
+			Catalog:      service.CatalogService{Catalog: catalogRepo},
+			Observations: service.ObservationService{Observations: observationRepo},
+			AuditLogs:    auditLogRepo,
 		},
 	})
 }

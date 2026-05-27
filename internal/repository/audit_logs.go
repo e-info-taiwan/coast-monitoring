@@ -56,6 +56,28 @@ func NewAuditLogRepository(db *pgxpool.Pool) AuditLogRepository {
 	return AuditLogRepository{db: db}
 }
 
+func (r AuditLogRepository) ListAuditLogs(ctx context.Context) ([]AuditLog, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, action::text, target_table, target_id, actor_user_id, actor_email, before_data, after_data, method, path, COALESCE(ip::text, ''), user_agent, logged_at
+		FROM audit_logs
+		ORDER BY logged_at DESC
+	`)
+	if err != nil {
+		return nil, translateError(err)
+	}
+	defer rows.Close()
+
+	var logs []AuditLog
+	for rows.Next() {
+		log, err := scanAuditLog(rows)
+		if err != nil {
+			return nil, err
+		}
+		logs = append(logs, log)
+	}
+	return logs, translateError(rows.Err())
+}
+
 func (r AuditLogRepository) CreateAuditLog(ctx context.Context, input CreateAuditLogRecord) (AuditLog, error) {
 	beforeData, err := marshalNullableJSON(input.BeforeData)
 	if err != nil {
@@ -69,14 +91,22 @@ func (r AuditLogRepository) CreateAuditLog(ctx context.Context, input CreateAudi
 	if input.IP != "" {
 		ip = input.IP
 	}
-	var log AuditLog
-	var action string
-	var actorUserID pgtype.UUID
-	err = r.db.QueryRow(ctx, `
+	return scanAuditLog(r.db.QueryRow(ctx, `
 		INSERT INTO audit_logs (action, target_table, target_id, actor_user_id, actor_email, before_data, after_data, method, path, ip, user_agent)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id, action::text, target_table, target_id, actor_user_id, actor_email, before_data, after_data, method, path, COALESCE(ip::text, ''), user_agent, logged_at
-	`, input.Action, input.TargetTable, input.TargetID, input.ActorUserID, input.ActorEmail, beforeData, afterData, input.Method, input.Path, ip, input.UserAgent).Scan(
+	`, input.Action, input.TargetTable, input.TargetID, input.ActorUserID, input.ActorEmail, beforeData, afterData, input.Method, input.Path, ip, input.UserAgent))
+}
+
+type auditLogScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanAuditLog(row auditLogScanner) (AuditLog, error) {
+	var log AuditLog
+	var action string
+	var actorUserID pgtype.UUID
+	err := row.Scan(
 		&log.ID,
 		&action,
 		&log.TargetTable,
