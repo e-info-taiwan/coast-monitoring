@@ -40,3 +40,17 @@ func TestPublicStaticRouteServesPublicHTML(t *testing.T) {
 		t.Fatalf("body does not look like public species HTML")
 	}
 }
+
+func TestUnknownAPIRouteDoesNotServeAdminHTML(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/unknown", nil)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Dependencies{}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+	if body := rec.Body.String(); strings.Contains(body, `src="/app.js"`) {
+		t.Fatalf("unknown API route served admin HTML")
+	}
+}

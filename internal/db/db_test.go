@@ -63,10 +63,13 @@ func TestDockerSetupRunsGoAppAndInitializesFreshDatabase(t *testing.T) {
 	if strings.Contains(strings.ToLower(dockerfileText), "pocketbase") {
 		t.Fatal("Dockerfile still references PocketBase")
 	}
-	if strings.Contains(dockerfileText, "RUN go test") {
-		t.Fatal("Dockerfile should not run tests during image build")
-	}
-	for _, want := range []string{"go build", "./cmd/server", `CMD ["/app/coast-monitoring"]`} {
+	for _, want := range []string{
+		"RUN go test ./...",
+		"RUN go build -o /out/coast-monitoring ./cmd/server",
+		"COPY migrations /app/migrations",
+		"COPY web /app/web",
+		`CMD ["/app/coast-monitoring"]`,
+	} {
 		if !strings.Contains(dockerfileText, want) {
 			t.Fatalf("Dockerfile missing %q", want)
 		}
