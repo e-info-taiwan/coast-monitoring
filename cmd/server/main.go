@@ -13,6 +13,7 @@ import (
 	"coast-monitoring/internal/repository"
 	"coast-monitoring/internal/service"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -84,8 +85,44 @@ func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider http
 			Catalog:      service.CatalogService{Catalog: catalogRepo},
 			Observations: service.ObservationService{Observations: observationRepo},
 			AuditLogs:    auditLogRepo,
+			Mutations:    postgresAdminMutationRunner{pool: pool},
 		},
 	})
+}
+
+type postgresAdminMutationRunner struct {
+	pool *pgxpool.Pool
+}
+
+func (r postgresAdminMutationRunner) RunAdminMutation(ctx context.Context, fn func(httpx.AdminMutationServices) error) error {
+	tx, err := r.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback(ctx)
+		}
+	}()
+
+	userRepo := repository.NewUserRepository(tx)
+	catalogRepo := repository.NewCatalogRepository(tx)
+	observationRepo := repository.NewObservationRepository(tx)
+	auditLogRepo := repository.NewAuditLogRepository(tx)
+	if err := fn(httpx.AdminMutationServices{
+		Users:        service.UserService{Users: userRepo},
+		Catalog:      service.CatalogService{Catalog: catalogRepo},
+		Observations: service.ObservationService{Observations: observationRepo},
+		AuditLogs:    auditLogRepo,
+	}); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 func googleConfigComplete(cfg config.Config) bool {

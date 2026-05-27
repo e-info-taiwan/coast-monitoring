@@ -6,14 +6,13 @@ import (
 	"coast-monitoring/internal/service"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type CatalogRepository struct {
-	db *pgxpool.Pool
+	db DBTX
 }
 
-func NewCatalogRepository(db *pgxpool.Pool) CatalogRepository {
+func NewCatalogRepository(db DBTX) CatalogRepository {
 	return CatalogRepository{db: db}
 }
 

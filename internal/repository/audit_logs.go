@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type AuditAction string
@@ -49,10 +48,10 @@ type CreateAuditLogRecord struct {
 }
 
 type AuditLogRepository struct {
-	db *pgxpool.Pool
+	db DBTX
 }
 
-func NewAuditLogRepository(db *pgxpool.Pool) AuditLogRepository {
+func NewAuditLogRepository(db DBTX) AuditLogRepository {
 	return AuditLogRepository{db: db}
 }
 

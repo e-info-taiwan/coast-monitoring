@@ -23,6 +23,7 @@ type AdminHandlers struct {
 	Catalog      AdminCatalogService
 	Observations AdminObservationService
 	AuditLogs    AdminAuditLogService
+	Mutations    AdminMutationRunner
 }
 
 type AdminUserService interface {
@@ -54,6 +55,19 @@ type AdminAuditLogService interface {
 	CreateAuditLog(ctx context.Context, input repository.CreateAuditLogRecord) (repository.AuditLog, error)
 }
 
+type AdminMutationRunner interface {
+	RunAdminMutation(ctx context.Context, fn func(AdminMutationServices) error) error
+}
+
+type AdminMutationServices struct {
+	Users        AdminUserService
+	Catalog      AdminCatalogService
+	Observations AdminObservationService
+	AuditLogs    AdminAuditLogService
+}
+
+var errAdminMutationUnavailable = errors.New("admin mutation runner is not configured")
+
 func (h *AdminHandlers) ListUsers(w http.ResponseWriter, r *http.Request) {
 	actor, ok := requireAdminHandlerService(w, r, h != nil && h.Users != nil)
 	if !ok {
@@ -72,7 +86,7 @@ func (h *AdminHandlers) ListUsers(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandlers) CreateUser(w http.ResponseWriter, r *http.Request) {
-	actor, ok := requireAdminHandlerService(w, r, h != nil && h.Users != nil)
+	actor, ok := requireAdminHandlerService(w, r, h != nil && h.Mutations != nil)
 	if !ok {
 		return
 	}
@@ -80,27 +94,34 @@ func (h *AdminHandlers) CreateUser(w http.ResponseWriter, r *http.Request) {
 	if !decodeAdminJSON(w, r, &req) {
 		return
 	}
-	user, err := h.Users.CreateUser(r.Context(), actor, service.CreateUserInput{
+	input := service.CreateUserInput{
 		Email:    req.Email,
 		Name:     req.Name,
 		Role:     policy.Role(req.Role),
 		Status:   policy.Status(req.Status),
 		Password: req.Password,
+	}
+	var response AdminUserResponse
+	err := h.Mutations.RunAdminMutation(r.Context(), func(services AdminMutationServices) error {
+		if services.Users == nil || services.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		user, err := services.Users.CreateUser(r.Context(), actor, input)
+		if err != nil {
+			return err
+		}
+		response = adminUserResponse(user)
+		return writeAudit(r, services.AuditLogs, actor, repository.AuditActionCreate, "users", user.ID, nil, response)
 	})
 	if err != nil {
 		writeServiceError(w, err, "create user failed")
-		return
-	}
-	response := adminUserResponse(user)
-	if err := h.writeAudit(r, actor, repository.AuditActionCreate, "users", user.ID, nil, response); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit log creation failed")
 		return
 	}
 	writeJSON(w, http.StatusCreated, response)
 }
 
 func (h *AdminHandlers) UpdateUser(w http.ResponseWriter, r *http.Request) {
-	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Users != nil)
+	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Mutations != nil)
 	if !ok {
 		return
 	}
@@ -127,30 +148,41 @@ func (h *AdminHandlers) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		status := policy.Status(*req.Status)
 		input.Status = &status
 	}
-	user, err := h.Users.UpdateUser(r.Context(), actor, id, input)
+	var response AdminUserResponse
+	err := h.Mutations.RunAdminMutation(r.Context(), func(services AdminMutationServices) error {
+		if services.Users == nil || services.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		user, err := services.Users.UpdateUser(r.Context(), actor, id, input)
+		if err != nil {
+			return err
+		}
+		response = adminUserResponse(user)
+		return writeAudit(r, services.AuditLogs, actor, repository.AuditActionUpdate, "users", user.ID, nil, response)
+	})
 	if err != nil {
 		writeServiceError(w, err, "update user failed")
-		return
-	}
-	response := adminUserResponse(user)
-	if err := h.writeAudit(r, actor, repository.AuditActionUpdate, "users", user.ID, nil, response); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit log creation failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *AdminHandlers) DisableUser(w http.ResponseWriter, r *http.Request) {
-	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Users != nil)
+	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Mutations != nil)
 	if !ok {
 		return
 	}
-	if err := h.Users.DisableUser(r.Context(), actor, id); err != nil {
+	err := h.Mutations.RunAdminMutation(r.Context(), func(services AdminMutationServices) error {
+		if services.Users == nil || services.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		if err := services.Users.DisableUser(r.Context(), actor, id); err != nil {
+			return err
+		}
+		return writeAudit(r, services.AuditLogs, actor, repository.AuditActionDelete, "users", id, nil, nil)
+	})
+	if err != nil {
 		writeServiceError(w, err, "disable user failed")
-		return
-	}
-	if err := h.writeAudit(r, actor, repository.AuditActionDelete, "users", id, nil, nil); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit log creation failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -174,7 +206,7 @@ func (h *AdminHandlers) ListLocations(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandlers) CreateLocation(w http.ResponseWriter, r *http.Request) {
-	actor, ok := requireAdminHandlerService(w, r, h != nil && h.Catalog != nil)
+	actor, ok := requireAdminHandlerService(w, r, h != nil && h.Mutations != nil)
 	if !ok {
 		return
 	}
@@ -182,21 +214,27 @@ func (h *AdminHandlers) CreateLocation(w http.ResponseWriter, r *http.Request) {
 	if !decoded {
 		return
 	}
-	location, err := h.Catalog.CreateLocation(r.Context(), actor, input)
+	var response CatalogResponse
+	err := h.Mutations.RunAdminMutation(r.Context(), func(services AdminMutationServices) error {
+		if services.Catalog == nil || services.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		location, err := services.Catalog.CreateLocation(r.Context(), actor, input)
+		if err != nil {
+			return err
+		}
+		response = locationResponse(location)
+		return writeAudit(r, services.AuditLogs, actor, repository.AuditActionCreate, "locations", location.ID, nil, response)
+	})
 	if err != nil {
 		writeServiceError(w, err, "create location failed")
-		return
-	}
-	response := locationResponse(location)
-	if err := h.writeAudit(r, actor, repository.AuditActionCreate, "locations", location.ID, nil, response); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit log creation failed")
 		return
 	}
 	writeJSON(w, http.StatusCreated, response)
 }
 
 func (h *AdminHandlers) UpdateLocation(w http.ResponseWriter, r *http.Request) {
-	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Catalog != nil)
+	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Mutations != nil)
 	if !ok {
 		return
 	}
@@ -204,30 +242,41 @@ func (h *AdminHandlers) UpdateLocation(w http.ResponseWriter, r *http.Request) {
 	if !decoded {
 		return
 	}
-	location, err := h.Catalog.UpdateLocation(r.Context(), actor, id, input)
+	var response CatalogResponse
+	err := h.Mutations.RunAdminMutation(r.Context(), func(services AdminMutationServices) error {
+		if services.Catalog == nil || services.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		location, err := services.Catalog.UpdateLocation(r.Context(), actor, id, input)
+		if err != nil {
+			return err
+		}
+		response = locationResponse(location)
+		return writeAudit(r, services.AuditLogs, actor, repository.AuditActionUpdate, "locations", location.ID, nil, response)
+	})
 	if err != nil {
 		writeServiceError(w, err, "update location failed")
-		return
-	}
-	response := locationResponse(location)
-	if err := h.writeAudit(r, actor, repository.AuditActionUpdate, "locations", location.ID, nil, response); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit log creation failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *AdminHandlers) DeleteLocation(w http.ResponseWriter, r *http.Request) {
-	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Catalog != nil)
+	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Mutations != nil)
 	if !ok {
 		return
 	}
-	if err := h.Catalog.DeleteLocation(r.Context(), actor, id); err != nil {
+	err := h.Mutations.RunAdminMutation(r.Context(), func(services AdminMutationServices) error {
+		if services.Catalog == nil || services.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		if err := services.Catalog.DeleteLocation(r.Context(), actor, id); err != nil {
+			return err
+		}
+		return writeAudit(r, services.AuditLogs, actor, repository.AuditActionDelete, "locations", id, nil, nil)
+	})
+	if err != nil {
 		writeServiceError(w, err, "delete location failed")
-		return
-	}
-	if err := h.writeAudit(r, actor, repository.AuditActionDelete, "locations", id, nil, nil); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit log creation failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -251,7 +300,7 @@ func (h *AdminHandlers) ListSpecies(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *AdminHandlers) CreateSpecies(w http.ResponseWriter, r *http.Request) {
-	actor, ok := requireAdminHandlerService(w, r, h != nil && h.Catalog != nil)
+	actor, ok := requireAdminHandlerService(w, r, h != nil && h.Mutations != nil)
 	if !ok {
 		return
 	}
@@ -259,21 +308,27 @@ func (h *AdminHandlers) CreateSpecies(w http.ResponseWriter, r *http.Request) {
 	if !decoded {
 		return
 	}
-	species, err := h.Catalog.CreateSpecies(r.Context(), actor, input)
+	var response CatalogResponse
+	err := h.Mutations.RunAdminMutation(r.Context(), func(services AdminMutationServices) error {
+		if services.Catalog == nil || services.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		species, err := services.Catalog.CreateSpecies(r.Context(), actor, input)
+		if err != nil {
+			return err
+		}
+		response = speciesResponse(species)
+		return writeAudit(r, services.AuditLogs, actor, repository.AuditActionCreate, "species", species.ID, nil, response)
+	})
 	if err != nil {
 		writeServiceError(w, err, "create species failed")
-		return
-	}
-	response := speciesResponse(species)
-	if err := h.writeAudit(r, actor, repository.AuditActionCreate, "species", species.ID, nil, response); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit log creation failed")
 		return
 	}
 	writeJSON(w, http.StatusCreated, response)
 }
 
 func (h *AdminHandlers) UpdateSpecies(w http.ResponseWriter, r *http.Request) {
-	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Catalog != nil)
+	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Mutations != nil)
 	if !ok {
 		return
 	}
@@ -281,30 +336,41 @@ func (h *AdminHandlers) UpdateSpecies(w http.ResponseWriter, r *http.Request) {
 	if !decoded {
 		return
 	}
-	species, err := h.Catalog.UpdateSpecies(r.Context(), actor, id, input)
+	var response CatalogResponse
+	err := h.Mutations.RunAdminMutation(r.Context(), func(services AdminMutationServices) error {
+		if services.Catalog == nil || services.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		species, err := services.Catalog.UpdateSpecies(r.Context(), actor, id, input)
+		if err != nil {
+			return err
+		}
+		response = speciesResponse(species)
+		return writeAudit(r, services.AuditLogs, actor, repository.AuditActionUpdate, "species", species.ID, nil, response)
+	})
 	if err != nil {
 		writeServiceError(w, err, "update species failed")
-		return
-	}
-	response := speciesResponse(species)
-	if err := h.writeAudit(r, actor, repository.AuditActionUpdate, "species", species.ID, nil, response); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit log creation failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *AdminHandlers) DeleteSpecies(w http.ResponseWriter, r *http.Request) {
-	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Catalog != nil)
+	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Mutations != nil)
 	if !ok {
 		return
 	}
-	if err := h.Catalog.DeleteSpecies(r.Context(), actor, id); err != nil {
+	err := h.Mutations.RunAdminMutation(r.Context(), func(services AdminMutationServices) error {
+		if services.Catalog == nil || services.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		if err := services.Catalog.DeleteSpecies(r.Context(), actor, id); err != nil {
+			return err
+		}
+		return writeAudit(r, services.AuditLogs, actor, repository.AuditActionDelete, "species", id, nil, nil)
+	})
+	if err != nil {
 		writeServiceError(w, err, "delete species failed")
-		return
-	}
-	if err := h.writeAudit(r, actor, repository.AuditActionDelete, "species", id, nil, nil); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit log creation failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -328,7 +394,7 @@ func (h *AdminHandlers) ListObservations(w http.ResponseWriter, r *http.Request)
 }
 
 func (h *AdminHandlers) UpdateObservation(w http.ResponseWriter, r *http.Request) {
-	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Observations != nil)
+	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Mutations != nil)
 	if !ok {
 		return
 	}
@@ -336,30 +402,41 @@ func (h *AdminHandlers) UpdateObservation(w http.ResponseWriter, r *http.Request
 	if !decoded {
 		return
 	}
-	observation, err := h.Observations.Update(r.Context(), actor, id, input)
+	var response ObservationResponse
+	err := h.Mutations.RunAdminMutation(r.Context(), func(services AdminMutationServices) error {
+		if services.Observations == nil || services.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		observation, err := services.Observations.Update(r.Context(), actor, id, input)
+		if err != nil {
+			return err
+		}
+		response = observationResponse(observation)
+		return writeAudit(r, services.AuditLogs, actor, repository.AuditActionUpdate, "observations", observation.ID, nil, response)
+	})
 	if err != nil {
 		writeServiceError(w, err, "update observation failed")
-		return
-	}
-	response := observationResponse(observation)
-	if err := h.writeAudit(r, actor, repository.AuditActionUpdate, "observations", observation.ID, nil, response); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit log creation failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *AdminHandlers) DeleteObservation(w http.ResponseWriter, r *http.Request) {
-	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Observations != nil)
+	actor, id, ok := requireAdminUUID(w, r, h != nil && h.Mutations != nil)
 	if !ok {
 		return
 	}
-	if err := h.Observations.Delete(r.Context(), actor, id); err != nil {
+	err := h.Mutations.RunAdminMutation(r.Context(), func(services AdminMutationServices) error {
+		if services.Observations == nil || services.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		if err := services.Observations.Delete(r.Context(), actor, id); err != nil {
+			return err
+		}
+		return writeAudit(r, services.AuditLogs, actor, repository.AuditActionDelete, "observations", id, nil, nil)
+	})
+	if err != nil {
 		writeServiceError(w, err, "delete observation failed")
-		return
-	}
-	if err := h.writeAudit(r, actor, repository.AuditActionDelete, "observations", id, nil, nil); err != nil {
-		writeError(w, http.StatusInternalServerError, "audit log creation failed")
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -590,12 +667,9 @@ func formatTime(value time.Time) string {
 	return value.UTC().Format(time.RFC3339)
 }
 
-func (h *AdminHandlers) writeAudit(r *http.Request, actor policy.User, action repository.AuditAction, targetTable string, targetID uuid.UUID, before any, after any) error {
-	if h == nil || h.AuditLogs == nil {
-		return nil
-	}
+func writeAudit(r *http.Request, auditLogs AdminAuditLogService, actor policy.User, action repository.AuditAction, targetTable string, targetID uuid.UUID, before any, after any) error {
 	actorID := actor.ID
-	_, err := h.AuditLogs.CreateAuditLog(r.Context(), repository.CreateAuditLogRecord{
+	_, err := auditLogs.CreateAuditLog(r.Context(), repository.CreateAuditLogRecord{
 		Action:      action,
 		TargetTable: targetTable,
 		TargetID:    targetID,
@@ -613,6 +687,8 @@ func (h *AdminHandlers) writeAudit(r *http.Request, actor policy.User, action re
 
 func writeServiceError(w http.ResponseWriter, err error, fallback string) {
 	switch {
+	case errors.Is(err, errAdminMutationUnavailable):
+		writeError(w, http.StatusServiceUnavailable, "admin mutation runner is not configured")
 	case errors.Is(err, service.ErrUnauthorized):
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 	case errors.Is(err, service.ErrForbidden):

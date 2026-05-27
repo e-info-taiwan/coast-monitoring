@@ -8,14 +8,13 @@ import (
 	"coast-monitoring/internal/service"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type UserRepository struct {
-	db *pgxpool.Pool
+	db DBTX
 }
 
-func NewUserRepository(db *pgxpool.Pool) UserRepository {
+func NewUserRepository(db DBTX) UserRepository {
 	return UserRepository{db: db}
 }
 

@@ -6,14 +6,13 @@ import (
 	"coast-monitoring/internal/service"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type ObservationRepository struct {
-	db *pgxpool.Pool
+	db DBTX
 }
 
-func NewObservationRepository(db *pgxpool.Pool) ObservationRepository {
+func NewObservationRepository(db DBTX) ObservationRepository {
 	return ObservationRepository{db: db}
 }
 

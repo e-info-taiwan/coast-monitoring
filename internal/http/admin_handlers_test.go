@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -115,8 +116,11 @@ func TestAdminCanCreateLocation(t *testing.T) {
 	router := NewRouter(Dependencies{
 		AuthHandlers: handlers,
 		AdminHandlers: &AdminHandlers{
-			Catalog:   catalog,
-			AuditLogs: auditLogs,
+			Catalog: catalog,
+			Mutations: &fakeAdminMutationRunner{services: AdminMutationServices{
+				Catalog:   catalog,
+				AuditLogs: auditLogs,
+			}},
 		},
 	})
 
@@ -146,6 +150,97 @@ func TestAdminCanCreateLocation(t *testing.T) {
 	audit := auditLogs.created[0]
 	if audit.Action != repository.AuditActionCreate || audit.TargetTable != "locations" || audit.ActorUserID == nil || *audit.ActorUserID != admin.ID {
 		t.Fatalf("audit log = %+v, want create locations by admin", audit)
+	}
+}
+
+func TestAdminCreateLocationUsesMutationRunner(t *testing.T) {
+	handlers := testAuthHandlers()
+	handlers.Auth = &fakeHTTPAuthService{sessionUser: activeAdminHTTP()}
+	catalog := &fakeAdminCatalogService{}
+	runner := &fakeAdminMutationRunner{services: AdminMutationServices{
+		Catalog:   catalog,
+		AuditLogs: &fakeAdminAuditLogService{},
+	}}
+	router := NewRouter(Dependencies{
+		AuthHandlers: handlers,
+		AdminHandlers: &AdminHandlers{
+			Catalog:   &fakeAdminCatalogService{},
+			Mutations: runner,
+		},
+	})
+
+	req := adminRequest(http.MethodPost, "/api/admin/locations", bytes.NewBufferString(`{"chineseName":"台東","englishName":"Taitung"}`))
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d, body %s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	if runner.calls != 1 {
+		t.Fatalf("mutation runner calls = %d, want 1", runner.calls)
+	}
+	if catalog.createdLocation.ChineseName != "台東" {
+		t.Fatalf("transaction catalog was not used, input = %+v", catalog.createdLocation)
+	}
+}
+
+func TestAdminCreateLocationReturnsErrorWhenMutationRunnerFails(t *testing.T) {
+	handlers := testAuthHandlers()
+	handlers.Auth = &fakeHTTPAuthService{sessionUser: activeAdminHTTP()}
+	runner := &fakeAdminMutationRunner{err: errors.New("rollback")}
+	catalog := &fakeAdminCatalogService{}
+	router := NewRouter(Dependencies{
+		AuthHandlers: handlers,
+		AdminHandlers: &AdminHandlers{
+			Catalog:   catalog,
+			Mutations: runner,
+		},
+	})
+
+	req := adminRequest(http.MethodPost, "/api/admin/locations", bytes.NewBufferString(`{"chineseName":"台東","englishName":"Taitung"}`))
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if catalog.createdLocation.ChineseName != "" {
+		t.Fatalf("catalog service was called outside failed mutation runner: %+v", catalog.createdLocation)
+	}
+}
+
+func TestAdminCreateLocationAuditFailureReturnsErrorFromMutation(t *testing.T) {
+	handlers := testAuthHandlers()
+	handlers.Auth = &fakeHTTPAuthService{sessionUser: activeAdminHTTP()}
+	catalog := &fakeAdminCatalogService{}
+	auditLogs := &fakeAdminAuditLogService{err: errors.New("audit insert failed")}
+	runner := &fakeAdminMutationRunner{services: AdminMutationServices{
+		Catalog:   catalog,
+		AuditLogs: auditLogs,
+	}}
+	router := NewRouter(Dependencies{
+		AuthHandlers:  handlers,
+		AdminHandlers: &AdminHandlers{Mutations: runner},
+	})
+
+	req := adminRequest(http.MethodPost, "/api/admin/locations", bytes.NewBufferString(`{"chineseName":"台東","englishName":"Taitung"}`))
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if runner.calls != 1 {
+		t.Fatalf("mutation runner calls = %d, want 1", runner.calls)
+	}
+	if catalog.createdLocation.ChineseName != "台東" {
+		t.Fatalf("catalog service was not called inside mutation before audit failure: %+v", catalog.createdLocation)
+	}
+	if len(auditLogs.created) != 1 {
+		t.Fatalf("audit log count = %d, want 1 attempted insert", len(auditLogs.created))
 	}
 }
 
@@ -252,6 +347,7 @@ func (s *fakeAdminCatalogService) DeleteSpecies(ctx context.Context, actor polic
 
 type fakeAdminAuditLogService struct {
 	created []repository.CreateAuditLogRecord
+	err     error
 }
 
 func (s *fakeAdminAuditLogService) ListAuditLogs(ctx context.Context) ([]repository.AuditLog, error) {
@@ -260,5 +356,22 @@ func (s *fakeAdminAuditLogService) ListAuditLogs(ctx context.Context) ([]reposit
 
 func (s *fakeAdminAuditLogService) CreateAuditLog(ctx context.Context, input repository.CreateAuditLogRecord) (repository.AuditLog, error) {
 	s.created = append(s.created, input)
+	if s.err != nil {
+		return repository.AuditLog{}, s.err
+	}
 	return repository.AuditLog{ID: uuid.New(), Action: input.Action, TargetTable: input.TargetTable, TargetID: input.TargetID}, nil
+}
+
+type fakeAdminMutationRunner struct {
+	services AdminMutationServices
+	err      error
+	calls    int
+}
+
+func (r *fakeAdminMutationRunner) RunAdminMutation(ctx context.Context, fn func(AdminMutationServices) error) error {
+	r.calls++
+	if r.err != nil {
+		return r.err
+	}
+	return fn(r.services)
 }
