@@ -110,7 +110,7 @@ func (deps Dependencies) CORS(allowedOrigins []string) func(http.Handler) http.H
 				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
 				w.Header().Add("Vary", "Origin")
 			}
-			if r.Method == http.MethodOptions {
+			if isCORSPreflight(r, origin) {
 				if origin != "" && !allowed[origin] {
 					writeError(w, http.StatusForbidden, "origin is not allowed")
 					return
@@ -121,6 +121,12 @@ func (deps Dependencies) CORS(allowedOrigins []string) func(http.Handler) http.H
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+func isCORSPreflight(r *http.Request, origin string) bool {
+	return r.Method == http.MethodOptions &&
+		origin != "" &&
+		strings.TrimSpace(r.Header.Get("Access-Control-Request-Method")) != ""
 }
 
 func (deps Dependencies) allowedCORSHeaders() string {
