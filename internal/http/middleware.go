@@ -11,14 +11,24 @@ import (
 type contextKey string
 
 const currentUserKey contextKey = "currentUser"
+const csrfTokenKey contextKey = "csrfToken"
 
 func withCurrentUser(ctx context.Context, user policy.User) context.Context {
 	return context.WithValue(ctx, currentUserKey, user)
 }
 
+func withCSRFToken(ctx context.Context, token string) context.Context {
+	return context.WithValue(ctx, csrfTokenKey, token)
+}
+
 func currentUser(r *http.Request) (policy.User, bool) {
 	user, ok := r.Context().Value(currentUserKey).(policy.User)
 	return user, ok
+}
+
+func currentCSRFToken(r *http.Request) string {
+	token, _ := r.Context().Value(csrfTokenKey).(string)
+	return token
 }
 
 func (h *AuthHandlers) RequireSession(next http.Handler) http.Handler {
@@ -43,7 +53,9 @@ func (h *AuthHandlers) RequireSession(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(withCurrentUser(r.Context(), user)))
+		ctx := withCurrentUser(r.Context(), user)
+		ctx = withCSRFToken(ctx, csrfToken)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -64,6 +76,21 @@ func (deps Dependencies) RequireAdmin(next http.Handler) http.Handler {
 			return
 		}
 		if !policy.CanUseAdminAPI(user) {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (deps Dependencies) RequireAppUser(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		user, ok := currentUser(r)
+		if !ok {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
+		if !policy.CanUseAppAPI(user) {
 			writeError(w, http.StatusForbidden, "forbidden")
 			return
 		}

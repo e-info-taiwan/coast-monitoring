@@ -10,6 +10,7 @@ import (
 type Dependencies struct {
 	AuthHandlers  *AuthHandlers
 	AdminHandlers *AdminHandlers
+	AppHandlers   *AppHandlers
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -41,6 +42,17 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Patch("/observations/{id}", deps.AdminHandlers.UpdateObservation)
 		r.Delete("/observations/{id}", deps.AdminHandlers.DeleteObservation)
 		r.Get("/audit-logs", deps.AdminHandlers.ListAuditLogs)
+	})
+	r.Route("/api/app", func(r chi.Router) {
+		r.Use(deps.RequireSession)
+		r.Use(deps.RequireAppUser)
+		r.Get("/session", deps.AppHandlers.Session)
+		r.Get("/locations", deps.AppHandlers.ListLocations)
+		r.Get("/species", deps.AppHandlers.ListSpecies)
+		r.Get("/observations", deps.AppHandlers.ListObservations)
+		r.Post("/observations", deps.AppHandlers.CreateObservation)
+		r.Patch("/observations/{id}", deps.AppHandlers.UpdateObservation)
+		r.Delete("/observations/{id}", deps.AppHandlers.DeleteObservation)
 	})
 	return r
 }

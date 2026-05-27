@@ -58,11 +58,30 @@ type ObservationResponse struct {
 	UpdatedAt  string `json:"updatedAt"`
 }
 
-type SaveObservationRequest struct {
+type AdminSaveObservationRequest struct {
 	ObservedOn string `json:"observedOn"`
 	LocationID string `json:"locationId"`
 	SpeciesID  string `json:"speciesId"`
 	ObserverID string `json:"observerId"`
+	Count      int    `json:"count"`
+	Notes      string `json:"notes"`
+}
+
+type AppObservationResponse struct {
+	ID         string `json:"id"`
+	ObservedOn string `json:"observedOn"`
+	LocationID string `json:"locationId"`
+	SpeciesID  string `json:"speciesId"`
+	Count      int    `json:"count"`
+	Notes      string `json:"notes"`
+	CreatedAt  string `json:"createdAt"`
+	UpdatedAt  string `json:"updatedAt"`
+}
+
+type SaveObservationRequest struct {
+	ObservedOn string `json:"observedOn"`
+	LocationID string `json:"locationId"`
+	SpeciesID  string `json:"speciesId"`
 	Count      int    `json:"count"`
 	Notes      string `json:"notes"`
 }

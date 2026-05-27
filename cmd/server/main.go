@@ -87,6 +87,11 @@ func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider http
 			AuditLogs:    auditLogRepo,
 			Mutations:    postgresAdminMutationRunner{pool: pool},
 		},
+		AppHandlers: &httpx.AppHandlers{
+			Catalog:      service.CatalogService{Catalog: catalogRepo},
+			Observations: service.ObservationService{Observations: observationRepo},
+			Mutations:    postgresAdminMutationRunner{pool: pool},
+		},
 	})
 }
 

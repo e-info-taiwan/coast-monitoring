@@ -46,6 +46,7 @@ type AdminCatalogService interface {
 
 type AdminObservationService interface {
 	ListForAdmin(ctx context.Context, actor policy.User) ([]service.Observation, error)
+	Create(ctx context.Context, actor policy.User, input service.ObservationInput) (service.Observation, error)
 	Update(ctx context.Context, actor policy.User, id uuid.UUID, input service.ObservationInput) (service.Observation, error)
 	Delete(ctx context.Context, actor policy.User, id uuid.UUID) error
 }
@@ -511,7 +512,7 @@ func decodeCatalogInput(w http.ResponseWriter, r *http.Request) (service.Catalog
 }
 
 func decodeObservationInput(w http.ResponseWriter, r *http.Request) (service.ObservationInput, bool) {
-	var req SaveObservationRequest
+	var req AdminSaveObservationRequest
 	if !decodeAdminJSON(w, r, &req) {
 		return service.ObservationInput{}, false
 	}
