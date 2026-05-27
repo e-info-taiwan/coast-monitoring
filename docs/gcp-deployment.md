@@ -11,7 +11,7 @@ This service is intended to run as one Cloud Run service backed by Cloud SQL Pos
 ## Required Environment Variables
 
 - `DATABASE_URL`: PostgreSQL connection string for the Cloud SQL database.
-- `SESSION_SECRET`: random session signing secret; use at least 32 characters.
+- `SESSION_SECRET`: random deployment secret required by service configuration; use at least 32 characters.
 - `GOOGLE_CLIENT_ID`: Google OAuth client ID.
 - `GOOGLE_CLIENT_SECRET`: Google OAuth client secret.
 - `GOOGLE_REDIRECT_URL`: production OAuth callback URL, usually `https://SERVICE_URL/api/auth/google/callback`.
@@ -20,6 +20,8 @@ This service is intended to run as one Cloud Run service backed by Cloud SQL Pos
 - `APP_ALLOWED_ORIGINS`: comma-separated allowed origins for the app-facing frontend.
 
 Store sensitive values such as `DATABASE_URL`, `SESSION_SECRET`, and `GOOGLE_CLIENT_SECRET` in Secret Manager, then mount them into Cloud Run as environment variables or secret references.
+
+`ADMIN_ALLOWED_ORIGINS` applies to `/api/admin/*` browser requests, and `APP_ALLOWED_ORIGINS` applies to `/api/app/*` browser requests. Keep these lists separate when the admin UI and app-facing frontend use different origins.
 
 ## Database Setup
 

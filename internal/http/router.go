@@ -11,9 +11,11 @@ import (
 )
 
 type Dependencies struct {
-	AuthHandlers  *AuthHandlers
-	AdminHandlers *AdminHandlers
-	AppHandlers   *AppHandlers
+	AuthHandlers        *AuthHandlers
+	AdminHandlers       *AdminHandlers
+	AppHandlers         *AppHandlers
+	AdminAllowedOrigins []string
+	AppAllowedOrigins   []string
 }
 
 func NewRouter(deps Dependencies) http.Handler {
@@ -27,6 +29,7 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Get("/api/auth/google/callback", deps.AuthHandlers.GoogleCallback)
 	r.Post("/api/auth/logout", deps.AuthHandlers.Logout)
 	r.Route("/api/admin", func(r chi.Router) {
+		r.Use(deps.CORS(deps.AdminAllowedOrigins))
 		r.Use(deps.RequireSession)
 		r.Use(deps.RequireAdmin)
 		r.Get("/users", deps.AdminHandlers.ListUsers)
@@ -47,6 +50,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/audit-logs", deps.AdminHandlers.ListAuditLogs)
 	})
 	r.Route("/api/app", func(r chi.Router) {
+		r.Use(deps.CORS(deps.AppAllowedOrigins))
 		r.Use(deps.RequireSession)
 		r.Use(deps.RequireAppUser)
 		r.Get("/session", deps.AppHandlers.Session)

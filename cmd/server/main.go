@@ -92,6 +92,8 @@ func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider http
 			Observations: service.ObservationService{Observations: observationRepo},
 			Mutations:    postgresAdminMutationRunner{pool: pool},
 		},
+		AdminAllowedOrigins: cfg.AdminAllowedOrigins,
+		AppAllowedOrigins:   cfg.AppAllowedOrigins,
 	})
 }
 

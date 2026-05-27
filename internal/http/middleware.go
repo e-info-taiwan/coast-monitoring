@@ -97,3 +97,47 @@ func (deps Dependencies) RequireAppUser(next http.Handler) http.Handler {
 		next.ServeHTTP(w, r)
 	})
 }
+
+func (deps Dependencies) CORS(allowedOrigins []string) func(http.Handler) http.Handler {
+	allowed := originSet(allowedOrigins)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			origin := strings.TrimSpace(r.Header.Get("Origin"))
+			if origin != "" && allowed[origin] {
+				w.Header().Set("Access-Control-Allow-Origin", origin)
+				w.Header().Set("Access-Control-Allow-Credentials", "true")
+				w.Header().Set("Access-Control-Allow-Headers", deps.allowedCORSHeaders())
+				w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS")
+				w.Header().Add("Vary", "Origin")
+			}
+			if r.Method == http.MethodOptions {
+				if origin != "" && !allowed[origin] {
+					writeError(w, http.StatusForbidden, "origin is not allowed")
+					return
+				}
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func (deps Dependencies) allowedCORSHeaders() string {
+	header := defaultCSRFHeaderName
+	if deps.AuthHandlers != nil {
+		header = deps.AuthHandlers.config().CSRFHeaderName
+	}
+	return "Accept, Content-Type, " + header
+}
+
+func originSet(origins []string) map[string]bool {
+	allowed := make(map[string]bool, len(origins))
+	for _, origin := range origins {
+		origin = strings.TrimSpace(origin)
+		if origin != "" {
+			allowed[origin] = true
+		}
+	}
+	return allowed
+}

@@ -43,7 +43,7 @@ docker compose up --build
 The common local and deployment settings are:
 
 - `DATABASE_URL`: PostgreSQL connection string.
-- `SESSION_SECRET`: random secret used for signed sessions; use at least 32 characters.
+- `SESSION_SECRET`: random deployment secret required by service configuration; use at least 32 characters.
 - `HTTP_ADDR`: listen address, usually `:8090`.
 - `GOOGLE_CLIENT_ID`: Google OAuth client ID.
 - `GOOGLE_CLIENT_SECRET`: Google OAuth client secret.
