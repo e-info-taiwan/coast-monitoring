@@ -19,8 +19,11 @@ import (
 const (
 	defaultSessionCookieName = "coast_session"
 	defaultCSRFCookieName    = "coast_csrf"
+	defaultOAuthStateCookie  = "coast_oauth_state"
+	defaultCSRFHeaderName    = "X-CSRF-Token"
 	defaultSessionTTL        = 7 * 24 * time.Hour
 	defaultOAuthStateTTL     = 10 * time.Minute
+	oauthStateCookiePath     = "/api/auth/google"
 )
 
 type AuthHandlers struct {
@@ -36,6 +39,8 @@ type AuthHandlers struct {
 type AuthHandlerConfig struct {
 	SessionCookieName   string
 	CSRFCookieName      string
+	OAuthStateCookie    string
+	CSRFHeaderName      string
 	SecureCookies       *bool
 	SessionTTL          time.Duration
 	OAuthStateTTL       time.Duration
@@ -124,7 +129,7 @@ func (h *AuthHandlers) PasswordLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	email := normalizeEmail(input.Email)
-	password := strings.TrimSpace(input.Password)
+	password := input.Password
 	if email == "" || password == "" {
 		_ = h.recordLoginAttempt(r.Context(), email, remoteIP(r), false)
 		writeError(w, http.StatusBadRequest, "email and password are required")
@@ -173,72 +178,93 @@ func (h *AuthHandlers) GoogleStart(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "oauth state creation failed")
 		return
 	}
+	stateExpiresAt := h.now().Add(h.config().OAuthStateTTL)
 	_, err = h.OAuthStates.CreateOAuthState(r.Context(), service.CreateOAuthStateRecord{
 		StateHash:    auth.HashToken(stateToken),
 		RedirectPath: "/",
-		ExpiresAt:    h.now().Add(h.config().OAuthStateTTL),
+		ExpiresAt:    stateExpiresAt,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "oauth state creation failed")
 		return
 	}
+	h.setOAuthStateCookie(w, stateToken, stateExpiresAt)
 	http.Redirect(w, r, h.Google.AuthCodeURL(stateToken), http.StatusFound)
 }
 
 func (h *AuthHandlers) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 	if h == nil || h.Auth == nil || h.Sessions == nil || h.OAuthStates == nil || h.Google == nil {
-		writeError(w, http.StatusServiceUnavailable, "google auth is not configured")
+		h.writeGoogleCallbackError(w, http.StatusServiceUnavailable, "google auth is not configured")
 		return
 	}
 	stateToken := strings.TrimSpace(r.URL.Query().Get("state"))
 	code := strings.TrimSpace(r.URL.Query().Get("code"))
 	if stateToken == "" || code == "" {
-		writeError(w, http.StatusBadRequest, "state and code are required")
+		h.writeGoogleCallbackError(w, http.StatusBadRequest, "state and code are required")
+		return
+	}
+	cookieState, ok := cookieValue(r, h.config().OAuthStateCookie)
+	if !ok || cookieState != stateToken {
+		h.writeGoogleCallbackError(w, http.StatusUnauthorized, "invalid oauth state")
 		return
 	}
 	if _, err := h.OAuthStates.ConsumeOAuthState(r.Context(), auth.HashToken(stateToken), h.now()); err != nil {
-		writeError(w, http.StatusUnauthorized, "invalid oauth state")
+		h.writeGoogleCallbackError(w, http.StatusUnauthorized, "invalid oauth state")
 		return
 	}
 	token, err := h.Google.Exchange(r.Context(), code)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "google code exchange failed")
+		h.writeGoogleCallbackError(w, http.StatusUnauthorized, "google code exchange failed")
 		return
 	}
 	identity, err := h.Google.VerifyIDToken(r.Context(), token)
 	if err != nil {
-		writeError(w, http.StatusUnauthorized, "google id token verification failed")
+		h.writeGoogleCallbackError(w, http.StatusUnauthorized, "google id token verification failed")
 		return
 	}
 	user, err := h.resolveGoogleUser(r.Context(), identity)
 	if err != nil {
 		if errors.Is(err, service.ErrUnauthorized) || errors.Is(err, service.ErrNotFound) || errors.Is(err, service.ErrValidation) {
-			writeError(w, http.StatusUnauthorized, "google account is not allowed")
+			h.writeGoogleCallbackError(w, http.StatusUnauthorized, "google account is not allowed")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "google login failed")
+		h.writeGoogleCallbackError(w, http.StatusInternalServerError, "google login failed")
 		return
 	}
 	response, err := h.createSession(r.Context(), w, r, loginUserToPolicyUser(user))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "session creation failed")
+		h.writeGoogleCallbackError(w, http.StatusInternalServerError, "session creation failed")
 		return
 	}
+	h.clearOAuthStateCookie(w)
 	writeJSON(w, http.StatusOK, response)
 }
 
 func (h *AuthHandlers) Logout(w http.ResponseWriter, r *http.Request) {
 	cfg := h.config()
+	var logoutErr error
 	if h != nil && h.Sessions != nil {
 		if token, ok := cookieValue(r, cfg.SessionCookieName); ok {
 			session, err := h.Sessions.GetSessionByTokenHash(r.Context(), auth.HashToken(token))
-			if err == nil {
-				_ = h.Sessions.RevokeSession(r.Context(), session.ID)
+			if err != nil {
+				if !errors.Is(err, service.ErrNotFound) {
+					logoutErr = err
+				}
+			} else if session.ID != uuid.Nil {
+				if err := h.Sessions.RevokeSession(r.Context(), session.ID); err != nil {
+					if !errors.Is(err, service.ErrNotFound) {
+						logoutErr = err
+					}
+				}
 			}
 		}
 	}
 	h.clearCookie(w, cfg.SessionCookieName, true)
 	h.clearCookie(w, cfg.CSRFCookieName, false)
+	if logoutErr != nil {
+		writeError(w, http.StatusInternalServerError, "logout failed")
+		return
+	}
 	writeJSON(w, http.StatusOK, SessionResponse{Authenticated: false})
 }
 
@@ -264,6 +290,12 @@ func (h *AuthHandlers) resolveGoogleUser(ctx context.Context, identity GoogleIde
 	user, err = h.Auth.FindLoginUserByEmail(ctx, email)
 	if err == nil {
 		if user.Status != policy.StatusActive {
+			return service.LoginUser{}, service.ErrUnauthorized
+		}
+		if user.GoogleSub != nil {
+			if strings.TrimSpace(*user.GoogleSub) == googleSub {
+				return user, nil
+			}
 			return service.LoginUser{}, service.ErrUnauthorized
 		}
 		return h.Auth.AttachGoogleSub(ctx, user.ID, googleSub)
@@ -351,6 +383,42 @@ func (h *AuthHandlers) clearCookie(w http.ResponseWriter, name string, httpOnly 
 	})
 }
 
+func (h *AuthHandlers) setOAuthStateCookie(w http.ResponseWriter, value string, expires time.Time) {
+	cfg := h.config()
+	maxAge := int(cfg.OAuthStateTTL.Seconds())
+	if maxAge < 1 {
+		maxAge = int(defaultOAuthStateTTL.Seconds())
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:     cfg.OAuthStateCookie,
+		Value:    value,
+		Path:     oauthStateCookiePath,
+		MaxAge:   maxAge,
+		Expires:  expires,
+		HttpOnly: true,
+		Secure:   cfg.secureCookies(),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func (h *AuthHandlers) clearOAuthStateCookie(w http.ResponseWriter) {
+	cfg := h.config()
+	http.SetCookie(w, &http.Cookie{
+		Name:     cfg.OAuthStateCookie,
+		Value:    "",
+		Path:     oauthStateCookiePath,
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   cfg.secureCookies(),
+		SameSite: http.SameSiteLaxMode,
+	})
+}
+
+func (h *AuthHandlers) writeGoogleCallbackError(w http.ResponseWriter, status int, message string) {
+	h.clearOAuthStateCookie(w)
+	writeError(w, status, message)
+}
+
 func (h *AuthHandlers) config() AuthHandlerConfig {
 	if h == nil {
 		return defaultAuthHandlerConfig()
@@ -362,6 +430,12 @@ func (h *AuthHandlers) config() AuthHandlerConfig {
 	}
 	if cfg.CSRFCookieName == "" {
 		cfg.CSRFCookieName = defaults.CSRFCookieName
+	}
+	if cfg.OAuthStateCookie == "" {
+		cfg.OAuthStateCookie = defaults.OAuthStateCookie
+	}
+	if cfg.CSRFHeaderName == "" {
+		cfg.CSRFHeaderName = defaults.CSRFHeaderName
 	}
 	if cfg.SecureCookies == nil {
 		cfg.SecureCookies = defaults.SecureCookies
@@ -381,6 +455,8 @@ func defaultAuthHandlerConfig() AuthHandlerConfig {
 	return AuthHandlerConfig{
 		SessionCookieName: defaultSessionCookieName,
 		CSRFCookieName:    defaultCSRFCookieName,
+		OAuthStateCookie:  defaultOAuthStateCookie,
+		CSRFHeaderName:    defaultCSRFHeaderName,
 		SecureCookies:     &secure,
 		SessionTTL:        defaultSessionTTL,
 		OAuthStateTTL:     defaultOAuthStateTTL,

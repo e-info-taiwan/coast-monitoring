@@ -100,6 +100,7 @@ func (r UserRepository) AttachGoogleSub(ctx context.Context, userID uuid.UUID, g
 		UPDATE users
 		SET google_sub = $2, updated_at = now()
 		WHERE id = $1
+			AND google_sub IS NULL
 		RETURNING id, email::text, name, role::text, status::text, google_sub, COALESCE(password_hash, '')
 	`, userID, googleSub))
 }

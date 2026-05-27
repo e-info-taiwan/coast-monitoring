@@ -28,6 +28,36 @@ func TestNewServerHandlerWiresAuthRoutes(t *testing.T) {
 	}
 }
 
+func TestNewServerHandlerAllowsMissingGoogleProvider(t *testing.T) {
+	handler := newServerHandler(config.Config{
+		SessionCookieName: "coast_session",
+		SecureCookies:     false,
+	}, nil, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/google/start", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d; body %s", rec.Code, http.StatusServiceUnavailable, rec.Body.String())
+	}
+}
+
+func TestGoogleConfigComplete(t *testing.T) {
+	complete := config.Config{
+		GoogleClientID:     "client-id",
+		GoogleClientSecret: "client-secret",
+		GoogleRedirectURL:  "https://app.example.com/api/auth/google/callback",
+	}
+	if !googleConfigComplete(complete) {
+		t.Fatal("googleConfigComplete = false, want true")
+	}
+	if googleConfigComplete(config.Config{GoogleClientID: "client-id"}) {
+		t.Fatal("googleConfigComplete = true, want false for incomplete config")
+	}
+}
+
 type stubGoogleProvider struct{}
 
 func (p *stubGoogleProvider) AuthCodeURL(state string) string {

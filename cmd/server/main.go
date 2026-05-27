@@ -4,6 +4,8 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"coast-monitoring/internal/config"
 	"coast-monitoring/internal/db"
@@ -27,13 +29,20 @@ func main() {
 	}
 	defer pool.Close()
 
-	googleProvider, err := httpx.NewGoogleOAuthProvider(ctx, httpx.GoogleOAuthConfig{
-		ClientID:     cfg.GoogleClientID,
-		ClientSecret: cfg.GoogleClientSecret,
-		RedirectURL:  cfg.GoogleRedirectURL,
-	})
-	if err != nil {
-		log.Fatal(err)
+	var googleProvider httpx.GoogleOAuthProvider
+	if googleConfigComplete(cfg) {
+		googleCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		googleProvider, err = httpx.NewGoogleOAuthProvider(googleCtx, httpx.GoogleOAuthConfig{
+			ClientID:     cfg.GoogleClientID,
+			ClientSecret: cfg.GoogleClientSecret,
+			RedirectURL:  cfg.GoogleRedirectURL,
+		})
+		cancel()
+		if err != nil {
+			log.Fatal(err)
+		}
+	} else {
+		log.Print("google auth disabled: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, or GOOGLE_REDIRECT_URL is missing")
 	}
 
 	server := &http.Server{
@@ -62,9 +71,16 @@ func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider http
 			Google:        googleProvider,
 			Config: httpx.AuthHandlerConfig{
 				SessionCookieName:   cfg.SessionCookieName,
+				CSRFHeaderName:      cfg.CSRFHeaderName,
 				SecureCookies:       &secureCookies,
 				BootstrapAdminEmail: cfg.BootstrapAdminEmail,
 			},
 		},
 	})
+}
+
+func googleConfigComplete(cfg config.Config) bool {
+	return strings.TrimSpace(cfg.GoogleClientID) != "" &&
+		strings.TrimSpace(cfg.GoogleClientSecret) != "" &&
+		strings.TrimSpace(cfg.GoogleRedirectURL) != ""
 }

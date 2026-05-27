@@ -174,6 +174,31 @@ func TestPasswordLoginRejectsDisabledUserAndRecordsFailedAttempt(t *testing.T) {
 	}
 }
 
+func TestPasswordLoginDoesNotTrimPasswordBeforeVerification(t *testing.T) {
+	passwordHash, err := auth.HashPassword(" password-with-spaces ")
+	if err != nil {
+		t.Fatalf("HashPassword error = %v", err)
+	}
+	handlers := testAuthHandlers()
+	handlers.Auth = &fakeHTTPAuthService{loginUserByEmail: service.LoginUser{
+		ID:           uuid.New(),
+		Email:        "user@example.com",
+		Name:         "User",
+		Role:         policy.RoleVolunteer,
+		Status:       policy.StatusActive,
+		PasswordHash: passwordHash,
+	}}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(`{"email":"user@example.com","password":" password-with-spaces "}`))
+	rec := httptest.NewRecorder()
+
+	handlers.PasswordLogin(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
 func TestGoogleStartStoresHashedStateAndRedirects(t *testing.T) {
 	oauthStates := &fakeHTTPOAuthStateStore{}
 	google := &fakeHTTPGoogleOAuth{}
@@ -200,6 +225,19 @@ func TestGoogleStartStoresHashedStateAndRedirects(t *testing.T) {
 	}
 	if bytes.Equal(oauthStates.created.StateHash, []byte(google.state)) {
 		t.Fatal("stored raw oauth state instead of hash")
+	}
+	stateCookie := findCookie(rec.Result().Cookies(), "coast_oauth_state")
+	if stateCookie == nil {
+		t.Fatal("coast_oauth_state cookie was not set")
+	}
+	if stateCookie.Value != google.state {
+		t.Fatalf("oauth state cookie = %q, want raw state token", stateCookie.Value)
+	}
+	if stateCookie.Path != "/api/auth/google" || !stateCookie.HttpOnly || stateCookie.SameSite != http.SameSiteLaxMode {
+		t.Fatalf("oauth state cookie attrs = %+v", stateCookie)
+	}
+	if stateCookie.MaxAge != int((10 * time.Minute).Seconds()) {
+		t.Fatalf("oauth state MaxAge = %d, want 600", stateCookie.MaxAge)
 	}
 }
 
@@ -236,6 +274,7 @@ func TestGoogleCallbackAttachesExistingEmailUserAndCreatesSession(t *testing.T) 
 	}}
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?state=state-token&code=auth-code", nil)
+	req.AddCookie(&http.Cookie{Name: "coast_oauth_state", Value: "state-token"})
 	rec := httptest.NewRecorder()
 
 	handlers.GoogleCallback(rec, req)
@@ -257,6 +296,10 @@ func TestGoogleCallbackAttachesExistingEmailUserAndCreatesSession(t *testing.T) 
 	}
 	if findCookie(rec.Result().Cookies(), "coast_session") == nil || findCookie(rec.Result().Cookies(), "coast_csrf") == nil {
 		t.Fatal("google callback did not set session cookies")
+	}
+	clearedStateCookie := findCookie(rec.Result().Cookies(), "coast_oauth_state")
+	if clearedStateCookie == nil || clearedStateCookie.MaxAge != -1 {
+		t.Fatalf("oauth state cookie was not cleared: %+v", clearedStateCookie)
 	}
 }
 
@@ -286,6 +329,7 @@ func TestGoogleCallbackCreatesBootstrapAdmin(t *testing.T) {
 	handlers.Config.BootstrapAdminEmail = "admin@example.com"
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?state=state-token&code=auth-code", nil)
+	req.AddCookie(&http.Cookie{Name: "coast_oauth_state", Value: "state-token"})
 	rec := httptest.NewRecorder()
 
 	handlers.GoogleCallback(rec, req)
@@ -295,6 +339,230 @@ func TestGoogleCallbackCreatesBootstrapAdmin(t *testing.T) {
 	}
 	if authSvc.bootstrapEmail != "admin@example.com" || authSvc.bootstrapGoogleSub != "google-sub" {
 		t.Fatalf("bootstrap input = email %q sub %q", authSvc.bootstrapEmail, authSvc.bootstrapGoogleSub)
+	}
+}
+
+func TestGoogleCallbackRejectsMissingStateCookie(t *testing.T) {
+	handlers := testAuthHandlers()
+	oauthStates := &fakeHTTPOAuthStateStore{}
+	handlers.OAuthStates = oauthStates
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?state=state-token&code=auth-code", nil)
+	rec := httptest.NewRecorder()
+
+	handlers.GoogleCallback(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if oauthStates.consumed {
+		t.Fatal("oauth state was consumed without browser state cookie")
+	}
+}
+
+func TestGoogleCallbackRejectsMismatchedStateCookie(t *testing.T) {
+	handlers := testAuthHandlers()
+	oauthStates := &fakeHTTPOAuthStateStore{}
+	handlers.OAuthStates = oauthStates
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?state=state-token&code=auth-code", nil)
+	req.AddCookie(&http.Cookie{Name: "coast_oauth_state", Value: "other-state"})
+	rec := httptest.NewRecorder()
+
+	handlers.GoogleCallback(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if oauthStates.consumed {
+		t.Fatal("oauth state was consumed when browser cookie mismatched callback state")
+	}
+	clearedStateCookie := findCookie(rec.Result().Cookies(), "coast_oauth_state")
+	if clearedStateCookie == nil || clearedStateCookie.MaxAge != -1 {
+		t.Fatalf("oauth state cookie was not cleared: %+v", clearedStateCookie)
+	}
+}
+
+func TestGoogleCallbackRejectsConsumedState(t *testing.T) {
+	handlers := testAuthHandlers()
+	handlers.OAuthStates = &fakeHTTPOAuthStateStore{consumeErr: service.ErrNotFound}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?state=state-token&code=auth-code", nil)
+	req.AddCookie(&http.Cookie{Name: "coast_oauth_state", Value: "state-token"})
+	rec := httptest.NewRecorder()
+
+	handlers.GoogleCallback(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	clearedStateCookie := findCookie(rec.Result().Cookies(), "coast_oauth_state")
+	if clearedStateCookie == nil || clearedStateCookie.MaxAge != -1 {
+		t.Fatalf("oauth state cookie was not cleared: %+v", clearedStateCookie)
+	}
+}
+
+func TestGoogleCallbackAllowsEmailUserWithMatchingGoogleSub(t *testing.T) {
+	userID := uuid.New()
+	authSvc := &fakeHTTPAuthService{
+		loginUserByGoogleSubErr: service.ErrNotFound,
+		loginUserByEmail: service.LoginUser{
+			ID:        userID,
+			Email:     "user@example.com",
+			Name:      "User",
+			Role:      policy.RoleVolunteer,
+			Status:    policy.StatusActive,
+			GoogleSub: stringPtr("google-sub"),
+		},
+	}
+	handlers := testAuthHandlers()
+	handlers.Auth = authSvc
+	handlers.Google = &fakeHTTPGoogleOAuth{identity: GoogleIdentity{
+		Subject:       "google-sub",
+		Email:         "user@example.com",
+		Name:          "User",
+		EmailVerified: true,
+	}}
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?state=state-token&code=auth-code", nil)
+	req.AddCookie(&http.Cookie{Name: "coast_oauth_state", Value: "state-token"})
+	rec := httptest.NewRecorder()
+
+	handlers.GoogleCallback(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if authSvc.attachedGoogleSub != "" {
+		t.Fatalf("AttachGoogleSub called with %q, want no attach for matching existing sub", authSvc.attachedGoogleSub)
+	}
+}
+
+func TestGoogleCallbackRejectsEmailUserWithMismatchedGoogleSub(t *testing.T) {
+	authSvc := &fakeHTTPAuthService{
+		loginUserByGoogleSubErr: service.ErrNotFound,
+		loginUserByEmail: service.LoginUser{
+			ID:        uuid.New(),
+			Email:     "user@example.com",
+			Name:      "User",
+			Role:      policy.RoleVolunteer,
+			Status:    policy.StatusActive,
+			GoogleSub: stringPtr("other-google-sub"),
+		},
+	}
+	handlers := testAuthHandlers()
+	handlers.Auth = authSvc
+	handlers.Google = &fakeHTTPGoogleOAuth{identity: GoogleIdentity{
+		Subject:       "google-sub",
+		Email:         "user@example.com",
+		Name:          "User",
+		EmailVerified: true,
+	}}
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?state=state-token&code=auth-code", nil)
+	req.AddCookie(&http.Cookie{Name: "coast_oauth_state", Value: "state-token"})
+	rec := httptest.NewRecorder()
+
+	handlers.GoogleCallback(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+	if authSvc.attachedGoogleSub != "" {
+		t.Fatalf("AttachGoogleSub called with %q, want no attach for mismatched existing sub", authSvc.attachedGoogleSub)
+	}
+}
+
+func TestLogoutReturnsServerErrorWhenRevokeFails(t *testing.T) {
+	handlers := testAuthHandlers()
+	handlers.Sessions = &fakeHTTPSessionStore{
+		session:   service.Session{ID: uuid.New(), UserID: uuid.New()},
+		revokeErr: errors.New("database unavailable"),
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	req.AddCookie(&http.Cookie{Name: "coast_session", Value: "session-token"})
+	rec := httptest.NewRecorder()
+
+	handlers.Logout(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+	if findCookie(rec.Result().Cookies(), "coast_session") == nil || findCookie(rec.Result().Cookies(), "coast_csrf") == nil {
+		t.Fatal("logout did not clear client cookies on revoke failure")
+	}
+}
+
+func TestLogoutSucceedsWhenSessionAlreadyMissing(t *testing.T) {
+	handlers := testAuthHandlers()
+	handlers.Sessions = &fakeHTTPSessionStore{getErr: service.ErrNotFound}
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/logout", nil)
+	req.AddCookie(&http.Cookie{Name: "coast_session", Value: "session-token"})
+	rec := httptest.NewRecorder()
+
+	handlers.Logout(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if findCookie(rec.Result().Cookies(), "coast_session") == nil || findCookie(rec.Result().Cookies(), "coast_csrf") == nil {
+		t.Fatal("logout did not clear client cookies for missing server-side session")
+	}
+}
+
+func TestRequireSessionStoresCurrentUser(t *testing.T) {
+	user := policy.User{
+		ID:     uuid.New(),
+		Email:  "user@example.com",
+		Name:   "User",
+		Role:   policy.RoleVolunteer,
+		Status: policy.StatusActive,
+	}
+	handlers := testAuthHandlers()
+	handlers.Auth = &fakeHTTPAuthService{sessionUser: user}
+	nextCalled := false
+	handler := handlers.RequireSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		nextCalled = true
+		got, ok := currentUser(r)
+		if !ok || got != user {
+			t.Fatalf("currentUser = %+v/%v, want %+v/true", got, ok, user)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/protected", nil)
+	req.Header.Set("X-CSRF-Token", "csrf-token")
+	req.AddCookie(&http.Cookie{Name: "coast_session", Value: "session-token"})
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNoContent)
+	}
+	if !nextCalled {
+		t.Fatal("next handler was not called")
+	}
+}
+
+func TestRequireSessionRejectsMissingSessionOrCSRF(t *testing.T) {
+	handlers := testAuthHandlers()
+	handler := handlers.RequireSession(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("next handler should not be called")
+	}))
+
+	req := httptest.NewRequest(http.MethodPost, "/api/protected", nil)
+	req.Header.Set("X-CSRF-Token", "csrf-token")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("missing session status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/api/protected", nil)
+	req.AddCookie(&http.Cookie{Name: "coast_session", Value: "session-token"})
+	rec = httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("missing csrf status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 }
 
@@ -309,6 +577,8 @@ func testAuthHandlers() *AuthHandlers {
 		Config: AuthHandlerConfig{
 			SessionCookieName: "coast_session",
 			CSRFCookieName:    "coast_csrf",
+			CSRFHeaderName:    "X-CSRF-Token",
+			OAuthStateCookie:  "coast_oauth_state",
 			SecureCookies:     boolPtr(false),
 			SessionTTL:        24 * time.Hour,
 			OAuthStateTTL:     10 * time.Minute,
@@ -408,8 +678,10 @@ func (s *fakeHTTPAuthService) CreateBootstrapAdmin(ctx context.Context, email, n
 }
 
 type fakeHTTPSessionStore struct {
-	created service.CreateSessionRecord
-	session service.Session
+	created   service.CreateSessionRecord
+	session   service.Session
+	getErr    error
+	revokeErr error
 }
 
 func (s *fakeHTTPSessionStore) CreateSession(ctx context.Context, input service.CreateSessionRecord) (service.Session, error) {
@@ -421,11 +693,14 @@ func (s *fakeHTTPSessionStore) CreateSession(ctx context.Context, input service.
 }
 
 func (s *fakeHTTPSessionStore) GetSessionByTokenHash(ctx context.Context, tokenHash []byte) (service.Session, error) {
+	if s.getErr != nil {
+		return service.Session{}, s.getErr
+	}
 	return s.session, nil
 }
 
 func (s *fakeHTTPSessionStore) RevokeSession(ctx context.Context, id uuid.UUID) error {
-	return nil
+	return s.revokeErr
 }
 
 type fakeHTTPLoginAttemptRecorder struct {
@@ -438,7 +713,9 @@ func (r *fakeHTTPLoginAttemptRecorder) RecordLoginAttempt(ctx context.Context, i
 }
 
 type fakeHTTPOAuthStateStore struct {
-	created service.CreateOAuthStateRecord
+	created    service.CreateOAuthStateRecord
+	consumeErr error
+	consumed   bool
 }
 
 func (s *fakeHTTPOAuthStateStore) CreateOAuthState(ctx context.Context, input service.CreateOAuthStateRecord) (service.OAuthState, error) {
@@ -447,6 +724,10 @@ func (s *fakeHTTPOAuthStateStore) CreateOAuthState(ctx context.Context, input se
 }
 
 func (s *fakeHTTPOAuthStateStore) ConsumeOAuthState(ctx context.Context, stateHash []byte, now time.Time) (service.OAuthState, error) {
+	s.consumed = true
+	if s.consumeErr != nil {
+		return service.OAuthState{}, s.consumeErr
+	}
 	if len(stateHash) == 0 {
 		return service.OAuthState{}, errors.New("empty state hash")
 	}
