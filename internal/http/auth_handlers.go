@@ -181,7 +181,7 @@ func (h *AuthHandlers) GoogleStart(w http.ResponseWriter, r *http.Request) {
 	stateExpiresAt := h.now().Add(h.config().OAuthStateTTL)
 	_, err = h.OAuthStates.CreateOAuthState(r.Context(), service.CreateOAuthStateRecord{
 		StateHash:    auth.HashToken(stateToken),
-		RedirectPath: "/",
+		RedirectPath: safeRedirectPath(r.URL.Query().Get("redirect")),
 		ExpiresAt:    stateExpiresAt,
 	})
 	if err != nil {
@@ -208,7 +208,8 @@ func (h *AuthHandlers) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 		h.writeGoogleCallbackError(w, http.StatusUnauthorized, "invalid oauth state")
 		return
 	}
-	if _, err := h.OAuthStates.ConsumeOAuthState(r.Context(), auth.HashToken(stateToken), h.now()); err != nil {
+	oauthState, err := h.OAuthStates.ConsumeOAuthState(r.Context(), auth.HashToken(stateToken), h.now())
+	if err != nil {
 		h.writeGoogleCallbackError(w, http.StatusUnauthorized, "invalid oauth state")
 		return
 	}
@@ -237,6 +238,10 @@ func (h *AuthHandlers) GoogleCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.clearOAuthStateCookie(w)
+	if oauthState.RedirectPath != "" {
+		http.Redirect(w, r, safeRedirectPath(oauthState.RedirectPath), http.StatusFound)
+		return
+	}
 	writeJSON(w, http.StatusOK, response)
 }
 
@@ -506,6 +511,14 @@ func cookieValue(r *http.Request, name string) (string, bool) {
 
 func normalizeEmail(email string) string {
 	return strings.ToLower(strings.TrimSpace(email))
+}
+
+func safeRedirectPath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" || !strings.HasPrefix(value, "/") || strings.HasPrefix(value, "//") || strings.HasPrefix(value, "/api/") {
+		return "/"
+	}
+	return value
 }
 
 func remoteIP(r *http.Request) string {

@@ -28,8 +28,8 @@
           </p>
           <div class="login-notes">
             <span class="note-pill">Admin only</span>
-            <span class="note-pill">Volunteer blocked</span>
-            <span class="note-pill">PocketBase backed</span>
+            <span class="note-pill">Volunteer entry</span>
+            <span class="note-pill">Go API backed</span>
           </div>
         </div>
 
@@ -38,7 +38,7 @@
             <span class="panel-label">Welcome</span>
             <h2>Sign in</h2>
             <p>
-              本機開發時請用 superuser 登入；正式環境才會改回 Google login。
+              使用 Google login 或 Email／密碼登入；session 會透過安全 cookie 維持。
             </p>
           </div>
 
@@ -75,7 +75,7 @@
               />
             </div>
             <p class="form-help">
-              預設本機 superuser 帳號是 <code>hcchien@gmail.com</code> /
+              預設本機 admin 帳號是 <code>hcchien@gmail.com</code> /
               <code>Test1234!</code>。
             </p>
             <button type="submit" class="primary-button">Sign in</button>
@@ -88,8 +88,8 @@
           <p class="eyebrow">Access restricted</p>
           <h2>目前登入帳號不是 admin</h2>
           <p>
-            這個系統只開放給 <strong>admin</strong>。如果你是 volunteer，
-            可以先登出，或請管理員幫你調整 role。
+            這個系統只開放給 <strong>admin</strong> 與 <strong>volunteer</strong>。
+            請先登出，或請管理員幫你調整 role。
           </p>
           <button id="sign-out-from-denied" class="ghost-button">
             Sign out

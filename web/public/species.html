@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <title>Location Directory</title>
+    <title>Species Directory</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -11,7 +11,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="/styles.css" />
-    <script type="module" src="/location.js"></script>
+    <script type="module" src="/public/species.js"></script>
   </head>
   <body class="public-page">
     <div class="page-glow page-glow-a"></div>
@@ -19,34 +19,34 @@
 
     <main class="public-shell">
       <section class="public-hero">
-        <p class="eyebrow">Public location directory</p>
-        <h1>地點清單</h1>
+        <p class="eyebrow">Public species directory</p>
+        <h1>生物物種清單</h1>
         <p class="lede">
-          這是一個不需要登入就能瀏覽的範例頁，會直接讀取 PocketBase 裡的 `location` 資料。
+          這個頁面讀取登入者可存取的物種清單，資料來自新的 first-party API。
         </p>
         <div class="login-notes">
-          <span class="note-pill">Public read-only</span>
-          <span class="note-pill">No login required</span>
-          <span class="note-pill">PocketBase backed</span>
+          <span class="note-pill">Read-only</span>
+          <span class="note-pill">Session required</span>
+          <span class="note-pill">Go API backed</span>
         </div>
       </section>
 
       <section class="public-card">
         <div class="public-toolbar">
           <div>
-            <p class="panel-label">Location list</p>
-            <h2>所有地點</h2>
-            <p id="location-summary" class="meta-line">Loading...</p>
+            <p class="panel-label">Species list</p>
+            <h2>所有物種</h2>
+            <p id="species-summary" class="meta-line">Loading...</p>
           </div>
 
           <div class="public-search-wrap">
-            <label class="sr-only" for="location-search">Search location</label>
-            <input id="location-search" class="public-search" type="search" placeholder="搜尋中文或英文名稱" />
+            <label class="sr-only" for="species-search">Search species</label>
+            <input id="species-search" class="public-search" type="search" placeholder="搜尋中文或英文名稱" />
           </div>
         </div>
 
-        <div id="location-grid" class="species-grid"></div>
-        <p id="location-status" class="status-copy"></p>
+        <div id="species-grid" class="species-grid"></div>
+        <p id="species-status" class="status-copy"></p>
       </section>
     </main>
   </body>

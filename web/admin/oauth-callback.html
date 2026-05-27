@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+    <title>Signing in...</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <style>
+      body {
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        padding: 24px;
+      }
+
+      .callback-card {
+        width: min(620px, 100%);
+        padding: 28px;
+        border: 1px solid var(--border);
+        border-radius: var(--radius-xl);
+        background: var(--panel);
+        box-shadow: var(--shadow);
+      }
+
+      .callback-card p {
+        color: var(--muted);
+        line-height: 1.6;
+      }
+
+      .callback-error {
+        color: #ffd9d9;
+        margin-top: 14px;
+        white-space: pre-wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="callback-card">
+      <p class="eyebrow">OAuth callback</p>
+      <h1>Signing in</h1>
+      <p id="status">Finishing Google login...</p>
+      <p id="error" class="callback-error"></p>
+    </main>
+
+    <script type="module">
+      const status = document.querySelector("#status")
+      const error = document.querySelector("#error")
+
+      function showError(message) {
+        status.textContent = "Sign in failed."
+        error.textContent = message
+      }
+
+      try {
+        status.textContent = "Google login is handled by the server. Redirecting..."
+        window.location.replace("/")
+      } catch (err) {
+        showError(err?.message || "Something went wrong.")
+      }
+    </script>
+  </body>
+</html>

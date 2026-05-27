@@ -3,6 +3,9 @@ package httpx
 import (
 	"encoding/json"
 	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/go-chi/chi/v5"
 )
@@ -54,7 +57,30 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Patch("/observations/{id}", deps.AppHandlers.UpdateObservation)
 		r.Delete("/observations/{id}", deps.AppHandlers.DeleteObservation)
 	})
+	r.Handle("/public/*", http.StripPrefix("/public/", http.FileServer(http.Dir(staticDir("web/public")))))
+	adminFiles := http.FileServer(http.Dir(staticDir("web/admin")))
+	r.NotFound(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			http.NotFound(w, r)
+			return
+		}
+		adminFiles.ServeHTTP(w, r)
+	})
 	return r
+}
+
+func staticDir(path string) string {
+	candidates := []string{
+		path,
+		filepath.Join("..", path),
+		filepath.Join("..", "..", path),
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+	}
+	return path
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {

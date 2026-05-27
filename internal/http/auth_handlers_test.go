@@ -223,6 +223,9 @@ func TestGoogleStartStoresHashedStateAndRedirects(t *testing.T) {
 	if !bytes.Equal(oauthStates.created.StateHash, auth.HashToken(google.state)) {
 		t.Fatal("stored oauth state hash does not match state token")
 	}
+	if oauthStates.created.RedirectPath != "/" {
+		t.Fatalf("oauth redirect path = %q, want /", oauthStates.created.RedirectPath)
+	}
 	if bytes.Equal(oauthStates.created.StateHash, []byte(google.state)) {
 		t.Fatal("stored raw oauth state instead of hash")
 	}
@@ -238,6 +241,25 @@ func TestGoogleStartStoresHashedStateAndRedirects(t *testing.T) {
 	}
 	if stateCookie.MaxAge != int((10 * time.Minute).Seconds()) {
 		t.Fatalf("oauth state MaxAge = %d, want 600", stateCookie.MaxAge)
+	}
+}
+
+func TestGoogleStartStoresSafeRedirectPath(t *testing.T) {
+	oauthStates := &fakeHTTPOAuthStateStore{}
+	handlers := testAuthHandlers()
+	handlers.OAuthStates = oauthStates
+	handlers.Google = &fakeHTTPGoogleOAuth{}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/google/start?redirect=/admin", nil)
+	rec := httptest.NewRecorder()
+
+	handlers.GoogleStart(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusFound)
+	}
+	if oauthStates.created.RedirectPath != "/admin" {
+		t.Fatalf("oauth redirect path = %q, want /admin", oauthStates.created.RedirectPath)
 	}
 }
 
@@ -339,6 +361,41 @@ func TestGoogleCallbackCreatesBootstrapAdmin(t *testing.T) {
 	}
 	if authSvc.bootstrapEmail != "admin@example.com" || authSvc.bootstrapGoogleSub != "google-sub" {
 		t.Fatalf("bootstrap input = email %q sub %q", authSvc.bootstrapEmail, authSvc.bootstrapGoogleSub)
+	}
+}
+
+func TestGoogleCallbackRedirectsStoredPath(t *testing.T) {
+	authSvc := &fakeHTTPAuthService{
+		loginUserByGoogleSub: service.LoginUser{
+			ID:     uuid.New(),
+			Email:  "user@example.com",
+			Name:   "User",
+			Role:   policy.RoleVolunteer,
+			Status: policy.StatusActive,
+		},
+	}
+	handlers := testAuthHandlers()
+	handlers.Auth = authSvc
+	handlers.Sessions = &fakeHTTPSessionStore{}
+	handlers.OAuthStates = &fakeHTTPOAuthStateStore{redirectPath: "/admin"}
+	handlers.Google = &fakeHTTPGoogleOAuth{identity: GoogleIdentity{
+		Subject:       "google-sub",
+		Email:         "user@example.com",
+		Name:          "User",
+		EmailVerified: true,
+	}}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/auth/google/callback?state=state-token&code=auth-code", nil)
+	req.AddCookie(&http.Cookie{Name: "coast_oauth_state", Value: "state-token"})
+	rec := httptest.NewRecorder()
+
+	handlers.GoogleCallback(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want %d, body %s", rec.Code, http.StatusFound, rec.Body.String())
+	}
+	if got := rec.Header().Get("Location"); got != "/admin" {
+		t.Fatalf("redirect location = %q, want /admin", got)
 	}
 }
 
@@ -713,9 +770,10 @@ func (r *fakeHTTPLoginAttemptRecorder) RecordLoginAttempt(ctx context.Context, i
 }
 
 type fakeHTTPOAuthStateStore struct {
-	created    service.CreateOAuthStateRecord
-	consumeErr error
-	consumed   bool
+	created      service.CreateOAuthStateRecord
+	consumeErr   error
+	consumed     bool
+	redirectPath string
 }
 
 func (s *fakeHTTPOAuthStateStore) CreateOAuthState(ctx context.Context, input service.CreateOAuthStateRecord) (service.OAuthState, error) {
@@ -731,7 +789,7 @@ func (s *fakeHTTPOAuthStateStore) ConsumeOAuthState(ctx context.Context, stateHa
 	if len(stateHash) == 0 {
 		return service.OAuthState{}, errors.New("empty state hash")
 	}
-	return service.OAuthState{ID: uuid.New(), ExpiresAt: now.Add(time.Minute)}, nil
+	return service.OAuthState{ID: uuid.New(), RedirectPath: s.redirectPath, ExpiresAt: now.Add(time.Minute)}, nil
 }
 
 type fakeHTTPGoogleOAuth struct {
