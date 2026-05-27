@@ -51,8 +51,8 @@ func (r ObservationRepository) UpdateObservation(ctx context.Context, id uuid.UU
 }
 
 func (r ObservationRepository) DeleteObservation(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.Exec(ctx, `DELETE FROM observations WHERE id = $1`, id)
-	return err
+	tag, err := r.db.Exec(ctx, `DELETE FROM observations WHERE id = $1`, id)
+	return requireRowsAffected(tag, err)
 }
 
 func (r ObservationRepository) listObservations(ctx context.Context, where string, args ...any) ([]service.Observation, error) {
@@ -63,7 +63,7 @@ func (r ObservationRepository) listObservations(ctx context.Context, where strin
 		ORDER BY observed_on DESC, created_at DESC
 	`, args...)
 	if err != nil {
-		return nil, err
+		return nil, translateError(err)
 	}
 	defer rows.Close()
 
@@ -75,7 +75,7 @@ func (r ObservationRepository) listObservations(ctx context.Context, where strin
 		}
 		observations = append(observations, observation)
 	}
-	return observations, rows.Err()
+	return observations, translateError(rows.Err())
 }
 
 type observationScanner interface {

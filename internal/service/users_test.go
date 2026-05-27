@@ -73,6 +73,112 @@ func TestAdminCanCreateVolunteer(t *testing.T) {
 	}
 }
 
+func TestCreateUserRejectsInvalidEmail(t *testing.T) {
+	svc := UserService{Users: &fakeUserRepository{}}
+
+	_, err := svc.CreateUser(context.Background(), activeAdmin(), CreateUserInput{
+		Email:    "not-an-email",
+		Name:     "Volunteer",
+		Role:     policy.RoleVolunteer,
+		Status:   policy.StatusActive,
+		Password: "password123",
+	})
+
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("CreateUser error = %v, want %v", err, ErrValidation)
+	}
+}
+
+func TestCreateActiveUserRequiresLoginMechanism(t *testing.T) {
+	svc := UserService{Users: &fakeUserRepository{}}
+
+	_, err := svc.CreateUser(context.Background(), activeAdmin(), CreateUserInput{
+		Email:  "volunteer@example.com",
+		Name:   "Volunteer",
+		Role:   policy.RoleVolunteer,
+		Status: policy.StatusActive,
+	})
+
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("CreateUser error = %v, want %v", err, ErrValidation)
+	}
+}
+
+func TestCreateDisabledUserAllowsNoLoginMechanism(t *testing.T) {
+	svc := UserService{Users: &fakeUserRepository{}}
+
+	_, err := svc.CreateUser(context.Background(), activeAdmin(), CreateUserInput{
+		Email:  "volunteer@example.com",
+		Name:   "Volunteer",
+		Role:   policy.RoleVolunteer,
+		Status: policy.StatusDisabled,
+	})
+
+	if err != nil {
+		t.Fatalf("CreateUser error = %v", err)
+	}
+}
+
+func TestCreateUserTrimsGoogleSub(t *testing.T) {
+	repo := &fakeUserRepository{}
+	svc := UserService{Users: repo}
+	googleSub := " google-sub "
+
+	_, err := svc.CreateUser(context.Background(), activeAdmin(), CreateUserInput{
+		Email:     "volunteer@example.com",
+		Name:      "Volunteer",
+		Role:      policy.RoleVolunteer,
+		Status:    policy.StatusActive,
+		GoogleSub: &googleSub,
+	})
+	if err != nil {
+		t.Fatalf("CreateUser error = %v", err)
+	}
+
+	if repo.created.GoogleSub == nil || *repo.created.GoogleSub != "google-sub" {
+		t.Fatalf("created google sub = %v, want trimmed value", repo.created.GoogleSub)
+	}
+}
+
+func TestUpdateUserRejectsEmptyPassword(t *testing.T) {
+	svc := UserService{Users: &fakeUserRepository{}}
+	password := " "
+
+	_, err := svc.UpdateUser(context.Background(), activeAdmin(), uuid.New(), UpdateUserInput{
+		Email:    "volunteer@example.com",
+		Name:     "Volunteer",
+		Role:     policy.RoleVolunteer,
+		Status:   policy.StatusActive,
+		Password: &password,
+	})
+
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("UpdateUser error = %v, want %v", err, ErrValidation)
+	}
+}
+
+func TestDisabledActorCannotListUsers(t *testing.T) {
+	svc := UserService{Users: &fakeUserRepository{}}
+	actor := activeAdmin()
+	actor.Status = policy.StatusDisabled
+
+	_, err := svc.ListUsers(context.Background(), actor)
+
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("ListUsers error = %v, want %v", err, ErrForbidden)
+	}
+}
+
+func activeAdmin() policy.User {
+	return policy.User{
+		ID:     uuid.New(),
+		Email:  "admin@example.com",
+		Name:   "Admin",
+		Role:   policy.RoleAdmin,
+		Status: policy.StatusActive,
+	}
+}
+
 type fakeUserRepository struct {
 	users   []User
 	created CreateUserRecord

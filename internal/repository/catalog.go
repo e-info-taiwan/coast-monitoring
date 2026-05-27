@@ -24,7 +24,7 @@ func (r CatalogRepository) ListLocations(ctx context.Context) ([]service.Locatio
 		ORDER BY chinese_name, english_name
 	`)
 	if err != nil {
-		return nil, err
+		return nil, translateError(err)
 	}
 	defer rows.Close()
 
@@ -36,7 +36,7 @@ func (r CatalogRepository) ListLocations(ctx context.Context) ([]service.Locatio
 		}
 		locations = append(locations, location)
 	}
-	return locations, rows.Err()
+	return locations, translateError(rows.Err())
 }
 
 func (r CatalogRepository) CreateLocation(ctx context.Context, input service.CatalogRecord) (service.Location, error) {
@@ -61,8 +61,8 @@ func (r CatalogRepository) UpdateLocation(ctx context.Context, id uuid.UUID, inp
 }
 
 func (r CatalogRepository) DeleteLocation(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.Exec(ctx, `DELETE FROM locations WHERE id = $1`, id)
-	return err
+	tag, err := r.db.Exec(ctx, `DELETE FROM locations WHERE id = $1`, id)
+	return requireRowsAffected(tag, err)
 }
 
 func (r CatalogRepository) ListSpecies(ctx context.Context) ([]service.Species, error) {
@@ -72,7 +72,7 @@ func (r CatalogRepository) ListSpecies(ctx context.Context) ([]service.Species, 
 		ORDER BY chinese_name, english_name
 	`)
 	if err != nil {
-		return nil, err
+		return nil, translateError(err)
 	}
 	defer rows.Close()
 
@@ -84,7 +84,7 @@ func (r CatalogRepository) ListSpecies(ctx context.Context) ([]service.Species, 
 		}
 		speciesList = append(speciesList, species)
 	}
-	return speciesList, rows.Err()
+	return speciesList, translateError(rows.Err())
 }
 
 func (r CatalogRepository) CreateSpecies(ctx context.Context, input service.CatalogRecord) (service.Species, error) {
@@ -109,6 +109,6 @@ func (r CatalogRepository) UpdateSpecies(ctx context.Context, id uuid.UUID, inpu
 }
 
 func (r CatalogRepository) DeleteSpecies(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.Exec(ctx, `DELETE FROM species WHERE id = $1`, id)
-	return err
+	tag, err := r.db.Exec(ctx, `DELETE FROM species WHERE id = $1`, id)
+	return requireRowsAffected(tag, err)
 }

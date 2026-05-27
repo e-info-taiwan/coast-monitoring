@@ -119,6 +119,18 @@ func (s ObservationService) Delete(ctx context.Context, actor policy.User, id uu
 }
 
 func validateObservationInput(actor policy.User, input ObservationInput) (ObservationRecord, error) {
+	if input.ObservedOn.IsZero() {
+		return ObservationRecord{}, fmt.Errorf("%w: observed on is required", ErrValidation)
+	}
+	if input.LocationID == uuid.Nil {
+		return ObservationRecord{}, fmt.Errorf("%w: location id is required", ErrValidation)
+	}
+	if input.SpeciesID == uuid.Nil {
+		return ObservationRecord{}, fmt.Errorf("%w: species id is required", ErrValidation)
+	}
+	if input.ObserverID == uuid.Nil {
+		return ObservationRecord{}, fmt.Errorf("%w: observer id is required", ErrValidation)
+	}
 	if input.Count < 0 {
 		return ObservationRecord{}, fmt.Errorf("%w: count must be zero or greater", ErrValidation)
 	}

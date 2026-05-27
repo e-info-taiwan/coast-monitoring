@@ -113,9 +113,94 @@ func TestVolunteerCannotUpdateOtherUsersObservation(t *testing.T) {
 	}
 }
 
+func TestObservationRequiresCoreFields(t *testing.T) {
+	actor := policy.User{
+		ID:     uuid.New(),
+		Email:  "admin@example.com",
+		Name:   "Admin",
+		Role:   policy.RoleAdmin,
+		Status: policy.StatusActive,
+	}
+	valid := ObservationInput{
+		ObservedOn: time.Date(2026, 5, 27, 0, 0, 0, 0, time.UTC),
+		LocationID: uuid.New(),
+		SpeciesID:  uuid.New(),
+		ObserverID: uuid.New(),
+		Count:      0,
+	}
+	tests := []struct {
+		name  string
+		input ObservationInput
+	}{
+		{name: "observed on", input: ObservationInput{LocationID: valid.LocationID, SpeciesID: valid.SpeciesID, ObserverID: valid.ObserverID}},
+		{name: "location id", input: ObservationInput{ObservedOn: valid.ObservedOn, SpeciesID: valid.SpeciesID, ObserverID: valid.ObserverID}},
+		{name: "species id", input: ObservationInput{ObservedOn: valid.ObservedOn, LocationID: valid.LocationID, ObserverID: valid.ObserverID}},
+		{name: "observer id", input: ObservationInput{ObservedOn: valid.ObservedOn, LocationID: valid.LocationID, SpeciesID: valid.SpeciesID}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := validateObservationInput(actor, tt.input)
+			if !errors.Is(err, ErrValidation) {
+				t.Fatalf("validateObservationInput error = %v, want %v", err, ErrValidation)
+			}
+		})
+	}
+}
+
+func TestObservationRejectsInvalidCountAndLongNotes(t *testing.T) {
+	actor := policy.User{ID: uuid.New()}
+	valid := ObservationInput{
+		ObservedOn: time.Date(2026, 5, 27, 0, 0, 0, 0, time.UTC),
+		LocationID: uuid.New(),
+		SpeciesID:  uuid.New(),
+		ObserverID: uuid.New(),
+		Count:      0,
+	}
+
+	negative := valid
+	negative.Count = -1
+	if _, err := validateObservationInput(actor, negative); !errors.Is(err, ErrValidation) {
+		t.Fatalf("negative count error = %v, want %v", err, ErrValidation)
+	}
+
+	longNotes := valid
+	longNotes.Notes = string(make([]rune, 1001))
+	if _, err := validateObservationInput(actor, longNotes); !errors.Is(err, ErrValidation) {
+		t.Fatalf("long notes error = %v, want %v", err, ErrValidation)
+	}
+}
+
+func TestVolunteerCannotDeleteOtherUsersObservation(t *testing.T) {
+	volunteerID := uuid.New()
+	otherID := uuid.New()
+	observationID := uuid.New()
+	repo := &fakeObservationRepository{
+		observations: []Observation{{ID: observationID, ObserverID: otherID}},
+	}
+	svc := ObservationService{Observations: repo}
+	actor := policy.User{
+		ID:     volunteerID,
+		Email:  "volunteer@example.com",
+		Name:   "Volunteer",
+		Role:   policy.RoleVolunteer,
+		Status: policy.StatusActive,
+	}
+
+	err := svc.Delete(context.Background(), actor, observationID)
+
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("Delete error = %v, want %v", err, ErrForbidden)
+	}
+	if repo.deleted {
+		t.Fatal("repository delete was called for forbidden volunteer delete")
+	}
+}
+
 type fakeObservationRepository struct {
 	observations []Observation
 	updated      bool
+	deleted      bool
 }
 
 func (r *fakeObservationRepository) ListObservations(ctx context.Context) ([]Observation, error) {
@@ -173,5 +258,6 @@ func (r *fakeObservationRepository) UpdateObservation(ctx context.Context, id uu
 }
 
 func (r *fakeObservationRepository) DeleteObservation(ctx context.Context, id uuid.UUID) error {
+	r.deleted = true
 	return nil
 }

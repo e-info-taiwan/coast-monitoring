@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net/mail"
 	"strings"
 	"time"
 
@@ -79,8 +80,9 @@ func (s UserService) CreateUser(ctx context.Context, actor policy.User, input Cr
 	if err != nil {
 		return User{}, err
 	}
-	if strings.TrimSpace(input.Password) != "" {
-		hash, err := auth.HashPassword(input.Password)
+	password := strings.TrimSpace(input.Password)
+	if password != "" {
+		hash, err := auth.HashPassword(password)
 		if err != nil {
 			return User{}, err
 		}
@@ -97,8 +99,12 @@ func (s UserService) UpdateUser(ctx context.Context, actor policy.User, id uuid.
 	if err != nil {
 		return User{}, err
 	}
-	if input.Password != nil && strings.TrimSpace(*input.Password) != "" {
-		hash, err := auth.HashPassword(*input.Password)
+	if input.Password != nil {
+		password := strings.TrimSpace(*input.Password)
+		if password == "" {
+			return User{}, fmt.Errorf("%w: password cannot be empty", ErrValidation)
+		}
+		hash, err := auth.HashPassword(password)
 		if err != nil {
 			return User{}, err
 		}
@@ -126,12 +132,19 @@ func validateCreateUserInput(input CreateUserInput) (CreateUserRecord, error) {
 	if err != nil {
 		return CreateUserRecord{}, err
 	}
+	googleSub, err := cleanOptionalString(input.GoogleSub, "google sub")
+	if err != nil {
+		return CreateUserRecord{}, err
+	}
+	if input.Status == policy.StatusActive && strings.TrimSpace(input.Password) == "" && googleSub == nil {
+		return CreateUserRecord{}, fmt.Errorf("%w: active user requires password or google sub", ErrValidation)
+	}
 	return CreateUserRecord{
 		Email:     email,
 		Name:      name,
 		Role:      input.Role,
 		Status:    input.Status,
-		GoogleSub: input.GoogleSub,
+		GoogleSub: googleSub,
 	}, nil
 }
 
@@ -140,12 +153,16 @@ func validateUpdateUserInput(input UpdateUserInput) (UpdateUserRecord, error) {
 	if err != nil {
 		return UpdateUserRecord{}, err
 	}
+	googleSub, err := cleanOptionalString(input.GoogleSub, "google sub")
+	if err != nil {
+		return UpdateUserRecord{}, err
+	}
 	return UpdateUserRecord{
 		Email:     email,
 		Name:      name,
 		Role:      input.Role,
 		Status:    input.Status,
-		GoogleSub: input.GoogleSub,
+		GoogleSub: googleSub,
 	}, nil
 }
 
@@ -153,6 +170,11 @@ func validateUserFields(email, name string, role policy.Role, status policy.Stat
 	email = strings.ToLower(strings.TrimSpace(email))
 	if email == "" {
 		return "", "", fmt.Errorf("%w: email is required", ErrValidation)
+	}
+	address, err := mail.ParseAddress(email)
+	_, domain, hasDomain := strings.Cut(email, "@")
+	if err != nil || address.Address != email || !hasDomain || !strings.Contains(domain, ".") {
+		return "", "", fmt.Errorf("%w: email is invalid", ErrValidation)
 	}
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -165,4 +187,15 @@ func validateUserFields(email, name string, role policy.Role, status policy.Stat
 		return "", "", fmt.Errorf("%w: status must be active or disabled", ErrValidation)
 	}
 	return email, name, nil
+}
+
+func cleanOptionalString(value *string, field string) (*string, error) {
+	if value == nil {
+		return nil, nil
+	}
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil, fmt.Errorf("%w: %s cannot be empty", ErrValidation, field)
+	}
+	return &trimmed, nil
 }

@@ -26,7 +26,7 @@ func (r UserRepository) ListUsers(ctx context.Context) ([]service.User, error) {
 		ORDER BY email
 	`)
 	if err != nil {
-		return nil, err
+		return nil, translateError(err)
 	}
 	defer rows.Close()
 
@@ -38,7 +38,7 @@ func (r UserRepository) ListUsers(ctx context.Context) ([]service.User, error) {
 		}
 		users = append(users, user)
 	}
-	return users, rows.Err()
+	return users, translateError(rows.Err())
 }
 
 func (r UserRepository) CreateUser(ctx context.Context, input service.CreateUserRecord) (service.User, error) {
@@ -67,8 +67,8 @@ func (r UserRepository) UpdateUser(ctx context.Context, id uuid.UUID, input serv
 }
 
 func (r UserRepository) DisableUser(ctx context.Context, id uuid.UUID) error {
-	_, err := r.db.Exec(ctx, `UPDATE users SET status = 'disabled', updated_at = now() WHERE id = $1`, id)
-	return err
+	tag, err := r.db.Exec(ctx, `UPDATE users SET status = 'disabled', updated_at = now() WHERE id = $1`, id)
+	return requireRowsAffected(tag, err)
 }
 
 type userScanner interface {
