@@ -1,4 +1,5 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+CREATE EXTENSION IF NOT EXISTS citext;
 
 CREATE TYPE user_role AS ENUM ('admin', 'volunteer');
 CREATE TYPE user_status AS ENUM ('active', 'disabled');
@@ -6,7 +7,7 @@ CREATE TYPE audit_action AS ENUM ('create', 'update', 'delete');
 
 CREATE TABLE users (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  email text NOT NULL UNIQUE,
+  email citext NOT NULL UNIQUE,
   name text NOT NULL,
   role user_role NOT NULL DEFAULT 'volunteer',
   status user_status NOT NULL DEFAULT 'active',
@@ -97,8 +98,12 @@ CREATE TABLE login_attempts (
 
 CREATE INDEX sessions_user_id_idx ON sessions(user_id);
 CREATE INDEX sessions_expires_at_idx ON sessions(expires_at);
+CREATE INDEX oauth_states_expires_at_idx ON oauth_states(expires_at);
+CREATE INDEX observations_location_id_idx ON observations(location_id);
+CREATE INDEX observations_species_id_idx ON observations(species_id);
 CREATE INDEX observations_observer_id_idx ON observations(observer_id);
 CREATE INDEX observations_observed_on_idx ON observations(observed_on);
 CREATE INDEX audit_logs_target_idx ON audit_logs(target_table, target_id);
 CREATE INDEX audit_logs_logged_at_idx ON audit_logs(logged_at DESC);
 CREATE INDEX login_attempts_email_time_idx ON login_attempts(email, attempted_at DESC);
+CREATE INDEX login_attempts_ip_time_idx ON login_attempts(ip, attempted_at DESC);

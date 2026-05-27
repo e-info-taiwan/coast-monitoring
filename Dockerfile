@@ -1,20 +1,21 @@
-FROM alpine:latest
+FROM golang:1.23-alpine AS build
 
-ARG PB_VERSION=0.36.5
+WORKDIR /src
 
-RUN apk add --no-cache \
-  ca-certificates \
-  unzip
+COPY go.mod go.sum ./
+RUN go mod download
 
-ADD https://github.com/pocketbase/pocketbase/releases/download/v${PB_VERSION}/pocketbase_${PB_VERSION}_linux_amd64.zip /tmp/pocketbase.zip
-RUN unzip /tmp/pocketbase.zip -d /pb/
+COPY . .
+RUN go test ./...
+RUN go build -o /out/coast-monitoring ./cmd/server
 
-COPY pb_migrations /pb/pb_migrations
-COPY pb_hooks /pb/pb_hooks
-COPY pb_public /pb/pb_public
+FROM alpine:3.21
 
-WORKDIR /pb
+RUN apk add --no-cache ca-certificates
+
+WORKDIR /app
+COPY --from=build /out/coast-monitoring /app/coast-monitoring
 
 EXPOSE 8090
 
-CMD ["/pb/pocketbase", "serve", "--http=0.0.0.0:8090"]
+CMD ["/app/coast-monitoring"]
