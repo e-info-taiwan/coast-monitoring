@@ -16,11 +16,16 @@ type Config struct {
 	GoogleClientSecret  string
 	GoogleRedirectURL   string
 	BootstrapAdminEmail string
+	SecureCookies       bool
 	AdminAllowedOrigins []string
 	AppAllowedOrigins   []string
 }
 
 func Load() (Config, error) {
+	secureCookies, err := boolEnv("SECURE_COOKIES", true)
+	if err != nil {
+		return Config{}, err
+	}
 	cfg := Config{
 		HTTPAddr:          env("HTTP_ADDR", ":8090"),
 		DatabaseURL:       strings.TrimSpace(os.Getenv("DATABASE_URL")),
@@ -35,6 +40,7 @@ func Load() (Config, error) {
 		BootstrapAdminEmail: strings.ToLower(strings.TrimSpace(
 			os.Getenv("BOOTSTRAP_ADMIN_EMAIL"),
 		)),
+		SecureCookies:       secureCookies,
 		AdminAllowedOrigins: splitCSV(os.Getenv("ADMIN_ALLOWED_ORIGINS")),
 		AppAllowedOrigins:   splitCSV(os.Getenv("APP_ALLOWED_ORIGINS")),
 	}
@@ -54,6 +60,21 @@ func env(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func boolEnv(key string, fallback bool) (bool, error) {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(key)))
+	if value == "" {
+		return fallback, nil
+	}
+	switch value {
+	case "1", "true", "yes", "y", "on":
+		return true, nil
+	case "0", "false", "no", "n", "off":
+		return false, nil
+	default:
+		return false, errors.New(key + " must be a boolean")
+	}
 }
 
 func splitCSV(value string) []string {
