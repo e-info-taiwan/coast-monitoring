@@ -63,6 +63,7 @@ type UpdateUserRecord struct {
 
 type UserRepository interface {
 	ListUsers(ctx context.Context) ([]User, error)
+	GetUser(ctx context.Context, id uuid.UUID) (User, error)
 	CreateUser(ctx context.Context, input CreateUserRecord) (User, error)
 	UpdateUser(ctx context.Context, id uuid.UUID, input UpdateUserRecord) (User, error)
 	DisableUser(ctx context.Context, id uuid.UUID) error
@@ -109,6 +110,16 @@ func (s UserService) UpdateUser(ctx context.Context, actor policy.User, id uuid.
 			return User{}, err
 		}
 		record.PasswordHash = &hash
+	}
+	existing, err := s.Users.GetUser(ctx, id)
+	if err != nil {
+		return User{}, err
+	}
+	if record.GoogleSub == nil {
+		record.GoogleSub = existing.GoogleSub
+	}
+	if record.Status == policy.StatusActive && !existing.HasPassword && existing.GoogleSub == nil && record.PasswordHash == nil && record.GoogleSub == nil {
+		return User{}, fmt.Errorf("%w: active user requires password or google sub", ErrValidation)
 	}
 	return s.Users.UpdateUser(ctx, id, record)
 }

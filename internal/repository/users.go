@@ -41,6 +41,14 @@ func (r UserRepository) ListUsers(ctx context.Context) ([]service.User, error) {
 	return users, translateError(rows.Err())
 }
 
+func (r UserRepository) GetUser(ctx context.Context, id uuid.UUID) (service.User, error) {
+	return scanUser(r.db.QueryRow(ctx, `
+		SELECT id, email::text, name, role::text, status::text, google_sub, password_hash IS NOT NULL, created_at, updated_at
+		FROM users
+		WHERE id = $1
+	`, id))
+}
+
 func (r UserRepository) CreateUser(ctx context.Context, input service.CreateUserRecord) (service.User, error) {
 	return scanUser(r.db.QueryRow(ctx, `
 		INSERT INTO users (email, name, role, status, google_sub, password_hash)

@@ -157,6 +157,70 @@ func TestUpdateUserRejectsEmptyPassword(t *testing.T) {
 	}
 }
 
+func TestUpdateUserRejectsActivationWithoutLoginMechanism(t *testing.T) {
+	id := uuid.New()
+	repo := &fakeUserRepository{
+		users: []User{
+			{
+				ID:          id,
+				Email:       "volunteer@example.com",
+				Name:        "Volunteer",
+				Role:        policy.RoleVolunteer,
+				Status:      policy.StatusDisabled,
+				HasPassword: false,
+			},
+		},
+	}
+	svc := UserService{Users: repo}
+
+	_, err := svc.UpdateUser(context.Background(), activeAdmin(), id, UpdateUserInput{
+		Email:  "volunteer@example.com",
+		Name:   "Volunteer",
+		Role:   policy.RoleVolunteer,
+		Status: policy.StatusActive,
+	})
+
+	if !errors.Is(err, ErrValidation) {
+		t.Fatalf("UpdateUser error = %v, want %v", err, ErrValidation)
+	}
+}
+
+func TestUpdateUserAllowsActivationWithNewPassword(t *testing.T) {
+	id := uuid.New()
+	repo := &fakeUserRepository{
+		users: []User{
+			{
+				ID:          id,
+				Email:       "volunteer@example.com",
+				Name:        "Volunteer",
+				Role:        policy.RoleVolunteer,
+				Status:      policy.StatusDisabled,
+				HasPassword: false,
+			},
+		},
+	}
+	svc := UserService{Users: repo}
+	password := "password123"
+
+	user, err := svc.UpdateUser(context.Background(), activeAdmin(), id, UpdateUserInput{
+		Email:    "volunteer@example.com",
+		Name:     "Volunteer",
+		Role:     policy.RoleVolunteer,
+		Status:   policy.StatusActive,
+		Password: &password,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUser error = %v", err)
+	}
+
+	if user.Status != policy.StatusActive {
+		t.Fatalf("updated status = %q, want %q", user.Status, policy.StatusActive)
+	}
+	if !user.HasPassword {
+		t.Fatal("updated user HasPassword = false, want true")
+	}
+}
+
 func TestDisabledActorCannotListUsers(t *testing.T) {
 	svc := UserService{Users: &fakeUserRepository{}}
 	actor := activeAdmin()
@@ -188,6 +252,15 @@ func (r *fakeUserRepository) ListUsers(ctx context.Context) ([]User, error) {
 	return append([]User(nil), r.users...), nil
 }
 
+func (r *fakeUserRepository) GetUser(ctx context.Context, id uuid.UUID) (User, error) {
+	for _, user := range r.users {
+		if user.ID == id {
+			return user, nil
+		}
+	}
+	return User{}, ErrNotFound
+}
+
 func (r *fakeUserRepository) CreateUser(ctx context.Context, input CreateUserRecord) (User, error) {
 	r.created = input
 	user := User{
@@ -212,6 +285,18 @@ func (r *fakeUserRepository) UpdateUser(ctx context.Context, id uuid.UUID, input
 		Status:      input.Status,
 		GoogleSub:   input.GoogleSub,
 		HasPassword: input.PasswordHash != nil && *input.PasswordHash != "",
+	}
+	for i, existing := range r.users {
+		if existing.ID == id {
+			if input.GoogleSub == nil {
+				user.GoogleSub = existing.GoogleSub
+			}
+			if input.PasswordHash == nil {
+				user.HasPassword = existing.HasPassword
+			}
+			r.users[i] = user
+			break
+		}
 	}
 	return user, nil
 }
