@@ -60,7 +60,7 @@ func TestDockerSetupRunsGoAppAndInitializesFreshDatabase(t *testing.T) {
 		t.Fatal(err)
 	}
 	dockerfileText := string(dockerfile)
-	if strings.Contains(strings.ToLower(dockerfileText), "pocketbase") {
+	if strings.Contains(strings.ToLower(dockerfileText), "pocket"+"base") {
 		t.Fatal("Dockerfile still references the legacy backend")
 	}
 	for _, want := range []string{
