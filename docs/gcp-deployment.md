@@ -58,9 +58,10 @@ gcloud run deploy coast-monitoring \
   --image REGION-docker.pkg.dev/PROJECT/REPOSITORY/coast-monitoring:TAG \
   --region REGION \
   --allow-unauthenticated \
+  --port 8090 \
   --min-instances 0 \
   --max-instances 2 \
   --concurrency 20
 ```
 
-Set environment variables and secret references in the same deployment command or through the Cloud Run console.
+Set environment variables and secret references in the same deployment command or through the Cloud Run console. The container currently listens on `8090`; if you change `HTTP_ADDR`, keep the Cloud Run container port and the application listen port aligned.
