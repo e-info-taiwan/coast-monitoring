@@ -39,6 +39,35 @@ type SessionAuthenticator interface {
 	GetUserByValidSession(ctx context.Context, sessionTokenHash, csrfTokenHash []byte) (policy.User, error)
 }
 
+type LoginAttemptRecord struct {
+	Email   string
+	IP      string
+	Success bool
+}
+
+type LoginAttemptRepository interface {
+	RecordLoginAttempt(ctx context.Context, input LoginAttemptRecord) error
+}
+
+type OAuthState struct {
+	ID           uuid.UUID
+	RedirectPath string
+	ExpiresAt    time.Time
+	CreatedAt    time.Time
+	ConsumedAt   *time.Time
+}
+
+type CreateOAuthStateRecord struct {
+	StateHash    []byte
+	RedirectPath string
+	ExpiresAt    time.Time
+}
+
+type OAuthStateRepository interface {
+	CreateOAuthState(ctx context.Context, input CreateOAuthStateRecord) (OAuthState, error)
+	ConsumeOAuthState(ctx context.Context, stateHash []byte, now time.Time) (OAuthState, error)
+}
+
 type LoginUser struct {
 	ID           uuid.UUID
 	Email        string
@@ -54,6 +83,7 @@ type AuthUserRepository interface {
 	FindLoginUserByGoogleSub(ctx context.Context, googleSub string) (LoginUser, error)
 	AttachGoogleSub(ctx context.Context, userID uuid.UUID, googleSub string) (LoginUser, error)
 	AnyAdminExists(ctx context.Context) (bool, error)
+	CreateBootstrapAdmin(ctx context.Context, input CreateUserRecord) (LoginUser, error)
 }
 
 type AuthService struct {
@@ -107,4 +137,28 @@ func (s AuthService) AttachGoogleSub(ctx context.Context, userID uuid.UUID, goog
 
 func (s AuthService) AnyAdminExists(ctx context.Context) (bool, error) {
 	return s.Users.AnyAdminExists(ctx)
+}
+
+func (s AuthService) CreateBootstrapAdmin(ctx context.Context, email, name, googleSub string) (LoginUser, error) {
+	if strings.TrimSpace(name) == "" {
+		name = email
+	}
+	record, err := validateCreateUserInput(CreateUserInput{
+		Email:     email,
+		Name:      name,
+		Role:      policy.RoleAdmin,
+		Status:    policy.StatusActive,
+		GoogleSub: &googleSub,
+	})
+	if err != nil {
+		return LoginUser{}, err
+	}
+	exists, err := s.Users.AnyAdminExists(ctx)
+	if err != nil {
+		return LoginUser{}, err
+	}
+	if exists {
+		return LoginUser{}, ErrConflict
+	}
+	return s.Users.CreateBootstrapAdmin(ctx, record)
 }

@@ -110,6 +110,14 @@ func (r UserRepository) AnyAdminExists(ctx context.Context) (bool, error) {
 	return exists, translateError(err)
 }
 
+func (r UserRepository) CreateBootstrapAdmin(ctx context.Context, input service.CreateUserRecord) (service.LoginUser, error) {
+	return scanLoginUser(r.db.QueryRow(ctx, `
+		INSERT INTO users (email, name, role, status, google_sub, password_hash)
+		VALUES ($1, $2, 'admin', 'active', $3, NULL)
+		RETURNING id, email::text, name, role::text, status::text, google_sub, COALESCE(password_hash, '')
+	`, input.Email, input.Name, input.GoogleSub))
+}
+
 type userScanner interface {
 	Scan(dest ...any) error
 }

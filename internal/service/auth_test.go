@@ -177,6 +177,40 @@ func TestAnyAdminExistsDelegates(t *testing.T) {
 	}
 }
 
+func TestCreateBootstrapAdminCreatesFirstActiveAdmin(t *testing.T) {
+	repo := &fakeAuthUserRepository{loginUser: LoginUser{ID: uuid.New(), Email: "admin@example.com"}}
+	svc := AuthService{Users: repo}
+
+	_, err := svc.CreateBootstrapAdmin(context.Background(), " Admin@Example.COM ", " Admin ", " google-sub ")
+	if err != nil {
+		t.Fatalf("CreateBootstrapAdmin error = %v", err)
+	}
+
+	if repo.created.Email != "admin@example.com" {
+		t.Fatalf("created email = %q, want normalized email", repo.created.Email)
+	}
+	if repo.created.Name != "Admin" {
+		t.Fatalf("created name = %q, want trimmed name", repo.created.Name)
+	}
+	if repo.created.Role != policy.RoleAdmin || repo.created.Status != policy.StatusActive {
+		t.Fatalf("created role/status = %s/%s, want active admin", repo.created.Role, repo.created.Status)
+	}
+	if repo.created.GoogleSub == nil || *repo.created.GoogleSub != "google-sub" {
+		t.Fatalf("created google sub = %v, want google-sub", repo.created.GoogleSub)
+	}
+}
+
+func TestCreateBootstrapAdminRejectsWhenAdminExists(t *testing.T) {
+	repo := &fakeAuthUserRepository{anyAdminExists: true}
+	svc := AuthService{Users: repo}
+
+	_, err := svc.CreateBootstrapAdmin(context.Background(), "admin@example.com", "Admin", "google-sub")
+
+	if !errors.Is(err, ErrConflict) {
+		t.Fatalf("CreateBootstrapAdmin error = %v, want %v", err, ErrConflict)
+	}
+}
+
 type fakeSessionAuthenticator struct {
 	user             policy.User
 	err              error
@@ -199,6 +233,7 @@ type fakeAuthUserRepository struct {
 	email          string
 	googleSub      string
 	userID         uuid.UUID
+	created        CreateUserRecord
 }
 
 func (r *fakeAuthUserRepository) FindLoginUserByEmail(ctx context.Context, email string) (LoginUser, error) {
@@ -219,4 +254,9 @@ func (r *fakeAuthUserRepository) AttachGoogleSub(ctx context.Context, userID uui
 
 func (r *fakeAuthUserRepository) AnyAdminExists(ctx context.Context) (bool, error) {
 	return r.anyAdminExists, nil
+}
+
+func (r *fakeAuthUserRepository) CreateBootstrapAdmin(ctx context.Context, input CreateUserRecord) (LoginUser, error) {
+	r.created = input
+	return r.loginUser, nil
 }
