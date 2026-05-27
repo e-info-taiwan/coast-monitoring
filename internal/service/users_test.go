@@ -141,19 +141,90 @@ func TestCreateUserTrimsGoogleSub(t *testing.T) {
 }
 
 func TestUpdateUserRejectsEmptyPassword(t *testing.T) {
-	svc := UserService{Users: &fakeUserRepository{}}
+	id := uuid.New()
+	svc := UserService{Users: &fakeUserRepository{users: []User{{
+		ID:          id,
+		Email:       "volunteer@example.com",
+		Name:        "Volunteer",
+		Role:        policy.RoleVolunteer,
+		Status:      policy.StatusActive,
+		HasPassword: true,
+	}}}}
 	password := " "
 
-	_, err := svc.UpdateUser(context.Background(), activeAdmin(), uuid.New(), UpdateUserInput{
-		Email:    "volunteer@example.com",
-		Name:     "Volunteer",
-		Role:     policy.RoleVolunteer,
-		Status:   policy.StatusActive,
+	_, err := svc.UpdateUser(context.Background(), activeAdmin(), id, UpdateUserInput{
 		Password: &password,
 	})
 
 	if !errors.Is(err, ErrValidation) {
 		t.Fatalf("UpdateUser error = %v, want %v", err, ErrValidation)
+	}
+}
+
+func TestUpdateUserPatchNameAndRoleSucceeds(t *testing.T) {
+	id := uuid.New()
+	repo := &fakeUserRepository{
+		users: []User{{
+			ID:          id,
+			Email:       "volunteer@example.com",
+			Name:        "Volunteer",
+			Role:        policy.RoleVolunteer,
+			Status:      policy.StatusActive,
+			HasPassword: true,
+		}},
+	}
+	svc := UserService{Users: repo}
+	name := " Updated Name "
+	role := policy.RoleAdmin
+
+	user, err := svc.UpdateUser(context.Background(), activeAdmin(), id, UpdateUserInput{
+		Name: &name,
+		Role: &role,
+	})
+	if err != nil {
+		t.Fatalf("UpdateUser error = %v", err)
+	}
+
+	if user.Name != "Updated Name" {
+		t.Fatalf("updated name = %q, want trimmed patched name", user.Name)
+	}
+	if user.Role != policy.RoleAdmin {
+		t.Fatalf("updated role = %q, want %q", user.Role, policy.RoleAdmin)
+	}
+	if user.Email != "volunteer@example.com" {
+		t.Fatalf("updated email = %q, want existing email preserved", user.Email)
+	}
+	if user.Status != policy.StatusActive {
+		t.Fatalf("updated status = %q, want existing status preserved", user.Status)
+	}
+}
+
+func TestUpdateUserNilFieldsPreserveExistingValues(t *testing.T) {
+	id := uuid.New()
+	googleSub := "google-sub"
+	repo := &fakeUserRepository{
+		users: []User{{
+			ID:          id,
+			Email:       "volunteer@example.com",
+			Name:        "Volunteer",
+			Role:        policy.RoleVolunteer,
+			Status:      policy.StatusActive,
+			GoogleSub:   &googleSub,
+			HasPassword: false,
+		}},
+	}
+	svc := UserService{Users: repo}
+
+	user, err := svc.UpdateUser(context.Background(), activeAdmin(), id, UpdateUserInput{})
+	if err != nil {
+		t.Fatalf("UpdateUser error = %v", err)
+	}
+
+	if user.Email != "volunteer@example.com" || user.Name != "Volunteer" || user.Role != policy.RoleVolunteer || user.Status != policy.StatusActive {
+		t.Fatalf("nil patch did not preserve existing user: %+v", user)
+	}
+	if user.GoogleSub == nil || *user.GoogleSub != googleSub {
+		t.Fatalf("nil GoogleSub patch = %v, want existing GoogleSub preserved", user.GoogleSub)
 	}
 }
 
@@ -172,12 +243,10 @@ func TestUpdateUserRejectsActivationWithoutLoginMechanism(t *testing.T) {
 		},
 	}
 	svc := UserService{Users: repo}
+	status := policy.StatusActive
 
 	_, err := svc.UpdateUser(context.Background(), activeAdmin(), id, UpdateUserInput{
-		Email:  "volunteer@example.com",
-		Name:   "Volunteer",
-		Role:   policy.RoleVolunteer,
-		Status: policy.StatusActive,
+		Status: &status,
 	})
 
 	if !errors.Is(err, ErrValidation) {
@@ -201,12 +270,10 @@ func TestUpdateUserAllowsActivationWithNewPassword(t *testing.T) {
 	}
 	svc := UserService{Users: repo}
 	password := "password123"
+	status := policy.StatusActive
 
 	user, err := svc.UpdateUser(context.Background(), activeAdmin(), id, UpdateUserInput{
-		Email:    "volunteer@example.com",
-		Name:     "Volunteer",
-		Role:     policy.RoleVolunteer,
-		Status:   policy.StatusActive,
+		Status:   &status,
 		Password: &password,
 	})
 	if err != nil {
@@ -241,6 +308,10 @@ func activeAdmin() policy.User {
 		Role:   policy.RoleAdmin,
 		Status: policy.StatusActive,
 	}
+}
+
+func stringPtr(value string) *string {
+	return &value
 }
 
 type fakeUserRepository struct {

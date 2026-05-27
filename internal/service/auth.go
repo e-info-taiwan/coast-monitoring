@@ -39,8 +39,26 @@ type SessionAuthenticator interface {
 	GetUserByValidSession(ctx context.Context, sessionTokenHash, csrfTokenHash []byte) (policy.User, error)
 }
 
+type LoginUser struct {
+	ID           uuid.UUID
+	Email        string
+	Name         string
+	Role         policy.Role
+	Status       policy.Status
+	GoogleSub    *string
+	PasswordHash string
+}
+
+type AuthUserRepository interface {
+	FindLoginUserByEmail(ctx context.Context, email string) (LoginUser, error)
+	FindLoginUserByGoogleSub(ctx context.Context, googleSub string) (LoginUser, error)
+	AttachGoogleSub(ctx context.Context, userID uuid.UUID, googleSub string) (LoginUser, error)
+	AnyAdminExists(ctx context.Context) (bool, error)
+}
+
 type AuthService struct {
 	Sessions SessionAuthenticator
+	Users    AuthUserRepository
 }
 
 func (s AuthService) AuthenticateSession(ctx context.Context, sessionToken, csrfToken string) (policy.User, error) {
@@ -61,4 +79,32 @@ func (s AuthService) AuthenticateSession(ctx context.Context, sessionToken, csrf
 		return policy.User{}, ErrUnauthorized
 	}
 	return user, nil
+}
+
+func (s AuthService) FindLoginUserByEmail(ctx context.Context, email string) (LoginUser, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
+	if email == "" {
+		return LoginUser{}, ErrValidation
+	}
+	return s.Users.FindLoginUserByEmail(ctx, email)
+}
+
+func (s AuthService) FindLoginUserByGoogleSub(ctx context.Context, googleSub string) (LoginUser, error) {
+	googleSub = strings.TrimSpace(googleSub)
+	if googleSub == "" {
+		return LoginUser{}, ErrValidation
+	}
+	return s.Users.FindLoginUserByGoogleSub(ctx, googleSub)
+}
+
+func (s AuthService) AttachGoogleSub(ctx context.Context, userID uuid.UUID, googleSub string) (LoginUser, error) {
+	googleSub = strings.TrimSpace(googleSub)
+	if userID == uuid.Nil || googleSub == "" {
+		return LoginUser{}, ErrValidation
+	}
+	return s.Users.AttachGoogleSub(ctx, userID, googleSub)
+}
+
+func (s AuthService) AnyAdminExists(ctx context.Context) (bool, error) {
+	return s.Users.AnyAdminExists(ctx)
 }

@@ -35,10 +35,10 @@ type CreateUserInput struct {
 }
 
 type UpdateUserInput struct {
-	Email     string
-	Name      string
-	Role      policy.Role
-	Status    policy.Status
+	Email     *string
+	Name      *string
+	Role      *policy.Role
+	Status    *policy.Status
 	GoogleSub *string
 	Password  *string
 }
@@ -96,10 +96,15 @@ func (s UserService) UpdateUser(ctx context.Context, actor policy.User, id uuid.
 	if !policy.CanUseAdminAPI(actor) {
 		return User{}, ErrForbidden
 	}
-	record, err := validateUpdateUserInput(input)
+	existing, err := s.Users.GetUser(ctx, id)
 	if err != nil {
 		return User{}, err
 	}
+	record, err := validateUpdateUserInput(existing, input)
+	if err != nil {
+		return User{}, err
+	}
+	hasNewPassword := false
 	if input.Password != nil {
 		password := strings.TrimSpace(*input.Password)
 		if password == "" {
@@ -110,15 +115,9 @@ func (s UserService) UpdateUser(ctx context.Context, actor policy.User, id uuid.
 			return User{}, err
 		}
 		record.PasswordHash = &hash
+		hasNewPassword = true
 	}
-	existing, err := s.Users.GetUser(ctx, id)
-	if err != nil {
-		return User{}, err
-	}
-	if record.GoogleSub == nil {
-		record.GoogleSub = existing.GoogleSub
-	}
-	if record.Status == policy.StatusActive && !existing.HasPassword && existing.GoogleSub == nil && record.PasswordHash == nil && record.GoogleSub == nil {
+	if record.Status == policy.StatusActive && !existing.HasPassword && !hasNewPassword && record.GoogleSub == nil {
 		return User{}, fmt.Errorf("%w: active user requires password or google sub", ErrValidation)
 	}
 	return s.Users.UpdateUser(ctx, id, record)
@@ -159,20 +158,39 @@ func validateCreateUserInput(input CreateUserInput) (CreateUserRecord, error) {
 	}, nil
 }
 
-func validateUpdateUserInput(input UpdateUserInput) (UpdateUserRecord, error) {
-	email, name, err := validateUserFields(input.Email, input.Name, input.Role, input.Status)
+func validateUpdateUserInput(existing User, input UpdateUserInput) (UpdateUserRecord, error) {
+	email := existing.Email
+	if input.Email != nil {
+		email = *input.Email
+	}
+	name := existing.Name
+	if input.Name != nil {
+		name = *input.Name
+	}
+	role := existing.Role
+	if input.Role != nil {
+		role = *input.Role
+	}
+	status := existing.Status
+	if input.Status != nil {
+		status = *input.Status
+	}
+	email, name, err := validateUserFields(email, name, role, status)
 	if err != nil {
 		return UpdateUserRecord{}, err
 	}
-	googleSub, err := cleanOptionalString(input.GoogleSub, "google sub")
+	googleSub := existing.GoogleSub
+	if input.GoogleSub != nil {
+		googleSub, err = cleanOptionalString(input.GoogleSub, "google sub")
+	}
 	if err != nil {
 		return UpdateUserRecord{}, err
 	}
 	return UpdateUserRecord{
 		Email:     email,
 		Name:      name,
-		Role:      input.Role,
-		Status:    input.Status,
+		Role:      role,
+		Status:    status,
 		GoogleSub: googleSub,
 	}, nil
 }

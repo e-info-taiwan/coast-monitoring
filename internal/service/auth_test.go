@@ -101,6 +101,82 @@ func TestAuthenticateSessionRejectsDisabledUser(t *testing.T) {
 	}
 }
 
+func TestFindLoginUserByEmailNormalizesEmail(t *testing.T) {
+	repo := &fakeAuthUserRepository{loginUser: LoginUser{
+		ID:           uuid.New(),
+		Email:        "user@example.com",
+		Name:         "User",
+		Role:         policy.RoleVolunteer,
+		Status:       policy.StatusActive,
+		PasswordHash: "hash",
+	}}
+	svc := AuthService{Users: repo}
+
+	user, err := svc.FindLoginUserByEmail(context.Background(), " USER@EXAMPLE.COM ")
+	if err != nil {
+		t.Fatalf("FindLoginUserByEmail error = %v", err)
+	}
+
+	if user.PasswordHash != "hash" {
+		t.Fatal("login user did not include password hash for auth flow")
+	}
+	if repo.email != "user@example.com" {
+		t.Fatalf("repository email = %q, want normalized email", repo.email)
+	}
+}
+
+func TestFindLoginUserByGoogleSubTrimsSub(t *testing.T) {
+	repo := &fakeAuthUserRepository{loginUser: LoginUser{
+		ID:        uuid.New(),
+		Email:     "user@example.com",
+		Name:      "User",
+		Role:      policy.RoleVolunteer,
+		Status:    policy.StatusActive,
+		GoogleSub: stringPtr("google-sub"),
+	}}
+	svc := AuthService{Users: repo}
+
+	_, err := svc.FindLoginUserByGoogleSub(context.Background(), " google-sub ")
+	if err != nil {
+		t.Fatalf("FindLoginUserByGoogleSub error = %v", err)
+	}
+
+	if repo.googleSub != "google-sub" {
+		t.Fatalf("repository google sub = %q, want trimmed value", repo.googleSub)
+	}
+}
+
+func TestAttachGoogleSubTrimsSub(t *testing.T) {
+	userID := uuid.New()
+	repo := &fakeAuthUserRepository{loginUser: LoginUser{ID: userID}}
+	svc := AuthService{Users: repo}
+
+	_, err := svc.AttachGoogleSub(context.Background(), userID, " google-sub ")
+	if err != nil {
+		t.Fatalf("AttachGoogleSub error = %v", err)
+	}
+
+	if repo.userID != userID {
+		t.Fatalf("repository userID = %s, want %s", repo.userID, userID)
+	}
+	if repo.googleSub != "google-sub" {
+		t.Fatalf("repository google sub = %q, want trimmed value", repo.googleSub)
+	}
+}
+
+func TestAnyAdminExistsDelegates(t *testing.T) {
+	repo := &fakeAuthUserRepository{anyAdminExists: true}
+	svc := AuthService{Users: repo}
+
+	exists, err := svc.AnyAdminExists(context.Background())
+	if err != nil {
+		t.Fatalf("AnyAdminExists error = %v", err)
+	}
+	if !exists {
+		t.Fatal("AnyAdminExists = false, want true")
+	}
+}
+
 type fakeSessionAuthenticator struct {
 	user             policy.User
 	err              error
@@ -115,4 +191,32 @@ func (r *fakeSessionAuthenticator) GetUserByValidSession(ctx context.Context, se
 		return policy.User{}, r.err
 	}
 	return r.user, nil
+}
+
+type fakeAuthUserRepository struct {
+	loginUser      LoginUser
+	anyAdminExists bool
+	email          string
+	googleSub      string
+	userID         uuid.UUID
+}
+
+func (r *fakeAuthUserRepository) FindLoginUserByEmail(ctx context.Context, email string) (LoginUser, error) {
+	r.email = email
+	return r.loginUser, nil
+}
+
+func (r *fakeAuthUserRepository) FindLoginUserByGoogleSub(ctx context.Context, googleSub string) (LoginUser, error) {
+	r.googleSub = googleSub
+	return r.loginUser, nil
+}
+
+func (r *fakeAuthUserRepository) AttachGoogleSub(ctx context.Context, userID uuid.UUID, googleSub string) (LoginUser, error) {
+	r.userID = userID
+	r.googleSub = googleSub
+	return r.loginUser, nil
+}
+
+func (r *fakeAuthUserRepository) AnyAdminExists(ctx context.Context) (bool, error) {
+	return r.anyAdminExists, nil
 }

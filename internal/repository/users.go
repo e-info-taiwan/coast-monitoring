@@ -79,6 +79,37 @@ func (r UserRepository) DisableUser(ctx context.Context, id uuid.UUID) error {
 	return requireRowsAffected(tag, err)
 }
 
+func (r UserRepository) FindLoginUserByEmail(ctx context.Context, email string) (service.LoginUser, error) {
+	return scanLoginUser(r.db.QueryRow(ctx, `
+		SELECT id, email::text, name, role::text, status::text, google_sub, COALESCE(password_hash, '')
+		FROM users
+		WHERE email = $1
+	`, email))
+}
+
+func (r UserRepository) FindLoginUserByGoogleSub(ctx context.Context, googleSub string) (service.LoginUser, error) {
+	return scanLoginUser(r.db.QueryRow(ctx, `
+		SELECT id, email::text, name, role::text, status::text, google_sub, COALESCE(password_hash, '')
+		FROM users
+		WHERE google_sub = $1
+	`, googleSub))
+}
+
+func (r UserRepository) AttachGoogleSub(ctx context.Context, userID uuid.UUID, googleSub string) (service.LoginUser, error) {
+	return scanLoginUser(r.db.QueryRow(ctx, `
+		UPDATE users
+		SET google_sub = $2, updated_at = now()
+		WHERE id = $1
+		RETURNING id, email::text, name, role::text, status::text, google_sub, COALESCE(password_hash, '')
+	`, userID, googleSub))
+}
+
+func (r UserRepository) AnyAdminExists(ctx context.Context) (bool, error) {
+	var exists bool
+	err := r.db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM users WHERE role = 'admin')`).Scan(&exists)
+	return exists, translateError(err)
+}
+
 type userScanner interface {
 	Scan(dest ...any) error
 }
@@ -100,6 +131,30 @@ func scanUser(row userScanner) (service.User, error) {
 		&user.UpdatedAt,
 	); err != nil {
 		return service.User{}, translateError(err)
+	}
+	user.Role = policy.Role(role)
+	user.Status = policy.Status(status)
+	if googleSub.Valid {
+		user.GoogleSub = &googleSub.String
+	}
+	return user, nil
+}
+
+func scanLoginUser(row userScanner) (service.LoginUser, error) {
+	var user service.LoginUser
+	var role string
+	var status string
+	var googleSub sql.NullString
+	if err := row.Scan(
+		&user.ID,
+		&user.Email,
+		&user.Name,
+		&role,
+		&status,
+		&googleSub,
+		&user.PasswordHash,
+	); err != nil {
+		return service.LoginUser{}, translateError(err)
 	}
 	user.Role = policy.Role(role)
 	user.Status = policy.Status(status)
