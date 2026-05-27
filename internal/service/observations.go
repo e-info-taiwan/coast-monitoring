@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -51,7 +52,9 @@ type ObservationRepository interface {
 	GetObservation(ctx context.Context, id uuid.UUID) (Observation, error)
 	CreateObservation(ctx context.Context, input ObservationRecord) (Observation, error)
 	UpdateObservation(ctx context.Context, id uuid.UUID, input ObservationRecord) (Observation, error)
+	UpdateObservationForObserver(ctx context.Context, id uuid.UUID, expectedObserverID uuid.UUID, input ObservationRecord) (Observation, error)
 	DeleteObservation(ctx context.Context, id uuid.UUID) error
+	DeleteObservationForObserver(ctx context.Context, id uuid.UUID, expectedObserverID uuid.UUID) error
 }
 
 type ObservationService struct {
@@ -90,11 +93,7 @@ func (s ObservationService) Create(ctx context.Context, actor policy.User, input
 }
 
 func (s ObservationService) Update(ctx context.Context, actor policy.User, id uuid.UUID, input ObservationInput) (Observation, error) {
-	existing, err := s.Observations.GetObservation(ctx, id)
-	if err != nil {
-		return Observation{}, err
-	}
-	if !policy.CanManageObservation(actor, existing.ObserverID) {
+	if !policy.CanUseAppAPI(actor) {
 		return Observation{}, ErrForbidden
 	}
 	if actor.Role == policy.RoleVolunteer && input.ObserverID != actor.ID {
@@ -104,18 +103,28 @@ func (s ObservationService) Update(ctx context.Context, actor policy.User, id uu
 	if err != nil {
 		return Observation{}, err
 	}
-	return s.Observations.UpdateObservation(ctx, id, record)
+	if actor.Role == policy.RoleAdmin {
+		return s.Observations.UpdateObservation(ctx, id, record)
+	}
+	observation, err := s.Observations.UpdateObservationForObserver(ctx, id, actor.ID, record)
+	if errors.Is(err, ErrNotFound) {
+		return Observation{}, ErrForbidden
+	}
+	return observation, err
 }
 
 func (s ObservationService) Delete(ctx context.Context, actor policy.User, id uuid.UUID) error {
-	existing, err := s.Observations.GetObservation(ctx, id)
-	if err != nil {
-		return err
-	}
-	if !policy.CanManageObservation(actor, existing.ObserverID) {
+	if !policy.CanUseAppAPI(actor) {
 		return ErrForbidden
 	}
-	return s.Observations.DeleteObservation(ctx, id)
+	if actor.Role == policy.RoleAdmin {
+		return s.Observations.DeleteObservation(ctx, id)
+	}
+	err := s.Observations.DeleteObservationForObserver(ctx, id, actor.ID)
+	if errors.Is(err, ErrNotFound) {
+		return ErrForbidden
+	}
+	return err
 }
 
 func validateObservationInput(actor policy.User, input ObservationInput) (ObservationRecord, error) {

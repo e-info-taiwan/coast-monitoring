@@ -3,6 +3,7 @@ package repository
 import (
 	"errors"
 	"fmt"
+	"strings"
 
 	"coast-monitoring/internal/service"
 
@@ -25,6 +26,9 @@ func translateError(err error) error {
 		case "23503":
 			return fmt.Errorf("%w: %s", service.ErrInvalidReference, pgErr.Message)
 		case "23514":
+			return fmt.Errorf("%w: %s", service.ErrValidation, pgErr.Message)
+		}
+		if strings.HasPrefix(pgErr.Code, "22") {
 			return fmt.Errorf("%w: %s", service.ErrValidation, pgErr.Message)
 		}
 	}

@@ -18,6 +18,8 @@ func TestTranslateErrorMapsPostgresCodes(t *testing.T) {
 		{name: "unique violation", code: "23505", want: service.ErrConflict},
 		{name: "foreign key violation", code: "23503", want: service.ErrInvalidReference},
 		{name: "check violation", code: "23514", want: service.ErrValidation},
+		{name: "invalid text representation", code: "22P02", want: service.ErrValidation},
+		{name: "data exception class", code: "22001", want: service.ErrValidation},
 	}
 
 	for _, tt := range tests {

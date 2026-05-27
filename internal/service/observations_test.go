@@ -77,6 +77,9 @@ func TestAdminCanUpdateAnyObservation(t *testing.T) {
 	if updated.Notes != "updated notes" {
 		t.Fatalf("updated notes = %q, want trimmed notes", updated.Notes)
 	}
+	if repo.scopedUpdate {
+		t.Fatal("admin update used owner-scoped update path")
+	}
 }
 
 func TestVolunteerCannotUpdateOtherUsersObservation(t *testing.T) {
@@ -110,6 +113,105 @@ func TestVolunteerCannotUpdateOtherUsersObservation(t *testing.T) {
 	}
 	if repo.updated {
 		t.Fatal("repository update was called for forbidden volunteer update")
+	}
+}
+
+func TestDisabledActorCannotUpdateObservationAndDoesNotLookup(t *testing.T) {
+	repo := &fakeObservationRepository{}
+	svc := ObservationService{Observations: repo}
+	actor := policy.User{
+		ID:     uuid.New(),
+		Email:  "admin@example.com",
+		Name:   "Admin",
+		Role:   policy.RoleAdmin,
+		Status: policy.StatusDisabled,
+	}
+
+	_, err := svc.Update(context.Background(), actor, uuid.New(), validObservationInput(uuid.New()))
+
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("Update error = %v, want %v", err, ErrForbidden)
+	}
+	if repo.got || repo.updated || repo.scopedUpdate {
+		t.Fatal("repository was called for disabled actor update")
+	}
+}
+
+func TestDisabledActorCannotDeleteObservationAndDoesNotLookup(t *testing.T) {
+	repo := &fakeObservationRepository{}
+	svc := ObservationService{Observations: repo}
+	actor := policy.User{
+		ID:     uuid.New(),
+		Email:  "admin@example.com",
+		Name:   "Admin",
+		Role:   policy.RoleAdmin,
+		Status: policy.StatusDisabled,
+	}
+
+	err := svc.Delete(context.Background(), actor, uuid.New())
+
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("Delete error = %v, want %v", err, ErrForbidden)
+	}
+	if repo.got || repo.deleted || repo.scopedDelete {
+		t.Fatal("repository was called for disabled actor delete")
+	}
+}
+
+func TestVolunteerUpdateUsesOwnerScopedWritePath(t *testing.T) {
+	volunteerID := uuid.New()
+	observationID := uuid.New()
+	repo := &fakeObservationRepository{
+		observations: []Observation{{ID: observationID, ObserverID: volunteerID, Count: 1}},
+	}
+	svc := ObservationService{Observations: repo}
+	actor := policy.User{
+		ID:     volunteerID,
+		Email:  "volunteer@example.com",
+		Name:   "Volunteer",
+		Role:   policy.RoleVolunteer,
+		Status: policy.StatusActive,
+	}
+
+	_, err := svc.Update(context.Background(), actor, observationID, validObservationInput(volunteerID))
+	if err != nil {
+		t.Fatalf("Update error = %v", err)
+	}
+
+	if repo.got {
+		t.Fatal("volunteer update performed pre-write lookup")
+	}
+	if repo.updated {
+		t.Fatal("volunteer update used id-only update path")
+	}
+	if !repo.scopedUpdate || repo.expectedObserverID != volunteerID {
+		t.Fatalf("volunteer update did not use scoped path with observer %s", volunteerID)
+	}
+}
+
+func TestVolunteerUpdateFailsIfOwnershipChangesBeforeWrite(t *testing.T) {
+	volunteerID := uuid.New()
+	otherID := uuid.New()
+	observationID := uuid.New()
+	repo := &fakeObservationRepository{
+		observations: []Observation{{ID: observationID, ObserverID: otherID, Count: 1}},
+	}
+	svc := ObservationService{Observations: repo}
+	actor := policy.User{
+		ID:     volunteerID,
+		Email:  "volunteer@example.com",
+		Name:   "Volunteer",
+		Role:   policy.RoleVolunteer,
+		Status: policy.StatusActive,
+	}
+
+	_, err := svc.Update(context.Background(), actor, observationID, validObservationInput(volunteerID))
+
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("Update error = %v, want %v", err, ErrForbidden)
+	}
+	if repo.updated {
+		t.Fatal("volunteer update used id-only update path")
 	}
 }
 
@@ -197,10 +299,111 @@ func TestVolunteerCannotDeleteOtherUsersObservation(t *testing.T) {
 	}
 }
 
+func TestAdminCanDeleteAnyObservation(t *testing.T) {
+	observationID := uuid.New()
+	repo := &fakeObservationRepository{
+		observations: []Observation{{ID: observationID, ObserverID: uuid.New()}},
+	}
+	svc := ObservationService{Observations: repo}
+
+	err := svc.Delete(context.Background(), activePolicyAdmin(), observationID)
+	if err != nil {
+		t.Fatalf("Delete error = %v", err)
+	}
+
+	if !repo.deleted {
+		t.Fatal("admin delete did not use id-only delete path")
+	}
+	if repo.scopedDelete {
+		t.Fatal("admin delete used owner-scoped delete path")
+	}
+}
+
+func TestVolunteerDeleteUsesOwnerScopedWritePath(t *testing.T) {
+	volunteerID := uuid.New()
+	observationID := uuid.New()
+	repo := &fakeObservationRepository{
+		observations: []Observation{{ID: observationID, ObserverID: volunteerID}},
+	}
+	svc := ObservationService{Observations: repo}
+	actor := policy.User{
+		ID:     volunteerID,
+		Email:  "volunteer@example.com",
+		Name:   "Volunteer",
+		Role:   policy.RoleVolunteer,
+		Status: policy.StatusActive,
+	}
+
+	err := svc.Delete(context.Background(), actor, observationID)
+	if err != nil {
+		t.Fatalf("Delete error = %v", err)
+	}
+
+	if repo.got {
+		t.Fatal("volunteer delete performed pre-write lookup")
+	}
+	if repo.deleted {
+		t.Fatal("volunteer delete used id-only delete path")
+	}
+	if !repo.scopedDelete || repo.expectedObserverID != volunteerID {
+		t.Fatalf("volunteer delete did not use scoped path with observer %s", volunteerID)
+	}
+}
+
+func TestVolunteerDeleteFailsIfOwnershipChangesBeforeWrite(t *testing.T) {
+	volunteerID := uuid.New()
+	otherID := uuid.New()
+	observationID := uuid.New()
+	repo := &fakeObservationRepository{
+		observations: []Observation{{ID: observationID, ObserverID: otherID}},
+	}
+	svc := ObservationService{Observations: repo}
+	actor := policy.User{
+		ID:     volunteerID,
+		Email:  "volunteer@example.com",
+		Name:   "Volunteer",
+		Role:   policy.RoleVolunteer,
+		Status: policy.StatusActive,
+	}
+
+	err := svc.Delete(context.Background(), actor, observationID)
+
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("Delete error = %v, want %v", err, ErrForbidden)
+	}
+	if repo.deleted {
+		t.Fatal("volunteer delete used id-only delete path")
+	}
+}
+
+func validObservationInput(observerID uuid.UUID) ObservationInput {
+	return ObservationInput{
+		ObservedOn: time.Date(2026, 5, 27, 0, 0, 0, 0, time.UTC),
+		LocationID: uuid.New(),
+		SpeciesID:  uuid.New(),
+		ObserverID: observerID,
+		Count:      1,
+	}
+}
+
+func activePolicyAdmin() policy.User {
+	return policy.User{
+		ID:     uuid.New(),
+		Email:  "admin@example.com",
+		Name:   "Admin",
+		Role:   policy.RoleAdmin,
+		Status: policy.StatusActive,
+	}
+}
+
 type fakeObservationRepository struct {
-	observations []Observation
-	updated      bool
-	deleted      bool
+	observations       []Observation
+	got                bool
+	updated            bool
+	deleted            bool
+	scopedUpdate       bool
+	scopedDelete       bool
+	expectedObserverID uuid.UUID
 }
 
 func (r *fakeObservationRepository) ListObservations(ctx context.Context) ([]Observation, error) {
@@ -218,6 +421,7 @@ func (r *fakeObservationRepository) ListObservationsByObserver(ctx context.Conte
 }
 
 func (r *fakeObservationRepository) GetObservation(ctx context.Context, id uuid.UUID) (Observation, error) {
+	r.got = true
 	for _, observation := range r.observations {
 		if observation.ID == id {
 			return observation, nil
@@ -257,7 +461,36 @@ func (r *fakeObservationRepository) UpdateObservation(ctx context.Context, id uu
 	return Observation{}, ErrNotFound
 }
 
+func (r *fakeObservationRepository) UpdateObservationForObserver(ctx context.Context, id uuid.UUID, expectedObserverID uuid.UUID, input ObservationRecord) (Observation, error) {
+	r.scopedUpdate = true
+	r.expectedObserverID = expectedObserverID
+	for i, observation := range r.observations {
+		if observation.ID == id && observation.ObserverID == expectedObserverID {
+			observation.ObservedOn = input.ObservedOn
+			observation.LocationID = input.LocationID
+			observation.SpeciesID = input.SpeciesID
+			observation.ObserverID = input.ObserverID
+			observation.Count = input.Count
+			observation.Notes = input.Notes
+			r.observations[i] = observation
+			return observation, nil
+		}
+	}
+	return Observation{}, ErrNotFound
+}
+
 func (r *fakeObservationRepository) DeleteObservation(ctx context.Context, id uuid.UUID) error {
 	r.deleted = true
 	return nil
+}
+
+func (r *fakeObservationRepository) DeleteObservationForObserver(ctx context.Context, id uuid.UUID, expectedObserverID uuid.UUID) error {
+	r.scopedDelete = true
+	r.expectedObserverID = expectedObserverID
+	for _, observation := range r.observations {
+		if observation.ID == id && observation.ObserverID == expectedObserverID {
+			return nil
+		}
+	}
+	return ErrNotFound
 }

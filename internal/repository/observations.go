@@ -50,8 +50,22 @@ func (r ObservationRepository) UpdateObservation(ctx context.Context, id uuid.UU
 	`, id, input.ObservedOn, input.LocationID, input.SpeciesID, input.ObserverID, input.Count, input.Notes, input.ActorID))
 }
 
+func (r ObservationRepository) UpdateObservationForObserver(ctx context.Context, id uuid.UUID, expectedObserverID uuid.UUID, input service.ObservationRecord) (service.Observation, error) {
+	return scanObservation(r.db.QueryRow(ctx, `
+		UPDATE observations
+		SET observed_on = $3, location_id = $4, species_id = $5, observer_id = $6, count = $7, notes = $8, updated_by = $9, updated_at = now()
+		WHERE id = $1 AND observer_id = $2
+		RETURNING id, observed_on, location_id, species_id, observer_id, count, notes, created_at, updated_at
+	`, id, expectedObserverID, input.ObservedOn, input.LocationID, input.SpeciesID, input.ObserverID, input.Count, input.Notes, input.ActorID))
+}
+
 func (r ObservationRepository) DeleteObservation(ctx context.Context, id uuid.UUID) error {
 	tag, err := r.db.Exec(ctx, `DELETE FROM observations WHERE id = $1`, id)
+	return requireRowsAffected(tag, err)
+}
+
+func (r ObservationRepository) DeleteObservationForObserver(ctx context.Context, id uuid.UUID, expectedObserverID uuid.UUID) error {
+	tag, err := r.db.Exec(ctx, `DELETE FROM observations WHERE id = $1 AND observer_id = $2`, id, expectedObserverID)
 	return requireRowsAffected(tag, err)
 }
 
