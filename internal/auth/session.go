@@ -4,9 +4,14 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 )
 
 func GenerateToken(byteCount int) (string, error) {
+	if byteCount <= 0 {
+		return "", errors.New("byteCount must be positive")
+	}
+
 	raw := make([]byte, byteCount)
 	if _, err := rand.Read(raw); err != nil {
 		return "", err
