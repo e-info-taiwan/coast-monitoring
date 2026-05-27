@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/base64"
 	"testing"
@@ -10,7 +11,7 @@ func TestTokenHashIsStableAndNotRawToken(t *testing.T) {
 	token := "session-token"
 	hash1 := HashToken(token)
 	hash2 := HashToken(token)
-	if string(hash1) != string(hash2) {
+	if !bytes.Equal(hash1, hash2) {
 		t.Fatal("token hash should be stable")
 	}
 	if string(hash1) == token {
@@ -20,7 +21,7 @@ func TestTokenHashIsStableAndNotRawToken(t *testing.T) {
 		t.Fatalf("token hash length = %d, want %d", len(hash1), sha256.Size)
 	}
 	expected := sha256.Sum256([]byte(token))
-	if string(hash1) != string(expected[:]) {
+	if !bytes.Equal(hash1, expected[:]) {
 		t.Fatal("token hash should equal SHA-256 sum")
 	}
 }
@@ -59,6 +60,16 @@ func TestGenerateTokenRejectsNegativeByteCount(t *testing.T) {
 	token, err := GenerateToken(-1)
 	if err == nil {
 		t.Fatal("expected error for negative byte count")
+	}
+	if token != "" {
+		t.Fatalf("token = %q, want empty string", token)
+	}
+}
+
+func TestGenerateTokenRejectsLowEntropyByteCount(t *testing.T) {
+	token, err := GenerateToken(1)
+	if err == nil {
+		t.Fatal("expected error for low entropy byte count")
 	}
 	if token != "" {
 		t.Fatalf("token = %q, want empty string", token)

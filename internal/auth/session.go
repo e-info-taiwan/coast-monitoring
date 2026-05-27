@@ -7,9 +7,11 @@ import (
 	"errors"
 )
 
+const MinTokenBytes = 32
+
 func GenerateToken(byteCount int) (string, error) {
-	if byteCount <= 0 {
-		return "", errors.New("byteCount must be positive")
+	if byteCount < MinTokenBytes {
+		return "", errors.New("byteCount must be at least 32")
 	}
 
 	raw := make([]byte, byteCount)
