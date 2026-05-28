@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -196,6 +197,61 @@ func TestPasswordLoginDoesNotTrimPasswordBeforeVerification(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want %d; body %s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+}
+
+func TestPasswordLoginRejectsTooManyFailedAttempts(t *testing.T) {
+	passwordHash, err := auth.HashPassword("correct-password")
+	if err != nil {
+		t.Fatalf("HashPassword error = %v", err)
+	}
+	authSvc := &fakeHTTPAuthService{loginUserByEmail: service.LoginUser{
+		ID:           uuid.New(),
+		Email:        "user@example.com",
+		Name:         "User",
+		Role:         policy.RoleVolunteer,
+		Status:       policy.StatusActive,
+		PasswordHash: passwordHash,
+	}}
+	attempts := &fakeHTTPLoginAttemptRecorder{recentFailedCount: 10}
+	handlers := testAuthHandlers()
+	handlers.Auth = authSvc
+	handlers.LoginAttempts = attempts
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(`{"email":"user@example.com","password":"correct-password"}`))
+	req.RemoteAddr = "192.0.2.10:12345"
+	rec := httptest.NewRecorder()
+
+	handlers.PasswordLogin(rec, req)
+
+	if rec.Code != http.StatusTooManyRequests {
+		t.Fatalf("status = %d, want %d; body %s", rec.Code, http.StatusTooManyRequests, rec.Body.String())
+	}
+	if authSvc.email != "" {
+		t.Fatalf("user lookup ran for throttled login: %q", authSvc.email)
+	}
+	if !attempts.counted || attempts.countEmail != "user@example.com" || attempts.countIP != "192.0.2.10" {
+		t.Fatalf("failed-attempt count not checked: %+v", attempts)
+	}
+	if len(attempts.records) != 1 || attempts.records[0].Success {
+		t.Fatalf("login attempts = %+v, want throttled failed attempt recorded", attempts.records)
+	}
+}
+
+func TestPasswordLoginRejectsLargeRequestBody(t *testing.T) {
+	handlers := testAuthHandlers()
+	largePassword := strings.Repeat("x", 2<<20)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/auth/password",
+		bytes.NewBufferString(`{"email":"user@example.com","password":"`+largePassword+`"}`),
+	)
+	rec := httptest.NewRecorder()
+
+	handlers.PasswordLogin(rec, req)
+
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusRequestEntityTooLarge)
 	}
 }
 
@@ -761,12 +817,25 @@ func (s *fakeHTTPSessionStore) RevokeSession(ctx context.Context, id uuid.UUID) 
 }
 
 type fakeHTTPLoginAttemptRecorder struct {
-	records []service.LoginAttemptRecord
+	records           []service.LoginAttemptRecord
+	recentFailedCount int
+	counted           bool
+	countEmail        string
+	countIP           string
+	countSince        time.Time
 }
 
 func (r *fakeHTTPLoginAttemptRecorder) RecordLoginAttempt(ctx context.Context, input service.LoginAttemptRecord) error {
 	r.records = append(r.records, input)
 	return nil
+}
+
+func (r *fakeHTTPLoginAttemptRecorder) CountRecentFailedLoginAttempts(ctx context.Context, email, ip string, since time.Time) (int, error) {
+	r.counted = true
+	r.countEmail = email
+	r.countIP = ip
+	r.countSince = since
+	return r.recentFailedCount, nil
 }
 
 type fakeHTTPOAuthStateStore struct {

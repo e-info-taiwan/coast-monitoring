@@ -1,7 +1,6 @@
 const API_BASE = `${window.location.origin}/api`
 const ADMIN_API_BASE = `${API_BASE}/admin`
 const APP_API_BASE = `${API_BASE}/app`
-const LOCAL_DEV_EMAIL = "hcchien@gmail.com"
 
 const $ = (selector) => document.querySelector(selector)
 
@@ -540,10 +539,6 @@ function renderProviderList() {
 
 function renderPasswordLogin() {
   passwordLoginForm?.classList.remove("hidden")
-  const emailInput = passwordLoginForm?.querySelector("#dev-email")
-  if (emailInput && !emailInput.value) {
-    emailInput.value = LOCAL_DEV_EMAIL
-  }
 }
 
 async function refreshSession() {

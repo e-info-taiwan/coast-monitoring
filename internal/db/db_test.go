@@ -66,8 +66,9 @@ func TestDockerSetupRunsGoAppAndInitializesFreshDatabase(t *testing.T) {
 	for _, want := range []string{
 		"RUN go test ./...",
 		"RUN go build -o /out/coast-monitoring ./cmd/server",
-		"COPY migrations /app/migrations",
-		"COPY web /app/web",
+		"COPY --chown=app:app migrations /app/migrations",
+		"COPY --chown=app:app web /app/web",
+		"USER app",
 		`CMD ["/app/coast-monitoring"]`,
 	} {
 		if !strings.Contains(dockerfileText, want) {

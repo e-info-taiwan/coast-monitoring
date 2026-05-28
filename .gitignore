@@ -4,3 +4,6 @@
 .env
 .DS_Store
 .worktrees/
+.claude/
+pb_data/
+pocketbase-local

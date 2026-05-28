@@ -24,6 +24,9 @@ const (
 	defaultSessionTTL        = 7 * 24 * time.Hour
 	defaultOAuthStateTTL     = 10 * time.Minute
 	oauthStateCookiePath     = "/api/auth/google"
+	defaultLoginAttemptLimit = 10
+	defaultLoginAttemptTTL   = 15 * time.Minute
+	maxAuthRequestBodyBytes  = 16 << 10
 )
 
 type AuthHandlers struct {
@@ -44,6 +47,8 @@ type AuthHandlerConfig struct {
 	SecureCookies       *bool
 	SessionTTL          time.Duration
 	OAuthStateTTL       time.Duration
+	LoginAttemptLimit   int
+	LoginAttemptTTL     time.Duration
 	BootstrapAdminEmail string
 }
 
@@ -64,6 +69,7 @@ type SessionStore interface {
 
 type LoginAttemptRecorder interface {
 	RecordLoginAttempt(ctx context.Context, input service.LoginAttemptRecord) error
+	CountRecentFailedLoginAttempts(ctx context.Context, email, ip string, since time.Time) (int, error)
 }
 
 type OAuthStateStore interface {
@@ -124,14 +130,14 @@ func (h *AuthHandlers) PasswordLogin(w http.ResponseWriter, r *http.Request) {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid login request")
+	if !decodeAuthJSON(w, r, &input) {
 		return
 	}
 	email := normalizeEmail(input.Email)
 	password := input.Password
+	ip := remoteIP(r)
 	if email == "" || password == "" {
-		_ = h.recordLoginAttempt(r.Context(), email, remoteIP(r), false)
+		_ = h.recordLoginAttempt(r.Context(), email, ip, false)
 		writeError(w, http.StatusBadRequest, "email and password are required")
 		return
 	}
@@ -139,11 +145,21 @@ func (h *AuthHandlers) PasswordLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "auth is not configured")
 		return
 	}
+	throttled, err := h.tooManyFailedLoginAttempts(r.Context(), email, ip)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "login attempt lookup failed")
+		return
+	}
+	if throttled {
+		_ = h.recordLoginAttempt(r.Context(), email, ip, false)
+		writeError(w, http.StatusTooManyRequests, "too many login attempts")
+		return
+	}
 
 	user, err := h.Auth.FindLoginUserByEmail(r.Context(), email)
 	if err != nil {
 		if errors.Is(err, service.ErrNotFound) || errors.Is(err, service.ErrValidation) {
-			_ = h.recordLoginAttempt(r.Context(), email, remoteIP(r), false)
+			_ = h.recordLoginAttempt(r.Context(), email, ip, false)
 			writeError(w, http.StatusUnauthorized, "invalid email or password")
 			return
 		}
@@ -151,12 +167,12 @@ func (h *AuthHandlers) PasswordLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if user.Status != policy.StatusActive || !auth.VerifyPassword(user.PasswordHash, password) {
-		_ = h.recordLoginAttempt(r.Context(), email, remoteIP(r), false)
+		_ = h.recordLoginAttempt(r.Context(), email, ip, false)
 		writeError(w, http.StatusUnauthorized, "invalid email or password")
 		return
 	}
 
-	if err := h.recordLoginAttempt(r.Context(), email, remoteIP(r), true); err != nil {
+	if err := h.recordLoginAttempt(r.Context(), email, ip, true); err != nil {
 		writeError(w, http.StatusInternalServerError, "login attempt recording failed")
 		return
 	}
@@ -364,6 +380,35 @@ func (h *AuthHandlers) recordLoginAttempt(ctx context.Context, email, ip string,
 	})
 }
 
+func (h *AuthHandlers) tooManyFailedLoginAttempts(ctx context.Context, email, ip string) (bool, error) {
+	if h == nil || h.LoginAttempts == nil {
+		return false, nil
+	}
+	cfg := h.config()
+	if cfg.LoginAttemptLimit <= 0 || cfg.LoginAttemptTTL <= 0 {
+		return false, nil
+	}
+	count, err := h.LoginAttempts.CountRecentFailedLoginAttempts(ctx, email, ip, h.now().Add(-cfg.LoginAttemptTTL))
+	if err != nil {
+		return false, err
+	}
+	return count >= cfg.LoginAttemptLimit, nil
+}
+
+func decodeAuthJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxAuthRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return false
+		}
+		writeError(w, http.StatusBadRequest, "invalid login request")
+		return false
+	}
+	return true
+}
+
 func (h *AuthHandlers) setCookie(w http.ResponseWriter, name, value string, httpOnly bool, expires time.Time) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
@@ -451,6 +496,12 @@ func (h *AuthHandlers) config() AuthHandlerConfig {
 	if cfg.OAuthStateTTL <= 0 {
 		cfg.OAuthStateTTL = defaults.OAuthStateTTL
 	}
+	if cfg.LoginAttemptLimit <= 0 {
+		cfg.LoginAttemptLimit = defaults.LoginAttemptLimit
+	}
+	if cfg.LoginAttemptTTL <= 0 {
+		cfg.LoginAttemptTTL = defaults.LoginAttemptTTL
+	}
 	cfg.BootstrapAdminEmail = normalizeEmail(cfg.BootstrapAdminEmail)
 	return cfg
 }
@@ -465,6 +516,8 @@ func defaultAuthHandlerConfig() AuthHandlerConfig {
 		SecureCookies:     &secure,
 		SessionTTL:        defaultSessionTTL,
 		OAuthStateTTL:     defaultOAuthStateTTL,
+		LoginAttemptLimit: defaultLoginAttemptLimit,
+		LoginAttemptTTL:   defaultLoginAttemptTTL,
 	}
 }
 

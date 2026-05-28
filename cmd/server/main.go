@@ -46,13 +46,21 @@ func main() {
 		log.Print("google auth disabled: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, or GOOGLE_REDIRECT_URL is missing")
 	}
 
-	server := &http.Server{
-		Addr:    cfg.HTTPAddr,
-		Handler: newServerHandler(cfg, pool, googleProvider),
-	}
+	server := newHTTPServer(cfg.HTTPAddr, newServerHandler(cfg, pool, googleProvider))
 
 	log.Printf("listening on %s", cfg.HTTPAddr)
 	log.Fatal(server.ListenAndServe())
+}
+
+func newHTTPServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
 }
 
 func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider httpx.GoogleOAuthProvider) http.Handler {

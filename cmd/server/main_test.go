@@ -58,6 +58,22 @@ func TestGoogleConfigComplete(t *testing.T) {
 	}
 }
 
+func TestNewHTTPServerSetsDefensiveTimeouts(t *testing.T) {
+	server := newHTTPServer(":0", http.NewServeMux())
+	if server.ReadHeaderTimeout <= 0 {
+		t.Fatal("ReadHeaderTimeout is not configured")
+	}
+	if server.ReadTimeout <= 0 {
+		t.Fatal("ReadTimeout is not configured")
+	}
+	if server.WriteTimeout <= 0 {
+		t.Fatal("WriteTimeout is not configured")
+	}
+	if server.IdleTimeout <= 0 {
+		t.Fatal("IdleTimeout is not configured")
+	}
+}
+
 type stubGoogleProvider struct{}
 
 func (p *stubGoogleProvider) AuthCodeURL(state string) string {
