@@ -16,6 +16,9 @@ Primary Google references:
 - Cloud Build config schema: https://cloud.google.com/build/docs/build-config-file-schema
 - Cloud Build deploy to Cloud Run: https://cloud.google.com/build/docs/deploying-builds/deploy-cloud-run
 - Cloud SQL PostgreSQL from Cloud Run: https://cloud.google.com/sql/docs/postgres/connect-run
+- Google OAuth web server flow: https://developers.google.com/identity/protocols/oauth2/web-server
+- Google OAuth app verification: https://support.google.com/cloud/answer/13463073
+- Google OAuth app audience and testing status: https://support.google.com/cloud/answer/15549945
 - `.gcloudignore`: https://cloud.google.com/sdk/gcloud/reference/topic/gcloudignore
 
 ## Deployment Files In This Repo
@@ -147,13 +150,54 @@ done
 
 ## Google OAuth Setup
 
-Create an OAuth web client in Google Cloud Console.
+Google login requires OAuth setup before first admin bootstrap.
+
+Create or select a Google Cloud project, then configure the OAuth consent screen / Google Auth Platform:
+
+- App name.
+- User support email.
+- Developer contact email.
+- User type:
+  - `Internal`: only users in the same Google Workspace / Cloud Identity organization can authorize.
+  - `External`: Gmail and other external Google accounts can authorize.
+
+The service uses Google only for sign-in and ID-token verification with basic identity scopes:
+
+```text
+openid email profile
+```
+
+These are non-sensitive sign-in scopes. Google OAuth app verification is normally not required unless you add sensitive or restricted Google API scopes later.
+
+Create an OAuth 2.0 Client ID:
+
+- Application type: `Web application`.
+- Authorized redirect URI: the production callback URL.
 
 Authorized redirect URI:
 
 ```text
 https://SERVICE_URL/api/auth/google/callback
 ```
+
+If you use a custom domain, add the custom-domain callback too:
+
+```text
+https://CUSTOM_DOMAIN/api/auth/google/callback
+```
+
+The redirect URI must exactly match the `GOOGLE_REDIRECT_URL` environment variable, including scheme, host, path, case, and trailing slash. A mismatch causes Google's `redirect_uri_mismatch` error.
+
+OAuth publishing status:
+
+- `Testing`: add the first admin email and any trial users as test users before login. Google limits testing projects to up to 100 test users.
+- `In production`: use this when real external users should be able to authorize the app.
+
+Store the OAuth values in Cloud Run as:
+
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_REDIRECT_URL`
 
 After the first deploy, update `GOOGLE_REDIRECT_URL` to the final Cloud Run or custom-domain URL. If you use a custom domain, update the OAuth client and redeploy the service with the custom-domain callback URL.
 
