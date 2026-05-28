@@ -77,3 +77,31 @@ func TestDockerSetupRunsGoAppAndInitializesFreshDatabase(t *testing.T) {
 		}
 	}
 }
+
+func TestCloudBuildConfigBuildsPushesAndDeploysToCloudRun(t *testing.T) {
+	t.Parallel()
+
+	config, err := os.ReadFile("../../cloudbuild.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(config)
+	required := []string{
+		"name: gcr.io/cloud-builders/docker",
+		"name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim",
+		"golang:1.23-alpine",
+		"go test -count=1 ./...",
+		"${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPOSITORY}/${_IMAGE_NAME}:${SHORT_SHA}",
+		"--add-cloudsql-instances=${_CLOUDSQL_INSTANCE}",
+		"--update-secrets=DATABASE_URL=${_DATABASE_URL_SECRET},SESSION_SECRET=${_SESSION_SECRET_SECRET},GOOGLE_CLIENT_SECRET=${_GOOGLE_CLIENT_SECRET_SECRET}",
+		"--min-instances=${_MIN_INSTANCES}",
+		"--max-instances=${_MAX_INSTANCES}",
+		"--concurrency=${_CONCURRENCY}",
+		"REGIONAL_USER_OWNED_BUCKET",
+	}
+	for _, want := range required {
+		if !strings.Contains(text, want) {
+			t.Fatalf("cloudbuild.yaml missing %q", want)
+		}
+	}
+}

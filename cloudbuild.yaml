@@ -1,0 +1,76 @@
+substitutions:
+  _REGION: asia-east1
+  _SERVICE_NAME: coast-monitoring
+  _ARTIFACT_REPOSITORY: coast-monitoring
+  _IMAGE_NAME: coast-monitoring
+  _RUNTIME_SERVICE_ACCOUNT: coast-monitoring-run@${PROJECT_ID}.iam.gserviceaccount.com
+  _CLOUDSQL_INSTANCE: ${PROJECT_ID}:${_REGION}:coast-monitoring-db
+  _GOOGLE_CLIENT_ID: replace-with-google-client-id
+  _GOOGLE_REDIRECT_URL: https://SERVICE_URL/api/auth/google/callback
+  _BOOTSTRAP_ADMIN_EMAIL: admin@example.com
+  _ADMIN_ALLOWED_ORIGINS: https://SERVICE_URL
+  _APP_ALLOWED_ORIGINS: https://app.example.com
+  _DATABASE_URL_SECRET: coast-database-url:latest
+  _SESSION_SECRET_SECRET: coast-session-secret:latest
+  _GOOGLE_CLIENT_SECRET_SECRET: coast-google-client-secret:latest
+  _MIN_INSTANCES: "0"
+  _MAX_INSTANCES: "2"
+  _CONCURRENCY: "20"
+
+steps:
+  - id: test
+    name: golang:1.23-alpine
+    entrypoint: sh
+    args:
+      - -c
+      - go test -count=1 ./...
+
+  - id: build-image
+    name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPOSITORY}/${_IMAGE_NAME}:${SHORT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPOSITORY}/${_IMAGE_NAME}:latest
+      - .
+
+  - id: push-sha-image
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPOSITORY}/${_IMAGE_NAME}:${SHORT_SHA}
+
+  - id: push-latest-image
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPOSITORY}/${_IMAGE_NAME}:latest
+
+  - id: deploy-cloud-run
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - ${_SERVICE_NAME}
+      - --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPOSITORY}/${_IMAGE_NAME}:${SHORT_SHA}
+      - --region=${_REGION}
+      - --platform=managed
+      - --allow-unauthenticated
+      - --service-account=${_RUNTIME_SERVICE_ACCOUNT}
+      - --add-cloudsql-instances=${_CLOUDSQL_INSTANCE}
+      - --min-instances=${_MIN_INSTANCES}
+      - --max-instances=${_MAX_INSTANCES}
+      - --concurrency=${_CONCURRENCY}
+      - --set-env-vars=^|^GOOGLE_CLIENT_ID=${_GOOGLE_CLIENT_ID}|GOOGLE_REDIRECT_URL=${_GOOGLE_REDIRECT_URL}|BOOTSTRAP_ADMIN_EMAIL=${_BOOTSTRAP_ADMIN_EMAIL}|ADMIN_ALLOWED_ORIGINS=${_ADMIN_ALLOWED_ORIGINS}|APP_ALLOWED_ORIGINS=${_APP_ALLOWED_ORIGINS}|SECURE_COOKIES=true
+      - --update-secrets=DATABASE_URL=${_DATABASE_URL_SECRET},SESSION_SECRET=${_SESSION_SECRET_SECRET},GOOGLE_CLIENT_SECRET=${_GOOGLE_CLIENT_SECRET_SECRET}
+
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPOSITORY}/${_IMAGE_NAME}:${SHORT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_ARTIFACT_REPOSITORY}/${_IMAGE_NAME}:latest
+
+options:
+  dynamicSubstitutions: true
+  substitutionOption: ALLOW_LOOSE
+  defaultLogsBucketBehavior: REGIONAL_USER_OWNED_BUCKET

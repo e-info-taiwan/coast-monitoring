@@ -13,6 +13,8 @@ Primary Google references:
 - Cloud Run container contract: https://cloud.google.com/run/docs/container-contract
 - Cloud Run source deploy: https://cloud.google.com/run/docs/deploying-source-code
 - Cloud Run secrets: https://cloud.google.com/run/docs/configuring/services/secrets
+- Cloud Build config schema: https://cloud.google.com/build/docs/build-config-file-schema
+- Cloud Build deploy to Cloud Run: https://cloud.google.com/build/docs/deploying-builds/deploy-cloud-run
 - Cloud SQL PostgreSQL from Cloud Run: https://cloud.google.com/sql/docs/postgres/connect-run
 - `.gcloudignore`: https://cloud.google.com/sdk/gcloud/reference/topic/gcloudignore
 
@@ -21,6 +23,7 @@ Primary Google references:
 Required for Cloud Run:
 
 - `Dockerfile`: builds and runs the Go service, includes `migrations/` and `web/`, and runs as the non-root `app` user.
+- `cloudbuild.yaml`: Cloud Build pipeline for test, Docker build, Artifact Registry push, and Cloud Run deploy.
 - `.gcloudignore`: prevents local-only files such as `.env`, `pb_data/`, `.claude/`, and worktrees from being uploaded by `gcloud run deploy --source .`.
 - `.env.example`: documents runtime configuration names and local defaults.
 - `deploy/cloud-run.env.yaml.example`: non-secret Cloud Run environment variable template.
@@ -64,9 +67,15 @@ REGION="asia-east1"
 INSTANCE="coast-monitoring-db"
 DB_NAME="coast_monitoring"
 DB_USER="coast_app"
+AR_REPOSITORY="coast-monitoring"
 
 gcloud config set project "$PROJECT_ID"
 gcloud services enable run.googleapis.com cloudbuild.googleapis.com sqladmin.googleapis.com secretmanager.googleapis.com artifactregistry.googleapis.com
+
+gcloud artifacts repositories create "$AR_REPOSITORY" \
+  --repository-format=docker \
+  --location="$REGION" \
+  --description="Coast Monitoring Docker images"
 
 gcloud sql instances create "$INSTANCE" \
   --database-version=POSTGRES_16 \
@@ -210,6 +219,45 @@ gcloud run services update "$SERVICE" \
 ```
 
 Do the first admin bootstrap only after this OAuth callback URL is correct.
+
+## Deploy With Cloud Build
+
+`cloudbuild.yaml` runs the same deployment as a repeatable build:
+
+1. Run `go test -count=1 ./...`.
+2. Build the Docker image.
+3. Push both `SHORT_SHA` and `latest` tags to Artifact Registry.
+4. Deploy the `SHORT_SHA` image to Cloud Run.
+
+Manual submit:
+
+```bash
+gcloud builds submit \
+  --region "$REGION" \
+  --config cloudbuild.yaml \
+  --substitutions "_REGION=$REGION,_SERVICE_NAME=coast-monitoring,_ARTIFACT_REPOSITORY=$AR_REPOSITORY,_IMAGE_NAME=coast-monitoring,_RUNTIME_SERVICE_ACCOUNT=$RUNTIME_SA,_CLOUDSQL_INSTANCE=$INSTANCE_CONNECTION_NAME,_GOOGLE_CLIENT_ID=replace-with-client-id,_GOOGLE_REDIRECT_URL=https://REAL_SERVICE_URL/api/auth/google/callback,_BOOTSTRAP_ADMIN_EMAIL=admin@example.com,_ADMIN_ALLOWED_ORIGINS=https://REAL_SERVICE_URL,_APP_ALLOWED_ORIGINS=https://app.example.com"
+```
+
+Secret substitutions default to:
+
+```text
+_DATABASE_URL_SECRET=coast-database-url:latest
+_SESSION_SECRET_SECRET=coast-session-secret:latest
+_GOOGLE_CLIENT_SECRET_SECRET=coast-google-client-secret:latest
+```
+
+Override them in the same `--substitutions` list if you use different Secret Manager names.
+
+For continuous deployment, create a Cloud Build trigger that points at `cloudbuild.yaml` on the `main` branch. Configure trigger substitutions with the same values as the manual submit command. The trigger region should match the Cloud Run deployment region.
+
+Cloud Build's service account needs enough permissions to build, push, and deploy:
+
+- `roles/artifactregistry.writer` for the Artifact Registry repository.
+- `roles/run.admin` to deploy Cloud Run.
+- `roles/iam.serviceAccountUser` on the Cloud Run runtime service account.
+- Permission to read source/log buckets as required by your Cloud Build setup.
+
+The Cloud Run runtime service account still needs `roles/cloudsql.client` and `roles/secretmanager.secretAccessor` as described above.
 
 ## First Admin Bootstrap
 

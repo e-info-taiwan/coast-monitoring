@@ -90,4 +90,4 @@ node --check web/public/location.js
 
 ## Deployment
 
-See [docs/gcp-deployment.md](docs/gcp-deployment.md) for the Cloud Run, Cloud SQL PostgreSQL, and Secret Manager deployment notes.
+See [docs/gcp-deployment.md](docs/gcp-deployment.md) for the Cloud Run, Cloud Build, Cloud SQL PostgreSQL, and Secret Manager deployment notes.
