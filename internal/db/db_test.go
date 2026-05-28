@@ -68,6 +68,7 @@ func TestDockerSetupRunsGoAppAndInitializesFreshDatabase(t *testing.T) {
 		"RUN go build -o /out/coast-monitoring ./cmd/server",
 		"COPY --chown=app:app migrations /app/migrations",
 		"COPY --chown=app:app web /app/web",
+		"EXPOSE 8080",
 		"USER app",
 		`CMD ["/app/coast-monitoring"]`,
 	} {

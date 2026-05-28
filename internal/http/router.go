@@ -23,11 +23,19 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	r.Get("/api/session", deps.AuthHandlers.Session)
-	r.Post("/api/auth/password", deps.AuthHandlers.PasswordLogin)
-	r.Get("/api/auth/google/start", deps.AuthHandlers.GoogleStart)
-	r.Get("/api/auth/google/callback", deps.AuthHandlers.GoogleCallback)
-	r.Post("/api/auth/logout", deps.AuthHandlers.Logout)
+	r.Group(func(r chi.Router) {
+		r.Use(deps.CORS(appendOrigins(deps.AdminAllowedOrigins, deps.AppAllowedOrigins)))
+		r.Options("/api/session", noContent)
+		r.Get("/api/session", deps.AuthHandlers.Session)
+		r.Options("/api/auth/password", noContent)
+		r.Post("/api/auth/password", deps.AuthHandlers.PasswordLogin)
+		r.Options("/api/auth/google/start", noContent)
+		r.Get("/api/auth/google/start", deps.AuthHandlers.GoogleStart)
+		r.Options("/api/auth/google/callback", noContent)
+		r.Get("/api/auth/google/callback", deps.AuthHandlers.GoogleCallback)
+		r.Options("/api/auth/logout", noContent)
+		r.Post("/api/auth/logout", deps.AuthHandlers.Logout)
+	})
 	r.Route("/api/admin", func(r chi.Router) {
 		r.Use(deps.CORS(deps.AdminAllowedOrigins))
 		r.Use(deps.RequireSession)
@@ -71,6 +79,17 @@ func NewRouter(deps Dependencies) http.Handler {
 		adminFiles.ServeHTTP(w, r)
 	})
 	return r
+}
+
+func noContent(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func appendOrigins(left, right []string) []string {
+	merged := make([]string, 0, len(left)+len(right))
+	merged = append(merged, left...)
+	merged = append(merged, right...)
+	return merged
 }
 
 func staticDir(path string) string {

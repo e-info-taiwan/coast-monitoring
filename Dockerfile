@@ -19,7 +19,7 @@ COPY --from=build --chown=app:app /out/coast-monitoring /app/coast-monitoring
 COPY --chown=app:app migrations /app/migrations
 COPY --chown=app:app web /app/web
 
-EXPOSE 8090
+EXPOSE 8080
 
 USER app
 

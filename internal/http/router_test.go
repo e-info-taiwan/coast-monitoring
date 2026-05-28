@@ -127,6 +127,49 @@ func TestAppCORSUsesAppAllowedOrigins(t *testing.T) {
 	}
 }
 
+func TestAuthCORSUsesAdminAndAppAllowedOrigins(t *testing.T) {
+	for _, origin := range []string{"https://admin.example.com", "https://app.example.com"} {
+		req := httptest.NewRequest(http.MethodOptions, "/api/session", nil)
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+		rec := httptest.NewRecorder()
+
+		NewRouter(Dependencies{
+			AdminAllowedOrigins: []string{"https://admin.example.com"},
+			AppAllowedOrigins:   []string{"https://app.example.com"},
+		}).ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusNoContent {
+			t.Fatalf("origin %s: status = %d, want %d", origin, rec.Code, http.StatusNoContent)
+		}
+		if got := rec.Header().Get("Access-Control-Allow-Origin"); got != origin {
+			t.Fatalf("origin %s: Access-Control-Allow-Origin = %q", origin, got)
+		}
+		if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "true" {
+			t.Fatalf("origin %s: Access-Control-Allow-Credentials = %q, want true", origin, got)
+		}
+	}
+}
+
+func TestAuthCORSRejectsUnknownOrigin(t *testing.T) {
+	req := httptest.NewRequest(http.MethodOptions, "/api/session", nil)
+	req.Header.Set("Origin", "https://unknown.example.com")
+	req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Dependencies{
+		AdminAllowedOrigins: []string{"https://admin.example.com"},
+		AppAllowedOrigins:   []string{"https://app.example.com"},
+	}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusForbidden)
+	}
+	if got := rec.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Fatalf("Access-Control-Allow-Origin = %q, want empty", got)
+	}
+}
+
 func TestAdminOPTIONSWithoutOriginRequiresSession(t *testing.T) {
 	req := httptest.NewRequest(http.MethodOptions, "/api/admin/users", nil)
 	rec := httptest.NewRecorder()

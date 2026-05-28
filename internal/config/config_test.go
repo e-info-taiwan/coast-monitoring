@@ -14,6 +14,7 @@ func TestLoadDefaults(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/coast?sslmode=disable")
 	t.Setenv("SESSION_SECRET", "01234567890123456789012345678901")
 	t.Setenv("HTTP_ADDR", "")
+	t.Setenv("PORT", "")
 	t.Setenv("SESSION_COOKIE_NAME", "")
 	t.Setenv("CSRF_HEADER_NAME", "")
 	cfg, err := Load()
@@ -28,6 +29,21 @@ func TestLoadDefaults(t *testing.T) {
 	}
 	if cfg.CSRFHeaderName != "X-CSRF-Token" {
 		t.Fatalf("CSRFHeaderName = %q, want X-CSRF-Token", cfg.CSRFHeaderName)
+	}
+}
+
+func TestLoadUsesCloudRunPortWhenHTTPAddrIsUnset(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://user:pass@localhost:5432/coast?sslmode=disable")
+	t.Setenv("SESSION_SECRET", "01234567890123456789012345678901")
+	t.Setenv("HTTP_ADDR", "")
+	t.Setenv("PORT", "8080")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.HTTPAddr != ":8080" {
+		t.Fatalf("HTTPAddr = %q, want :8080", cfg.HTTPAddr)
 	}
 }
 

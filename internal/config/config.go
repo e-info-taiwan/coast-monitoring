@@ -27,7 +27,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	cfg := Config{
-		HTTPAddr:          env("HTTP_ADDR", ":8090"),
+		HTTPAddr:          httpAddr(),
 		DatabaseURL:       strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		SessionSecret:     strings.TrimSpace(os.Getenv("SESSION_SECRET")),
 		SessionCookieName: env("SESSION_COOKIE_NAME", "coast_session"),
@@ -60,6 +60,20 @@ func env(key, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func httpAddr() string {
+	if value := env("HTTP_ADDR", ""); value != "" {
+		return value
+	}
+	port := strings.TrimSpace(os.Getenv("PORT"))
+	if port == "" {
+		return ":8090"
+	}
+	if strings.HasPrefix(port, ":") {
+		return port
+	}
+	return ":" + port
 }
 
 func boolEnv(key string, fallback bool) (bool, error) {

@@ -20,9 +20,12 @@ docker compose up -d db
 
 The local Docker Compose database applies `migrations/000001_init.sql` automatically when Postgres creates a fresh `postgres_data` volume. If you are using an existing volume or an external database, apply the SQL in `migrations/000001_init.sql` manually before starting the Go server.
 
-4. Run the service:
+4. Load the environment and run the service:
 
 ```bash
+set -a
+source .env
+set +a
 go run ./cmd/server
 ```
 
@@ -44,7 +47,7 @@ The common local and deployment settings are:
 
 - `DATABASE_URL`: PostgreSQL connection string.
 - `SESSION_SECRET`: random deployment secret required by service configuration; use at least 32 characters.
-- `HTTP_ADDR`: listen address, usually `:8090`.
+- `HTTP_ADDR`: local listen address, usually `:8090`. On Cloud Run, leave this unset and let the service use the injected `PORT`.
 - `GOOGLE_CLIENT_ID`: Google OAuth client ID.
 - `GOOGLE_CLIENT_SECRET`: Google OAuth client secret.
 - `GOOGLE_REDIRECT_URL`: Google OAuth callback URL, for example `http://127.0.0.1:8090/api/auth/google/callback`.
@@ -66,6 +69,8 @@ For the first deployment or a new local database, set `BOOTSTRAP_ADMIN_EMAIL` to
 - `/api/admin` powers the admin UI and includes user management, catalog management, observation management, and audit log access. These routes require an active admin session.
 - `/api/app` is for the app-facing frontend and volunteer workflows. It does not expose user management data.
 - Unknown `/api/*` routes return `404` instead of falling back to the static admin UI.
+
+See [docs/api.md](docs/api.md) for request/response examples and the FE server integration pattern.
 
 ## Testing
 
