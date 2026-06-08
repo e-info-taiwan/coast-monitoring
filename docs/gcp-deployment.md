@@ -30,7 +30,7 @@ Required for Cloud Run:
 - `.gcloudignore`: prevents local-only files such as `.env`, `pb_data/`, `.claude/`, and worktrees from being uploaded by `gcloud run deploy --source .`.
 - `.env.example`: documents runtime configuration names and local defaults.
 - `deploy/cloud-run.env.yaml.example`: non-secret Cloud Run environment variable template.
-- `migrations/000001_init.sql`: initial PostgreSQL schema. Apply this before routing production traffic.
+- `migrations/000001_init.sql`: initial PostgreSQL schema and seed data. The service runs checked-in SQL migrations at startup before serving web traffic.
 - `docs/gcp-deployment.md`: this deployment runbook.
 - `docs/api.md`: API usage for the admin UI and app-facing frontend.
 
@@ -94,7 +94,7 @@ For a very small cost-sensitive deployment, start with the smallest acceptable C
 
 ## Apply The Initial Migration
 
-Apply `migrations/000001_init.sql` once for a new database before sending production traffic to the service.
+The service runs checked-in SQL migrations at startup before serving web traffic. For a completely empty database, the first Cloud Run instance can initialize the schema and seed data automatically. For production change control, you can still pre-apply the same SQL once for a new database before routing traffic.
 
 Using Cloud SQL Auth Proxy locally or in Cloud Shell:
 

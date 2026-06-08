@@ -20,6 +20,8 @@ docker compose up -d db
 
 The local Docker Compose database applies `migrations/000001_init.sql` automatically when Postgres creates a fresh `postgres_data` volume. If you are using an existing volume or an external database, apply the SQL in `migrations/000001_init.sql` manually before starting the Go server.
 
+The Go server also runs checked-in SQL migrations at startup before serving web traffic. For a completely empty database, starting the service is enough to create the schema and seed data. Pre-applying SQL remains useful for production change control, but the web UI does not need a separate manual init button.
+
 4. Load the environment and run the service:
 
 ```bash

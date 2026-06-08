@@ -16,6 +16,7 @@ import (
 type AppHandlers struct {
 	Catalog      AppCatalogService
 	Observations AppObservationService
+	ReefCheck    AppReefCheckService
 	Mutations    AdminMutationRunner
 }
 
@@ -29,6 +30,11 @@ type AppObservationService interface {
 	Create(ctx context.Context, actor policy.User, input service.ObservationInput) (service.Observation, error)
 	Update(ctx context.Context, actor policy.User, id uuid.UUID, input service.ObservationInput) (service.Observation, error)
 	Delete(ctx context.Context, actor policy.User, id uuid.UUID) error
+}
+
+type AppReefCheckService interface {
+	ListForApp(ctx context.Context, actor policy.User) ([]service.ReefCheckSurvey, error)
+	Create(ctx context.Context, actor policy.User, input service.ReefCheckSurveyInput) (service.ReefCheckSurvey, error)
 }
 
 func (h *AppHandlers) Session(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +98,59 @@ func (h *AppHandlers) ListObservations(w http.ResponseWriter, r *http.Request) {
 		response = append(response, appObservationResponse(observation))
 	}
 	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *AppHandlers) ReefCheckConfig(w http.ResponseWriter, r *http.Request) {
+	_, ok := requireAppHandlerService(w, r, true)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, reefCheckConfigResponse())
+}
+
+func (h *AppHandlers) ListReefCheckSurveys(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireAppHandlerService(w, r, h != nil && h.ReefCheck != nil)
+	if !ok {
+		return
+	}
+	surveys, err := h.ReefCheck.ListForApp(r.Context(), actor)
+	if err != nil {
+		writeServiceError(w, err, "list reef check surveys failed")
+		return
+	}
+	response := make([]ReefCheckSurveyResponse, 0, len(surveys))
+	for _, survey := range surveys {
+		response = append(response, reefCheckSurveyResponse(survey))
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *AppHandlers) CreateReefCheckSurvey(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireAppHandlerService(w, r, h != nil && h.Mutations != nil)
+	if !ok {
+		return
+	}
+	input, decoded := decodeReefCheckSurveyInput(w, r)
+	if !decoded {
+		return
+	}
+	var response ReefCheckSurveyResponse
+	err := h.Mutations.RunAdminMutation(r.Context(), func(services AdminMutationServices) error {
+		if services.ReefCheck == nil || services.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		survey, err := services.ReefCheck.Create(r.Context(), actor, input)
+		if err != nil {
+			return err
+		}
+		response = reefCheckSurveyResponse(survey)
+		return writeAudit(r, services.AuditLogs, actor, repository.AuditActionCreate, "reef_check_surveys", survey.ID, nil, response)
+	})
+	if err != nil {
+		writeServiceError(w, err, "create reef check survey failed")
+		return
+	}
+	writeJSON(w, http.StatusCreated, response)
 }
 
 func (h *AppHandlers) CreateObservation(w http.ResponseWriter, r *http.Request) {
@@ -237,5 +296,191 @@ func appObservationResponse(observation service.Observation) AppObservationRespo
 		Notes:      observation.Notes,
 		CreatedAt:  formatTime(observation.CreatedAt),
 		UpdatedAt:  formatTime(observation.UpdatedAt),
+	}
+}
+
+func reefCheckConfigResponse() ReefCheckConfigResponse {
+	segments := service.ReefCheckDefaultSegments()
+	segmentResponses := make([]ReefCheckSegmentResponse, 0, len(segments))
+	for _, segment := range segments {
+		segmentResponses = append(segmentResponses, ReefCheckSegmentResponse{
+			Index:  segment.Index,
+			Label:  segment.Label,
+			StartM: segment.StartM,
+			EndM:   segment.EndM,
+		})
+	}
+	codes := service.ReefCheckSubstrateCodeCatalog()
+	codeResponses := make([]ReefCheckSubstrateCodeResponse, 0, len(codes))
+	for _, code := range codes {
+		codeResponses = append(codeResponses, ReefCheckSubstrateCodeResponse{
+			Code:               code.Code,
+			DisplayName:        code.DisplayName,
+			NormalizedCategory: code.NormalizedCategory,
+		})
+	}
+	metrics := service.ReefCheckMetricCatalog()
+	metricResponses := make([]ReefCheckMetricResponse, 0, len(metrics))
+	for _, metric := range metrics {
+		metricResponses = append(metricResponses, ReefCheckMetricResponse{
+			Module:      string(metric.Module),
+			Key:         metric.Key,
+			ChineseName: metric.ChineseName,
+			EnglishName: metric.EnglishName,
+			SizeClass:   metric.SizeClass,
+			SortOrder:   metric.SortOrder,
+		})
+	}
+	return ReefCheckConfigResponse{
+		Segments:        segmentResponses,
+		SubstrateCodes:  codeResponses,
+		Metrics:         metricResponses,
+		FishLengthModes: []string{string(service.ReefCheckFishLengthModeSeparate), string(service.ReefCheckFishLengthModeCombined)},
+	}
+}
+
+func decodeReefCheckSurveyInput(w http.ResponseWriter, r *http.Request) (service.ReefCheckSurveyInput, bool) {
+	var req SaveReefCheckSurveyRequest
+	if !decodeAdminJSON(w, r, &req) {
+		return service.ReefCheckSurveyInput{}, false
+	}
+	surveyDate, err := parseObservationDate(req.SurveyDate)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid surveyDate")
+		return service.ReefCheckSurveyInput{}, false
+	}
+	siteID := uuid.Nil
+	if strings.TrimSpace(req.SiteID) != "" {
+		siteID, err = uuid.Parse(strings.TrimSpace(req.SiteID))
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid siteId")
+			return service.ReefCheckSurveyInput{}, false
+		}
+	}
+	recorders, ok := decodeReefCheckRecorders(w, req.Recorders)
+	if !ok {
+		return service.ReefCheckSurveyInput{}, false
+	}
+	return service.ReefCheckSurveyInput{
+		SurveyDate: surveyDate,
+		SiteID:     siteID,
+		Site: service.ReefCheckSiteInput{
+			County:          req.Site.County,
+			LocationName:    req.Site.LocationName,
+			SiteName:        req.Site.SiteName,
+			SiteEnglishName: req.Site.SiteEnglishName,
+			Latitude:        req.Site.Latitude,
+			Longitude:       req.Site.Longitude,
+		},
+		DepthM:              req.DepthM,
+		CountryIsland:       req.CountryIsland,
+		TeamLeader:          req.TeamLeader,
+		SurveyTime:          req.SurveyTime,
+		Visibility:          req.Visibility,
+		Temperature:         req.Temperature,
+		GeneralComments:     req.GeneralComments,
+		SubstrateComments:   req.SubstrateComments,
+		RKCReason:           req.RKCReason,
+		RKCBleachingPercent: req.RKCBleachingPercent,
+		FishLengthMode:      service.ReefCheckFishLengthMode(req.FishLengthMode),
+		Recorders:           recorders,
+		Segments:            decodeReefCheckSegments(req.Segments),
+		SubstratePoints:     decodeSubstratePoints(req.SubstratePoints),
+		SubstrateBleaching:  decodeSubstrateBleaching(req.SubstrateBleaching),
+		MetricCounts:        decodeReefCheckMetricCounts(req.MetricCounts),
+	}, true
+}
+
+func decodeReefCheckRecorders(w http.ResponseWriter, req []ReefCheckRecorderRequest) ([]service.ReefCheckRecorderInput, bool) {
+	recorders := make([]service.ReefCheckRecorderInput, 0, len(req))
+	for _, recorder := range req {
+		userID := uuid.Nil
+		if strings.TrimSpace(recorder.UserID) != "" {
+			parsed, err := uuid.Parse(strings.TrimSpace(recorder.UserID))
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid recorder userId")
+				return nil, false
+			}
+			userID = parsed
+		}
+		recorders = append(recorders, service.ReefCheckRecorderInput{
+			Role:         service.ReefCheckRecorderRole(recorder.Role),
+			UserID:       userID,
+			RecorderName: recorder.RecorderName,
+		})
+	}
+	return recorders, true
+}
+
+func decodeReefCheckSegments(req []ReefCheckSegmentRequest) []service.ReefCheckSegmentInput {
+	segments := make([]service.ReefCheckSegmentInput, 0, len(req))
+	for _, segment := range req {
+		segments = append(segments, service.ReefCheckSegmentInput{
+			Index:  segment.Index,
+			Label:  segment.Label,
+			StartM: segment.StartM,
+			EndM:   segment.EndM,
+		})
+	}
+	return segments
+}
+
+func decodeSubstratePoints(req []SubstratePointRequest) []service.SubstratePointInput {
+	points := make([]service.SubstratePointInput, 0, len(req))
+	for _, point := range req {
+		points = append(points, service.SubstratePointInput{
+			SegmentIndex: point.SegmentIndex,
+			PointIndex:   point.PointIndex,
+			TransectM:    point.TransectM,
+			Code:         point.Code,
+		})
+	}
+	return points
+}
+
+func decodeSubstrateBleaching(req []SubstrateBleachingRequest) []service.SubstrateBleachingInput {
+	rows := make([]service.SubstrateBleachingInput, 0, len(req))
+	for _, row := range req {
+		rows = append(rows, service.SubstrateBleachingInput{
+			SegmentIndex:    row.SegmentIndex,
+			HCBleachedCount: row.HCBleachedCount,
+			SCBleachedCount: row.SCBleachedCount,
+		})
+	}
+	return rows
+}
+
+func decodeReefCheckMetricCounts(req []ReefCheckMetricCountRequest) []service.ReefCheckMetricCountInput {
+	counts := make([]service.ReefCheckMetricCountInput, 0, len(req))
+	for _, count := range req {
+		counts = append(counts, service.ReefCheckMetricCountInput{
+			Module:       service.ReefCheckModule(count.Module),
+			MetricKey:    count.MetricKey,
+			SegmentIndex: count.SegmentIndex,
+			Count:        count.Count,
+			Comment:      count.Comment,
+		})
+	}
+	return counts
+}
+
+func reefCheckSurveyResponse(survey service.ReefCheckSurvey) ReefCheckSurveyResponse {
+	return ReefCheckSurveyResponse{
+		ID:                  survey.ID.String(),
+		SurveyDate:          survey.SurveyDate.Format("2006-01-02"),
+		SiteID:              survey.SiteID.String(),
+		DepthM:              survey.DepthM,
+		CountryIsland:       survey.CountryIsland,
+		TeamLeader:          survey.TeamLeader,
+		SurveyTime:          survey.SurveyTime,
+		Visibility:          survey.Visibility,
+		Temperature:         survey.Temperature,
+		GeneralComments:     survey.GeneralComments,
+		SubstrateComments:   survey.SubstrateComments,
+		RKCReason:           survey.RKCReason,
+		RKCBleachingPercent: survey.RKCBleachingPercent,
+		FishLengthMode:      string(survey.FishLengthMode),
+		CreatedAt:           formatTime(survey.CreatedAt),
+		UpdatedAt:           formatTime(survey.UpdatedAt),
 	}
 }

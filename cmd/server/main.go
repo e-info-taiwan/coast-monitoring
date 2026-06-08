@@ -29,6 +29,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer pool.Close()
+	if err := db.Migrate(ctx, pool, "migrations"); err != nil {
+		log.Fatal(err)
+	}
 
 	var googleProvider httpx.GoogleOAuthProvider
 	if googleConfigComplete(cfg) {
@@ -68,6 +71,7 @@ func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider http
 	sessionRepo := repository.NewSessionRepository(pool)
 	catalogRepo := repository.NewCatalogRepository(pool)
 	observationRepo := repository.NewObservationRepository(pool)
+	reefCheckRepo := repository.NewReefCheckSurveyRepository(pool)
 	auditLogRepo := repository.NewAuditLogRepository(pool)
 	authService := service.AuthService{
 		Sessions: sessionRepo,
@@ -92,12 +96,14 @@ func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider http
 			Users:        service.UserService{Users: userRepo},
 			Catalog:      service.CatalogService{Catalog: catalogRepo},
 			Observations: service.ObservationService{Observations: observationRepo},
+			ReefCheck:    service.ReefCheckSurveyService{Surveys: reefCheckRepo},
 			AuditLogs:    auditLogRepo,
 			Mutations:    postgresAdminMutationRunner{pool: pool},
 		},
 		AppHandlers: &httpx.AppHandlers{
 			Catalog:      service.CatalogService{Catalog: catalogRepo},
 			Observations: service.ObservationService{Observations: observationRepo},
+			ReefCheck:    service.ReefCheckSurveyService{Surveys: reefCheckRepo},
 			Mutations:    postgresAdminMutationRunner{pool: pool},
 		},
 		AdminAllowedOrigins: cfg.AdminAllowedOrigins,
@@ -124,11 +130,13 @@ func (r postgresAdminMutationRunner) RunAdminMutation(ctx context.Context, fn fu
 	userRepo := repository.NewUserRepository(tx)
 	catalogRepo := repository.NewCatalogRepository(tx)
 	observationRepo := repository.NewObservationRepository(tx)
+	reefCheckRepo := repository.NewReefCheckSurveyRepository(tx)
 	auditLogRepo := repository.NewAuditLogRepository(tx)
 	if err := fn(httpx.AdminMutationServices{
 		Users:        service.UserService{Users: userRepo},
 		Catalog:      service.CatalogService{Catalog: catalogRepo},
 		Observations: service.ObservationService{Observations: observationRepo},
+		ReefCheck:    service.ReefCheckSurveyService{Surveys: reefCheckRepo},
 		AuditLogs:    auditLogRepo,
 	}); err != nil {
 		return err

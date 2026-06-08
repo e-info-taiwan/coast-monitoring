@@ -86,6 +86,119 @@ type SaveObservationRequest struct {
 	Notes      string `json:"notes"`
 }
 
+type ReefCheckConfigResponse struct {
+	Segments        []ReefCheckSegmentResponse       `json:"segments"`
+	SubstrateCodes  []ReefCheckSubstrateCodeResponse `json:"substrateCodes"`
+	Metrics         []ReefCheckMetricResponse        `json:"metrics"`
+	FishLengthModes []string                         `json:"fishLengthModes"`
+}
+
+type ReefCheckSegmentResponse struct {
+	Index  int    `json:"index"`
+	Label  string `json:"label"`
+	StartM int    `json:"startM"`
+	EndM   int    `json:"endM"`
+}
+
+type ReefCheckSubstrateCodeResponse struct {
+	Code               string `json:"code"`
+	DisplayName        string `json:"displayName"`
+	NormalizedCategory string `json:"normalizedCategory"`
+}
+
+type ReefCheckMetricResponse struct {
+	Module      string `json:"module"`
+	Key         string `json:"key"`
+	ChineseName string `json:"chineseName"`
+	EnglishName string `json:"englishName"`
+	SizeClass   string `json:"sizeClass"`
+	SortOrder   int    `json:"sortOrder"`
+}
+
+type ReefCheckSurveyResponse struct {
+	ID                  string   `json:"id"`
+	SurveyDate          string   `json:"surveyDate"`
+	SiteID              string   `json:"siteId"`
+	DepthM              int      `json:"depthM"`
+	CountryIsland       string   `json:"countryIsland"`
+	TeamLeader          string   `json:"teamLeader"`
+	SurveyTime          string   `json:"surveyTime"`
+	Visibility          string   `json:"visibility"`
+	Temperature         string   `json:"temperature"`
+	GeneralComments     string   `json:"generalComments"`
+	SubstrateComments   string   `json:"substrateComments"`
+	RKCReason           string   `json:"rkcReason"`
+	RKCBleachingPercent *float64 `json:"rkcBleachingPercent,omitempty"`
+	FishLengthMode      string   `json:"fishLengthMode"`
+	CreatedAt           string   `json:"createdAt"`
+	UpdatedAt           string   `json:"updatedAt"`
+}
+
+type SaveReefCheckSurveyRequest struct {
+	SurveyDate          string                        `json:"surveyDate"`
+	SiteID              string                        `json:"siteId"`
+	Site                ReefCheckSiteRequest          `json:"site"`
+	DepthM              int                           `json:"depthM"`
+	CountryIsland       string                        `json:"countryIsland"`
+	TeamLeader          string                        `json:"teamLeader"`
+	SurveyTime          string                        `json:"surveyTime"`
+	Visibility          string                        `json:"visibility"`
+	Temperature         string                        `json:"temperature"`
+	GeneralComments     string                        `json:"generalComments"`
+	SubstrateComments   string                        `json:"substrateComments"`
+	RKCReason           string                        `json:"rkcReason"`
+	RKCBleachingPercent *float64                      `json:"rkcBleachingPercent"`
+	FishLengthMode      string                        `json:"fishLengthMode"`
+	Recorders           []ReefCheckRecorderRequest    `json:"recorders"`
+	Segments            []ReefCheckSegmentRequest     `json:"segments"`
+	SubstratePoints     []SubstratePointRequest       `json:"substratePoints"`
+	SubstrateBleaching  []SubstrateBleachingRequest   `json:"substrateBleaching"`
+	MetricCounts        []ReefCheckMetricCountRequest `json:"metricCounts"`
+}
+
+type ReefCheckSiteRequest struct {
+	County          string  `json:"county"`
+	LocationName    string  `json:"locationName"`
+	SiteName        string  `json:"siteName"`
+	SiteEnglishName string  `json:"siteEnglishName"`
+	Latitude        float64 `json:"latitude"`
+	Longitude       float64 `json:"longitude"`
+}
+
+type ReefCheckRecorderRequest struct {
+	Role         string `json:"role"`
+	UserID       string `json:"userId"`
+	RecorderName string `json:"recorderName"`
+}
+
+type ReefCheckSegmentRequest struct {
+	Index  int    `json:"index"`
+	Label  string `json:"label"`
+	StartM int    `json:"startM"`
+	EndM   int    `json:"endM"`
+}
+
+type SubstratePointRequest struct {
+	SegmentIndex int     `json:"segmentIndex"`
+	PointIndex   int     `json:"pointIndex"`
+	TransectM    float64 `json:"transectM"`
+	Code         string  `json:"code"`
+}
+
+type SubstrateBleachingRequest struct {
+	SegmentIndex    int `json:"segmentIndex"`
+	HCBleachedCount int `json:"hcBleachedCount"`
+	SCBleachedCount int `json:"scBleachedCount"`
+}
+
+type ReefCheckMetricCountRequest struct {
+	Module       string `json:"module"`
+	MetricKey    string `json:"metricKey"`
+	SegmentIndex int    `json:"segmentIndex"`
+	Count        int    `json:"count"`
+	Comment      string `json:"comment"`
+}
+
 type AuditLogResponse struct {
 	ID          string `json:"id"`
 	Action      string `json:"action"`

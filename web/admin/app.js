@@ -40,6 +40,13 @@ const demoClearButton = $("#demo-clear")
 
 const OVERVIEW_KEY = "overview"
 const ENTRY_KEY = "observation"
+const REEF_CHECK_KEY = "reef_check"
+
+const REEF_CHECK_SHEETS = [
+  { key: "substrate", label: "底質", title: "Line Transect" },
+  { key: "fish", label: "魚類", title: "FIELD SHEET FISH" },
+  { key: "inverts", label: "無脊椎 / 影響", title: "FIELD SHEET INVERTS" },
+]
 
 const resourceConfigs = {
   users: {
@@ -206,6 +213,9 @@ const state = {
   auth: null,
   csrfToken: "",
   records: {},
+  reefCheckConfig: null,
+  reefCheckSurveys: [],
+  reefCheckActiveSheet: "substrate",
   selectedIds: {},
   history: {},
   draft: null,
@@ -366,7 +376,7 @@ function canSeeNav(key) {
   if (isAdmin()) {
     return true
   }
-  return key === ENTRY_KEY
+  return key === ENTRY_KEY || key === REEF_CHECK_KEY
 }
 
 function canLoadResource(key) {
@@ -434,6 +444,26 @@ function formatDate(value) {
     return String(value)
   }
   return date.toLocaleDateString("zh-TW", { month: "2-digit", day: "2-digit" })
+}
+
+function dateInputValue(date = new Date()) {
+  const year = date.getFullYear()
+  const month = String(date.getMonth() + 1).padStart(2, "0")
+  const day = String(date.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+function shiftedDateInputValue(days) {
+  const date = new Date()
+  date.setDate(date.getDate() + days)
+  return dateInputValue(date)
+}
+
+function observationDateOptions() {
+  return [
+    { key: "yesterday", label: "昨天", value: shiftedDateInputValue(-1) },
+    { key: "today", label: "今天", value: shiftedDateInputValue(0) },
+  ]
 }
 
 function formatRelativeTime(value) {
@@ -515,9 +545,42 @@ async function loadResource(resourceKey) {
 
 async function loadWorkspace() {
   const keys = Object.keys(resourceConfigs).filter(canLoadResource)
-  await Promise.all(keys.map((key) => loadResource(key)))
+  await Promise.all([...keys.map((key) => loadResource(key)), loadReefCheckData()])
   if (!keys.includes(ENTRY_KEY)) {
     await loadResource(ENTRY_KEY)
+  }
+}
+
+async function loadReefCheckData() {
+  await Promise.all([loadReefCheckConfig(), loadReefCheckSurveys()])
+}
+
+async function loadReefCheckConfig() {
+  try {
+    state.reefCheckConfig = await apiFetch("/app/reef-check/config")
+  } catch (error) {
+    state.reefCheckConfig = null
+    showAlert({
+      tone: "danger",
+      title: "無法載入 Reef Check 欄位設定",
+      message: error?.message || "",
+      id: "load-reef-check-config",
+    })
+  }
+}
+
+async function loadReefCheckSurveys() {
+  try {
+    const data = await apiFetch("/app/reef-check/surveys")
+    state.reefCheckSurveys = Array.isArray(data) ? data : []
+  } catch (error) {
+    state.reefCheckSurveys = []
+    showAlert({
+      tone: "danger",
+      title: "無法載入 Reef Check 紀錄",
+      message: error?.message || "",
+      id: "load-reef-check-surveys",
+    })
   }
 }
 
@@ -560,6 +623,7 @@ function renderSessionBadges() {
 function renderSidebar() {
   const navItems = [
     { key: ENTRY_KEY, title: "Observation", count: null },
+    { key: REEF_CHECK_KEY, title: "Reef Check", count: state.reefCheckSurveys.length },
     { key: OVERVIEW_KEY, title: "Overview", count: null },
     ...Object.entries(resourceConfigs)
       .filter(([key]) => key !== ENTRY_KEY)
@@ -917,6 +981,10 @@ function renderObservationMiniRow(entry) {
 }
 
 function renderObservation() {
+  renderReefCheck()
+}
+
+function renderLegacySpeciesObservation() {
   sectionEyebrow.textContent = "Field entry"
   sectionTitle.textContent = "Observation"
   sectionDescription.textContent = "依日期與地點，紀錄每個物種觀測到的數量。"
@@ -937,7 +1005,7 @@ function renderObservation() {
     (a.chineseName || a.englishName || "").localeCompare(b.chineseName || b.englishName || "", "zh-Hant"),
   )
   const recent = state.records[ENTRY_KEY] || []
-  const todayISO = new Date().toISOString().slice(0, 10)
+  const todayISO = dateInputValue()
   const locationOptions = locations
     .map((loc) => `<option value="${escapeHtml(loc.id)}">${escapeHtml(loc.chineseName || loc.englishName || loc.id)}</option>`)
     .join("")
@@ -965,6 +1033,18 @@ function renderObservation() {
         <div class="form-field">
           <label for="obs-date">Date *</label>
           <input id="obs-date" type="date" name="observedOn" value="${escapeHtml(todayISO)}" required ${disabled ? "disabled" : ""} />
+          <div class="date-picker-row" aria-label="Quick date choices">
+            ${observationDateOptions().map((option) => `
+              <button
+                type="button"
+                class="tiny-button date-option ${option.value === todayISO ? "is-active" : ""}"
+                data-obs-date-option="${escapeHtml(option.key)}"
+                data-date-value="${escapeHtml(option.value)}"
+                aria-pressed="${option.value === todayISO ? "true" : "false"}"
+                ${disabled ? "disabled" : ""}
+              >${escapeHtml(option.label)}</button>
+            `).join("")}
+          </div>
         </div>
         <div class="form-field">
           <label for="obs-location">Location *</label>
@@ -1005,6 +1085,34 @@ function renderObservation() {
     </section>
   `
   $("#observation-form")?.addEventListener("submit", handleObservationSubmit)
+  bindObservationDatePicker()
+}
+
+function bindObservationDatePicker() {
+  const dateInput = $("#obs-date")
+  const buttons = [...resourcePanel.querySelectorAll("[data-obs-date-option]")]
+  if (!dateInput || !buttons.length) {
+    return
+  }
+  const syncActive = () => {
+    buttons.forEach((button) => {
+      const active = button.dataset.dateValue === dateInput.value
+      button.classList.toggle("is-active", active)
+      button.setAttribute("aria-pressed", active ? "true" : "false")
+    })
+  }
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!button.dataset.dateValue) {
+        return
+      }
+      dateInput.value = button.dataset.dateValue
+      dateInput.dispatchEvent(new Event("change", { bubbles: true }))
+      syncActive()
+    })
+  })
+  dateInput.addEventListener("change", syncActive)
+  syncActive()
 }
 
 async function handleObservationSubmit(event) {
@@ -1074,9 +1182,781 @@ async function handleObservationSubmit(event) {
   }
 }
 
+function reefCheckSurfaceCopy() {
+  if (state.activeKey === ENTRY_KEY) {
+    return {
+      eyebrow: "Field entry",
+      title: "Observation",
+      description: "以 0.0-94.5m transect 分段輸入 Reef Check observation 資料。",
+      formTitle: "Observation 資料輸入",
+      metaLine: "底質為 4 個子樣區、每 0.5m 一格，共 160 個點位。",
+      submitHint: "送出時會建立完整 0.0-94.5m Reef Check observation。",
+      submitLabel: "Submit observation",
+      successTitle: "已送出 Observation",
+      successMessage: "完整 0.0-94.5m RC payload 已寫入。",
+      recentTitle: "最近 Observation",
+      recentEmpty: "目前還沒有 Reef Check observation。",
+    }
+  }
+  return {
+    eyebrow: "Reef Check",
+    title: "RC Survey",
+    description: "依 PDF 規劃填寫樣點、底質、魚類、無脊椎、環境衝擊與罕見生物資料。",
+    formTitle: "Reef Check 資料輸入",
+    metaLine: "",
+    submitHint: "送出時會建立完整 Reef Check survey。",
+    submitLabel: "Submit RC survey",
+    successTitle: "已送出 Reef Check survey",
+    successMessage: "完整 RC payload 已寫入。",
+    recentTitle: "最近 RC 紀錄",
+    recentEmpty: "目前還沒有 Reef Check survey。",
+  }
+}
+
+function renderReefCheck() {
+  const copy = reefCheckSurfaceCopy()
+  sectionEyebrow.textContent = copy.eyebrow
+  sectionTitle.textContent = copy.title
+  sectionDescription.textContent = copy.description
+  if (mobileSectionTitle) {
+    mobileSectionTitle.textContent = copy.title
+  }
+  if (state.demoError) {
+    resourcePanel.innerHTML = renderErrorState("GET /api/app/reef-check/config - simulated failure")
+    $("#error-retry-button")?.addEventListener("click", () => {
+      state.demoError = false
+      triggerNavTransition()
+    })
+    return
+  }
+  const config = state.reefCheckConfig
+  if (!config) {
+    resourcePanel.innerHTML = '<div class="empty-state"><p>Reef Check 欄位設定尚未載入。</p></div>'
+    return
+  }
+  const todayISO = dateInputValue()
+  const substrateSheet = renderReefCheckSubstrateSheetGrid(config.segments || [])
+  const sheetTabs = renderReefCheckSheetTabs()
+  const substratePanel = renderReefCheckSheetPanel("substrate", "底質", `
+    <div class="entry-section-head">
+      <h3>底質</h3>
+      <p>4 子樣區 × 40 格</p>
+    </div>
+    ${substrateSheet}
+    <div class="rc-field-note-grid">
+      <div class="form-field">
+        <label for="rc-rkc-reason">RKC >= 10% possible reason</label>
+        <textarea id="rc-rkc-reason" name="rkcReason" placeholder="若新死珊瑚比例達 10%，請填寫可能原因"></textarea>
+      </div>
+      <div class="form-field">
+        <label for="rc-rkc-bleaching-percent">What percentage of recorded RKC is a result of bleaching?</label>
+        <input id="rc-rkc-bleaching-percent" type="number" min="0" max="100" step="0.01" name="rkcBleachingPercent" />
+      </div>
+      <div class="form-field">
+        <label for="rc-substrate-comments">Comments</label>
+        <textarea id="rc-substrate-comments" name="substrateComments" placeholder="底質表格備註"></textarea>
+      </div>
+    </div>
+  `)
+  const fishPanel = renderReefCheckSheetPanel("fish", "FIELD SHEET FISH", renderReefCheckFishFieldSheet())
+  const invertsPanel = renderReefCheckSheetPanel("inverts", "FIELD SHEET INVERTS", renderReefCheckInvertsFieldSheet())
+  const modeOptions = (config.fishLengthModes || ["separate", "combined"])
+    .map((mode) => `<option value="${escapeHtml(mode)}">${escapeHtml(mode)}</option>`)
+    .join("")
+  resourcePanel.innerHTML = `
+    <div class="panel-header">
+      <div>
+        <h2>${escapeHtml(copy.formTitle)}</h2>
+        <p class="meta-line">${escapeHtml(copy.metaLine || `目前 catalog：${(config.substrateCodes || []).length} 個底質代碼、${(config.metrics || []).length} 個 RC 指標。`)}</p>
+      </div>
+      <div class="panel-actions">
+        <span class="session-pill">${state.reefCheckSurveys.length} surveys</span>
+      </div>
+    </div>
+    <form class="entry-panel reef-check-form" id="reef-check-form">
+      <section class="rc-section">
+        <div class="entry-section-head">
+          <h3>樣點基本資料</h3>
+          <p>survey setup</p>
+        </div>
+        <div class="entry-meta-grid rc-field-meta-grid">
+          <div class="form-field">
+            <label for="rc-site">Site name *</label>
+            <input id="rc-site" name="siteName" value="合界" required />
+          </div>
+          <div class="form-field">
+            <label for="rc-country-island">Country/Island</label>
+            <input id="rc-country-island" name="countryIsland" value="台灣" />
+          </div>
+          <div class="form-field">
+            <label for="rc-depth">Depth *</label>
+            <input id="rc-depth" type="number" min="1" step="1" name="depthM" value="10" required />
+          </div>
+          <div class="form-field">
+            <label for="rc-survey-date">Date *</label>
+            <input id="rc-survey-date" type="date" name="surveyDate" value="${escapeHtml(todayISO)}" required />
+            <div class="date-picker-row" aria-label="Quick survey date choices">
+              ${observationDateOptions().map((option) => `
+                <button
+                  type="button"
+                  class="tiny-button date-option ${option.value === todayISO ? "is-active" : ""}"
+                  data-rc-date-option="${escapeHtml(option.key)}"
+                  data-date-value="${escapeHtml(option.value)}"
+                  aria-pressed="${option.value === todayISO ? "true" : "false"}"
+                >${escapeHtml(option.label)}</button>
+              `).join("")}
+            </div>
+          </div>
+          <div class="form-field">
+            <label for="rc-team-leader">TS/TL</label>
+            <input id="rc-team-leader" name="teamLeader" value="" />
+          </div>
+          <div class="form-field">
+            <label for="rc-data-recorded-by">Data recorded by *</label>
+            <input id="rc-data-recorded-by" name="recorder_benthos" value="${escapeHtml(currentUser()?.name || "")}" required />
+          </div>
+          <div class="form-field">
+            <label for="rc-survey-time">Time</label>
+            <input id="rc-survey-time" name="surveyTime" value="" />
+          </div>
+          <div class="form-field">
+            <label for="rc-visibility">Visibility</label>
+            <input id="rc-visibility" name="visibility" value="" />
+          </div>
+          <div class="form-field">
+            <label for="rc-temperature">Temperature</label>
+            <input id="rc-temperature" name="temperature" value="" />
+          </div>
+        </div>
+        <div class="entry-meta-grid rc-meta-grid">
+          <div class="form-field">
+            <label for="rc-county">County *</label>
+            <input id="rc-county" name="county" value="屏東縣" required />
+          </div>
+          <div class="form-field">
+            <label for="rc-location">Location *</label>
+            <input id="rc-location" name="locationName" value="恆春鎮" required />
+          </div>
+          <div class="form-field">
+            <label for="rc-site-english">Site (English) *</label>
+            <input id="rc-site-english" name="siteEnglishName" value="Hejie" required />
+          </div>
+          <div class="form-field">
+            <label for="rc-latitude">N *</label>
+            <input id="rc-latitude" type="number" step="0.000001" name="latitude" value="21.955583" required />
+          </div>
+          <div class="form-field">
+            <label for="rc-longitude">E *</label>
+            <input id="rc-longitude" type="number" step="0.000001" name="longitude" value="120.711889" required />
+          </div>
+          <div class="form-field">
+            <label for="rc-fish-length-mode">魚類體長紀錄 *</label>
+            <select id="rc-fish-length-mode" name="fishLengthMode" required>${modeOptions}</select>
+          </div>
+          <div class="form-field">
+            <label for="rc-recorder-fish">Fish recorded by *</label>
+            <input id="rc-recorder-fish" name="recorder_fish" value="${escapeHtml(currentUser()?.name || "")}" required />
+          </div>
+          <div class="form-field">
+            <label for="rc-recorder-invertebrate">Invert recorded by *</label>
+            <input id="rc-recorder-invertebrate" name="recorder_invertebrate" value="${escapeHtml(currentUser()?.name || "")}" required />
+          </div>
+        </div>
+      </section>
+
+      <section class="rc-section">
+        ${sheetTabs}
+        <div class="rc-sheet-panels">
+          ${substratePanel}
+          ${fishPanel}
+          ${invertsPanel}
+        </div>
+      </section>
+
+      <section class="rc-section">
+        <div class="entry-section-head">
+          <h3>整份 survey 備註</h3>
+          <p>comments</p>
+        </div>
+        <div class="form-field">
+          <label for="rc-comments">General survey comments</label>
+          <textarea id="rc-comments" name="generalComments" placeholder="魚類、無脊椎、影響或整份 RC survey 備註"></textarea>
+        </div>
+      </section>
+
+      <div class="entry-actions">
+        <span class="submit-hint">${escapeHtml(copy.submitHint)}</span>
+        <button type="submit" class="primary-button">${escapeHtml(copy.submitLabel)}</button>
+      </div>
+    </form>
+    <section class="dash-panel">
+      <header class="dash-panel-head">
+        <div>
+          <h2>${escapeHtml(copy.recentTitle)}</h2>
+          <p>近期 ${state.reefCheckSurveys.slice(0, 8).length} 筆 survey</p>
+        </div>
+      </header>
+      ${
+        state.reefCheckSurveys.length
+          ? `<div class="audit-mini-list">${state.reefCheckSurveys.slice(0, 8).map(renderReefCheckMiniRow).join("")}</div>`
+          : `<div class="empty-state"><p>${escapeHtml(copy.recentEmpty)}</p></div>`
+      }
+    </section>
+  `
+  $("#reef-check-form")?.addEventListener("submit", handleReefCheckSubmit)
+  bindReefCheckDatePicker()
+  bindReefCheckSheetTabs()
+}
+
+function reefCheckActiveSheet() {
+  return REEF_CHECK_SHEETS.some((sheet) => sheet.key === state.reefCheckActiveSheet)
+    ? state.reefCheckActiveSheet
+    : "substrate"
+}
+
+function renderReefCheckSheetTabs() {
+  const active = reefCheckActiveSheet()
+  return `
+    <div class="rc-sheet-tabs" role="tablist" aria-label="Reef Check field sheets">
+      ${REEF_CHECK_SHEETS.map((sheet) => `
+        <button
+          type="button"
+          class="rc-sheet-tab ${sheet.key === active ? "is-active" : ""}"
+          role="tab"
+          id="rc-sheet-tab-${escapeHtml(sheet.key)}"
+          aria-selected="${sheet.key === active ? "true" : "false"}"
+          aria-controls="rc-sheet-panel-${escapeHtml(sheet.key)}"
+          data-rc-sheet-tab="${escapeHtml(sheet.key)}"
+        >
+          <span>${escapeHtml(sheet.label)}</span>
+          <small>${escapeHtml(sheet.title)}</small>
+        </button>
+      `).join("")}
+    </div>
+  `
+}
+
+function renderReefCheckSheetPanel(key, title, body) {
+  const active = key === reefCheckActiveSheet()
+  return `
+    <section
+      class="rc-sheet-panel ${active ? "is-active" : ""}"
+      id="rc-sheet-panel-${escapeHtml(key)}"
+      role="tabpanel"
+      aria-labelledby="rc-sheet-tab-${escapeHtml(key)}"
+      data-rc-sheet-panel="${escapeHtml(key)}"
+      ${active ? "" : "hidden"}
+    >
+      <div class="rc-sheet-panel-title">${escapeHtml(title)}</div>
+      ${body}
+    </section>
+  `
+}
+
+function bindReefCheckSheetTabs() {
+  const tabs = [...resourcePanel.querySelectorAll("[data-rc-sheet-tab]")]
+  const panels = [...resourcePanel.querySelectorAll("[data-rc-sheet-panel]")]
+  if (!tabs.length || !panels.length) {
+    return
+  }
+  const activate = (sheetKey) => {
+    state.reefCheckActiveSheet = sheetKey
+    tabs.forEach((tab) => {
+      const active = tab.dataset.rcSheetTab === sheetKey
+      tab.classList.toggle("is-active", active)
+      tab.setAttribute("aria-selected", active ? "true" : "false")
+    })
+    panels.forEach((panel) => {
+      const active = panel.dataset.rcSheetPanel === sheetKey
+      panel.hidden = !active
+      panel.classList.toggle("is-active", active)
+    })
+  }
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      if (tab.dataset.rcSheetTab) {
+        activate(tab.dataset.rcSheetTab)
+      }
+    })
+  })
+  activate(reefCheckActiveSheet())
+}
+
+function bindReefCheckDatePicker() {
+  const dateInput = $("#rc-survey-date")
+  const buttons = [...resourcePanel.querySelectorAll("[data-rc-date-option]")]
+  if (!dateInput || !buttons.length) {
+    return
+  }
+  const syncActive = () => {
+    buttons.forEach((button) => {
+      const active = button.dataset.dateValue === dateInput.value
+      button.classList.toggle("is-active", active)
+      button.setAttribute("aria-pressed", active ? "true" : "false")
+    })
+  }
+  buttons.forEach((button) => {
+    button.addEventListener("click", () => {
+      if (!button.dataset.dateValue) {
+        return
+      }
+      dateInput.value = button.dataset.dateValue
+      dateInput.dispatchEvent(new Event("change", { bubbles: true }))
+      syncActive()
+    })
+  })
+  dateInput.addEventListener("change", syncActive)
+  syncActive()
+}
+
+function renderReefCheckSubstrateSheetGrid(segments) {
+  const normalizedSegments = segments.length ? segments : [
+    { index: 1, label: "SEGMENT 1", startM: 0, endM: 20 },
+    { index: 2, label: "SEGMENT 2", startM: 25, endM: 45 },
+    { index: 3, label: "SEGMENT 3", startM: 50, endM: 70 },
+    { index: 4, label: "SEGMENT 4", startM: 75, endM: 95 },
+  ]
+  const segmentHead = normalizedSegments.map((segment) => `
+    <div class="rc-field-sheet-segment-head">
+      <strong>${escapeHtml(`SEGMENT ${segment.index}`)}</strong>
+      <span>${escapeHtml(fieldSheetSegmentRange(segment))}</span>
+    </div>
+  `).join("")
+  const columnHead = normalizedSegments.map(() => `
+    <span class="rc-field-sheet-column-head">m</span>
+    <span class="rc-field-sheet-column-head">Code</span>
+    <span class="rc-field-sheet-column-head">m</span>
+    <span class="rc-field-sheet-column-head">Code</span>
+  `).join("")
+  const rows = []
+  for (let row = 0; row < 20; row += 1) {
+    rows.push(`
+      <div class="rc-field-sheet-row">
+        ${normalizedSegments.map((segment) => {
+          const firstPoint = row + 1
+          const secondPoint = row + 21
+          return `
+            ${renderSubstrateSheetPair(segment, firstPoint)}
+            ${renderSubstrateSheetPair(segment, secondPoint)}
+          `
+        }).join("")}
+      </div>
+    `)
+  }
+  const bleachingRows = normalizedSegments.map((segment) => `
+    <div class="entry-meta-grid rc-bleaching-grid">
+      <div class="form-field">
+        <label for="hc-bleach-${segment.index}">HC 白化 ${escapeHtml(`SEGMENT ${segment.index}`)}</label>
+        <input id="hc-bleach-${segment.index}" type="number" min="0" step="1" name="hc_bleach_${segment.index}" value="0" />
+      </div>
+      <div class="form-field">
+        <label for="sc-bleach-${segment.index}">SC 白化 ${escapeHtml(`SEGMENT ${segment.index}`)}</label>
+        <input id="sc-bleach-${segment.index}" type="number" min="0" step="1" name="sc_bleach_${segment.index}" value="0" />
+      </div>
+    </div>
+  `).join("")
+  return `
+    <div class="rc-substrate-legend" aria-label="Substrate code legend">
+      ${reefCheckFieldSheetCodes().map((code) => `
+        <span><strong>${escapeHtml(code.code)}</strong>${escapeHtml(code.label)}</span>
+      `).join("")}
+    </div>
+    <div class="rc-field-sheet-wrap">
+      <div class="rc-field-sheet-grid" aria-label="Line Transect Substrate field sheet">
+        <div class="rc-field-sheet-row rc-field-sheet-segments">${segmentHead}</div>
+        <div class="rc-field-sheet-row rc-field-sheet-columns">${columnHead}</div>
+        ${rows.join("")}
+      </div>
+    </div>
+    <div class="rc-field-bleaching-panel">${bleachingRows}</div>
+  `
+}
+
+function renderSubstrateSheetPair(segment, point) {
+  const selected = defaultSubstrateCode(point)
+  const meter = reefCheckTransectMeter(segment, point)
+  const meterLabel = formatCompactMeter(meter)
+  return `
+    <span class="rc-field-meter">${escapeHtml(meterLabel)}</span>
+    <label class="rc-field-code-cell">
+      <span class="sr-only">${escapeHtml(`SEGMENT ${segment.index} ${meterLabel}m code`)}</span>
+      <select name="substrate_${segment.index}_${point}" data-transect-m="${escapeHtml(formatTransectMeter(meter))}">
+        ${substrateCodeOptions(selected)}
+      </select>
+    </label>
+  `
+}
+
+function fieldSheetSegmentRange(segment) {
+  const ranges = {
+    1: "0 - 19.5 m",
+    2: "25 - 44.5 m",
+    3: "50 - 69.5 m",
+    4: "75 - 94.5 m",
+  }
+  return ranges[Number(segment.index)] || `${formatCompactMeter(segment.startM || 0)} - ${formatCompactMeter(Number(segment.startM || 0) + 19.5)} m`
+}
+
+function formatCompactMeter(value) {
+  const number = Number(value)
+  return Number.isInteger(number) ? String(number) : number.toFixed(1)
+}
+
+function reefCheckFieldSheetCodes() {
+  return [
+    { code: "HC", label: "hard coral" },
+    { code: "SC", label: "soft coral" },
+    { code: "RKC", label: "recently killed coral" },
+    { code: "NIA", label: "nutrient indicator algae" },
+    { code: "SP", label: "sponge" },
+    { code: "RC", label: "rock" },
+    { code: "RB", label: "rubble" },
+    { code: "SD", label: "sand" },
+    { code: "SI", label: "silt/clay" },
+    { code: "OT", label: "other" },
+  ]
+}
+
+function reefCheckTransectMeter(segment, point) {
+  return Number(segment.startM || 0) + (point - 1) * 0.5
+}
+
+function formatTransectMeter(value) {
+  return Number(value).toFixed(1)
+}
+
+function defaultSubstrateCode(point) {
+  if (point <= 10) {
+    return "1"
+  }
+  if (point <= 20) {
+    return "2"
+  }
+  if (point <= 25) {
+    return "4"
+  }
+  if (point <= 30) {
+    return "6"
+  }
+  return "8"
+}
+
+function substrateCodeOptions(selected) {
+  return (state.reefCheckConfig?.substrateCodes || [])
+    .map((code) => {
+      const value = String(code.code)
+      const label = `${value} ${code.normalizedCategory}`
+      return `<option value="${escapeHtml(value)}" ${value === selected ? "selected" : ""}>${escapeHtml(label)}</option>`
+    })
+    .join("")
+}
+
+function renderReefCheckFishFieldSheet() {
+  const used = new Set()
+  return `
+    <div class="entry-section-head">
+      <h3>魚類</h3>
+      <p>FIELD SHEET FISH</p>
+    </div>
+    ${renderReefCheckMetricFieldTable("FISH 魚類", metricRows("fish", [
+      { key: "butterflyfish", label: "Butterflyfish 蝴蝶魚" },
+      { key: "sweetlips", label: "Grunts/Sweetlips/Margates 石鱸" },
+      { key: "snapper", label: "Snapper 笛鯛" },
+      { key: "barramundi_cod", label: "Barramundi cod 老鼠斑" },
+      { key: "humphead_wrasse", label: "Humphead wrasse 蘇眉" },
+      { key: "bumphead_parrotfish", label: "Bumphead parrotfish 龍頭鸚哥" },
+      { key: "other_parrotfish", label: "Other parrotfish 鸚哥魚 (>20cm)" },
+      { key: "moray_eel", label: "Moray eel 裸胸鯙" },
+    ], used))}
+    ${renderReefCheckMetricFieldTable("Grouper 石斑魚", metricRows("fish", [
+      { key: "grouper_less30", label: "Grouper <30 cm" },
+      { key: "grouper_30_40", label: "Grouper 30-40 cm" },
+      { key: "grouper_40_50", label: "Grouper 40-50 cm" },
+      { key: "grouper_50_60", label: "Grouper 50-60 cm" },
+      { key: "grouper_60", label: "Grouper >60 cm" },
+    ], used))}
+    ${renderReefCheckMetricFieldTable("Rare animals sighted (#/type/size)", metricRows("rare_organism", [
+      { key: "sharks", label: "Sharks 鯊魚" },
+      { key: "turtles", label: "Turtles 海龜" },
+      { key: "mantas", label: "Mantas 魟" },
+      { key: "other", label: "Other 其他" },
+    ], used))}
+    ${renderReefCheckMetricFieldTable("其他魚類 / 補充欄位", remainingMetricRows("fish", used))}
+  `
+}
+
+function renderReefCheckInvertsFieldSheet() {
+  const used = new Set()
+  return `
+    <div class="entry-section-head">
+      <h3>無脊椎與環境影響</h3>
+      <p>FIELD SHEET INVERTS</p>
+    </div>
+    ${renderReefCheckMetricFieldTable("Invertebrates 無脊椎類", metricRows("invertebrate", [
+      { key: "banded_coral_shrimp", label: "Banded coral shrimp 珊瑚蝦" },
+      { key: "diadema", label: "Long-spined black sea urchin Diadema 魔鬼海膽" },
+      { key: "echinothrix", label: "Long-spined black sea urchin Echinothrix 刺冠海膽" },
+      { key: "pencil_urchin", label: "Pencil urchin 鉛筆海膽" },
+      { key: "collector_urchin", label: "Collector urchin 馬糞海膽" },
+      { key: "seacucumber", label: "Sea cucumber 海參" },
+      { key: "crown_of_thorns", label: "Crown-of-thorns 棘冠海星" },
+      { key: "triton", label: "Triton 大法螺" },
+      { key: "lobster", label: "Lobster 龍蝦" },
+    ], used))}
+    ${renderReefCheckMetricFieldTable("Giant clam 硨磲貝", metricRows("invertebrate", [
+      { key: "giantclam_less10", label: "Giant clam <10 cm" },
+      { key: "giantclam_10_20", label: "Giant clam 10-20 cm" },
+      { key: "giantclam_20_30", label: "Giant clam 20-30 cm" },
+      { key: "giantclam_30_40", label: "Giant clam 30-40 cm" },
+      { key: "giantclam_40_50", label: "Giant clam 40-50 cm" },
+      { key: "giantclam_50", label: "Giant clam >50 cm" },
+    ], used))}
+    ${renderReefCheckMetricFieldTable("Impacts: Coral Damage/Disease/Bleaching/Trash", metricRows("impact", [
+      { key: "boat_anchor", label: "Coral damage: Boat/Anchor" },
+      { key: "dynamite", label: "Coral damage: Dynamite" },
+      { key: "other_coral_damage", label: "Coral damage: Other" },
+      { key: "fishnet", label: "Trash: Fish nets" },
+      { key: "trash", label: "Trash" },
+      { key: "general_trash", label: "Trash: General" },
+      { key: "bleaching_population_percent", label: "Bleaching (% of coral population)" },
+      { key: "bleaching_colony_percent", label: "Bleaching (% of coral colony)" },
+      { key: "disease_coral_black_band", label: "Coral Disease: Black Band" },
+      { key: "disease_coral_white_band", label: "Coral Disease: White Band" },
+    ], used))}
+    ${renderReefCheckMetricFieldTable("無脊椎補充欄位", remainingMetricRows("invertebrate", used))}
+    ${renderReefCheckMetricFieldTable("環境影響補充欄位", remainingMetricRows("impact", used))}
+  `
+}
+
+function renderReefCheckMetricFieldTable(title, rows) {
+  if (!rows.length) {
+    return ""
+  }
+  const segments = state.reefCheckConfig?.segments || []
+  return `
+    <div class="rc-field-metric-table">
+      <div class="rc-field-metric-title">${escapeHtml(title)}</div>
+      <div class="rc-field-metric-row rc-field-metric-head">
+        <span>項目</span>
+        ${segments.map((segment) => `<span>${escapeHtml(segment.label)}</span>`).join("")}
+      </div>
+      ${rows.map((metric) => `
+        <div class="rc-field-metric-row">
+          <div class="species-name">
+            <strong>${escapeHtml(metric.fieldLabel || metric.chineseName || metric.key)}</strong>
+            <span>${escapeHtml(metric.englishName || metric.sizeClass || "")}</span>
+          </div>
+          ${segments.map((segment) => `
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value="0"
+              data-rc-metric="1"
+              data-module="${escapeHtml(String(metric.module))}"
+              data-key="${escapeHtml(metric.key)}"
+              data-segment="${escapeHtml(String(segment.index))}"
+              aria-label="${escapeHtml(metric.fieldLabel || metric.chineseName || metric.key)} ${escapeHtml(segment.label)}"
+            />
+          `).join("")}
+        </div>
+      `).join("")}
+    </div>
+  `
+}
+
+function metricRows(module, definitions, used) {
+  return definitions
+    .map((definition) => {
+      const metric = reefCheckMetricByKey(module, definition.key)
+      if (!metric) {
+        return null
+      }
+      used?.add(definition.key)
+      return { ...metric, fieldLabel: definition.label }
+    })
+    .filter(Boolean)
+}
+
+function remainingMetricRows(module, used) {
+  return (state.reefCheckConfig?.metrics || [])
+    .filter((metric) => metric.module === module && !used.has(metric.key))
+    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+}
+
+function reefCheckMetricByKey(module, key) {
+  return (state.reefCheckConfig?.metrics || []).find((metric) => metric.module === module && metric.key === key)
+}
+
+function renderReefCheckMetricTable(module, title) {
+  const metrics = (state.reefCheckConfig?.metrics || [])
+    .filter((metric) => metric.module === module)
+    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+  const segments = state.reefCheckConfig?.segments || []
+  const rows = metrics.map((metric) => `
+    <div class="rc-metric-row">
+      <div class="species-name">
+        <strong>${escapeHtml(metric.chineseName || metric.key)}</strong>
+        <span>${escapeHtml([metric.englishName, metric.sizeClass].filter(Boolean).join(" · "))}</span>
+      </div>
+      ${segments.map((segment) => `
+        <input
+          type="number"
+          min="0"
+          step="1"
+          value="0"
+          data-rc-metric="1"
+          data-module="${escapeHtml(module)}"
+          data-key="${escapeHtml(metric.key)}"
+          data-segment="${escapeHtml(String(segment.index))}"
+          aria-label="${escapeHtml(metric.chineseName || metric.key)} ${escapeHtml(segment.label)}"
+        />
+      `).join("")}
+    </div>
+  `).join("")
+  return `
+    <section class="rc-section">
+      <div class="entry-section-head">
+        <h3>${escapeHtml(title)}</h3>
+        <p>${metrics.length} items</p>
+      </div>
+      <div class="rc-metric-table">
+        <div class="rc-metric-head">
+          <span>種類</span>
+          ${segments.map((segment) => `<span>${escapeHtml(segment.label)}</span>`).join("")}
+        </div>
+        ${rows}
+      </div>
+    </section>
+  `
+}
+
+function renderReefCheckMiniRow(survey) {
+  return `
+    <article class="audit-mini-row">
+      <div class="audit-mini-pin tone-ok" aria-hidden="true">${escapeHtml(String(survey.depthM || "-"))}</div>
+      <div class="audit-mini-text">
+        <strong>${escapeHtml(survey.surveyDate || "survey")} · ${escapeHtml(survey.fishLengthMode || "")}</strong>
+        <p>${escapeHtml(survey.id || "")}</p>
+      </div>
+      <time class="audit-mini-time">${escapeHtml(formatRelativeTime(survey.createdAt))}</time>
+    </article>
+  `
+}
+
+async function handleReefCheckSubmit(event) {
+  event.preventDefault()
+  const copy = reefCheckSurfaceCopy()
+  const form = event.target
+  const formData = new FormData(form)
+  const payload = {
+    surveyDate: String(formData.get("surveyDate") || "").trim(),
+    depthM: Number(formData.get("depthM") || 0),
+    fishLengthMode: String(formData.get("fishLengthMode") || "").trim(),
+    site: {
+      county: String(formData.get("county") || "").trim(),
+      locationName: String(formData.get("locationName") || "").trim(),
+      siteName: String(formData.get("siteName") || "").trim(),
+      siteEnglishName: String(formData.get("siteEnglishName") || "").trim(),
+      latitude: Number(formData.get("latitude") || 0),
+      longitude: Number(formData.get("longitude") || 0),
+    },
+    countryIsland: String(formData.get("countryIsland") || "").trim(),
+    teamLeader: String(formData.get("teamLeader") || "").trim(),
+    surveyTime: String(formData.get("surveyTime") || "").trim(),
+    visibility: String(formData.get("visibility") || "").trim(),
+    temperature: String(formData.get("temperature") || "").trim(),
+    recorders: [
+      { role: "benthos", recorderName: String(formData.get("recorder_benthos") || "").trim() },
+      { role: "fish", recorderName: String(formData.get("recorder_fish") || "").trim() },
+      { role: "invertebrate", recorderName: String(formData.get("recorder_invertebrate") || "").trim() },
+    ],
+    segments: state.reefCheckConfig?.segments || [],
+    substratePoints: reefCheckSubstratePayload(formData),
+    substrateBleaching: reefCheckBleachingPayload(formData),
+    metricCounts: reefCheckMetricPayload(form),
+    rkcReason: String(formData.get("rkcReason") || "").trim(),
+    rkcBleachingPercent: optionalNumber(formData.get("rkcBleachingPercent")),
+    substrateComments: String(formData.get("substrateComments") || "").trim(),
+    generalComments: String(formData.get("generalComments") || "").trim(),
+  }
+  const submitButton = form.querySelector('button[type="submit"]')
+  if (submitButton) {
+    submitButton.disabled = true
+    submitButton.textContent = "Submitting…"
+  }
+  try {
+    await apiFetch("/app/reef-check/surveys", { method: "POST", body: payload })
+    await loadReefCheckSurveys()
+    if (isAdmin()) {
+      await loadResource("audit_logs")
+    }
+    showAlert({
+      tone: "ok",
+      title: copy.successTitle,
+      message: copy.successMessage,
+      id: "reef-check-submit",
+    })
+    renderReefCheck()
+  } catch (error) {
+    showAlert({
+      tone: "danger",
+      title: "Reef Check 送出失敗",
+      message: error?.message || "",
+      id: "reef-check-submit",
+    })
+  } finally {
+    if (submitButton) {
+      submitButton.disabled = false
+      submitButton.textContent = "Submit RC survey"
+    }
+  }
+}
+
+function optionalNumber(value) {
+  const text = String(value || "").trim()
+  return text === "" ? null : Number(text)
+}
+
+function reefCheckSubstratePayload(formData) {
+  const points = []
+  ;(state.reefCheckConfig?.segments || []).forEach((segment) => {
+    for (let point = 1; point <= 40; point += 1) {
+      points.push({
+        segmentIndex: Number(segment.index),
+        pointIndex: point,
+        transectM: reefCheckTransectMeter(segment, point),
+        code: String(formData.get(`substrate_${segment.index}_${point}`) || "").trim(),
+      })
+    }
+  })
+  return points
+}
+
+function reefCheckBleachingPayload(formData) {
+  return (state.reefCheckConfig?.segments || []).map((segment) => ({
+    segmentIndex: Number(segment.index),
+    hcBleachedCount: Number(formData.get(`hc_bleach_${segment.index}`) || 0),
+    scBleachedCount: Number(formData.get(`sc_bleach_${segment.index}`) || 0),
+  }))
+}
+
+function reefCheckMetricPayload(form) {
+  return [...form.querySelectorAll("[data-rc-metric]")].map((input) => ({
+    module: input.dataset.module,
+    metricKey: input.dataset.key,
+    segmentIndex: Number(input.dataset.segment),
+    count: Number(input.value || 0),
+  }))
+}
+
 function renderResource(resourceKey) {
   if (resourceKey === ENTRY_KEY) {
     renderObservation()
+    return
+  }
+  if (resourceKey === REEF_CHECK_KEY) {
+    renderReefCheck()
     return
   }
   if (resourceKey === OVERVIEW_KEY) {

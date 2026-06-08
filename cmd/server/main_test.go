@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"strings"
 	"testing"
 
 	"coast-monitoring/internal/config"
@@ -71,6 +73,20 @@ func TestNewHTTPServerSetsDefensiveTimeouts(t *testing.T) {
 	}
 	if server.IdleTimeout <= 0 {
 		t.Fatal("IdleTimeout is not configured")
+	}
+}
+
+func TestMainRunsMigrationsBeforeServing(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(source)
+	if !strings.Contains(text, `db.Migrate(ctx, pool, "migrations")`) {
+		t.Fatal("main.go must run database migrations before building the HTTP server")
+	}
+	if strings.Index(text, `db.Migrate(ctx, pool, "migrations")`) > strings.Index(text, `newHTTPServer`) {
+		t.Fatal("database migrations must run before the HTTP server is created")
 	}
 }
 
