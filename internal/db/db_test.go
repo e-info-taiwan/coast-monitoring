@@ -145,6 +145,86 @@ func TestReefCheckFieldSheetMetadataMigrationMatchesFieldWorkbook(t *testing.T) 
 	}
 }
 
+func TestReefCheckV12SchemaMigrationMatchesSpec(t *testing.T) {
+	t.Parallel()
+
+	migration, err := os.ReadFile("../../migrations/000004_reef_check_v12_schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(migration)
+
+	required := []string{
+		"CREATE TYPE taxon_group AS ENUM ('fish', 'invert', 'rare')",
+		"CREATE TYPE impact_group AS ENUM ('coral_damage', 'trash', 'bleaching', 'disease')",
+		"CREATE TYPE impact_value_type AS ENUM ('level', 'count', 'percent')",
+		"CREATE TYPE transect_method AS ENUM ('line', 'belt_fish', 'belt_invert')",
+		"CREATE TYPE participant_role AS ENUM ('member', 'team_leader', 'team_scientist')",
+		"CREATE TABLE IF NOT EXISTS substrate_type (",
+		"code text PRIMARY KEY",
+		"numeric_code smallint NOT NULL",
+		"CREATE TABLE IF NOT EXISTS taxon (",
+		"taxon_group taxon_group NOT NULL",
+		"is_aggregate boolean NOT NULL DEFAULT false",
+		"aggregate_of text",
+		"CREATE TABLE IF NOT EXISTS impact_type (",
+		"impact_group impact_group NOT NULL",
+		"value_type impact_value_type NOT NULL",
+		"has_raw_count boolean NOT NULL DEFAULT false",
+		"CREATE TABLE IF NOT EXISTS diver (",
+		"CHECK (name_zh IS NOT NULL OR name_en IS NOT NULL)",
+		"CREATE TABLE IF NOT EXISTS site (",
+		"region text",
+		"UNIQUE (name_en)",
+		"CREATE TABLE IF NOT EXISTS survey (",
+		"start_date date NOT NULL",
+		"end_date date NOT NULL",
+		"UNIQUE (site_id, start_date)",
+		"CREATE TABLE IF NOT EXISTS site_description (",
+		"survey_id integer PRIMARY KEY REFERENCES survey(id) ON DELETE CASCADE",
+		"temp_surface_c numeric",
+		"anthropogenic_impact text",
+		"submitted_by text",
+		"CREATE TABLE IF NOT EXISTS transect (",
+		"method transect_method NOT NULL",
+		"survey_date date",
+		"rkc_bleaching_note text",
+		"UNIQUE (survey_id, method, depth_m)",
+		"CREATE TABLE IF NOT EXISTS transect_participant (",
+		"role participant_role NOT NULL",
+		"UNIQUE (transect_id, diver_id, role)",
+		"CREATE TABLE IF NOT EXISTS substrate_point (",
+		"substrate_code text NOT NULL REFERENCES substrate_type(code)",
+		"UNIQUE (transect_id, position_m)",
+		"CREATE TABLE IF NOT EXISTS substrate_bleaching (",
+		"UNIQUE (transect_id, segment)",
+		"CREATE TABLE IF NOT EXISTS belt_observation (",
+		"taxon_id integer NOT NULL REFERENCES taxon(id)",
+		"UNIQUE (transect_id, taxon_id, segment)",
+		"CREATE TABLE IF NOT EXISTS impact_observation (",
+		"impact_type_id integer NOT NULL REFERENCES impact_type(id)",
+		"raw_value numeric NOT NULL DEFAULT 0",
+		"UNIQUE (transect_id, impact_type_id, segment)",
+		"('HC', 1, '硬珊瑚', 'hard coral'",
+		"('OT', 10, '其他', 'other'",
+		"('fish', '石斑魚總數', 'Grouper total', NULL, true, 'grouper'",
+		"('invert', '硨磲貝總數', 'Giant clam total', NULL, true, 'giant_clam'",
+		"('trash', '漁業垃圾（漁網）', 'Trash: fish nets', 'level', true",
+		"('bleaching', '珊瑚白化佔總體百分比', 'Bleaching (% of population)', 'percent', false",
+		"('北海岸與東北角', '新北市', '萬里區', '野柳', 'Yeliu', 25.21151111, 121.6988278)",
+		"('蘭嶼', '臺東縣', '蘭嶼鄉', '曙光礁', 'Shuguang Reef', 22.067078, 121.56979)",
+	}
+	for _, want := range required {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("v1.2 schema migration missing %q", want)
+		}
+	}
+	siteRows := regexp.MustCompile(`\('[^']+', '[^']+', '[^']+', '[^']+', '[^']+', [0-9]+\.[0-9]+, [0-9]+\.[0-9]+\)`).FindAllString(sql, -1)
+	if len(siteRows) != 36 {
+		t.Fatalf("v1.2 site seed rows = %d, want 36", len(siteRows))
+	}
+}
+
 func TestDockerSetupRunsGoAppAndInitializesFreshDatabase(t *testing.T) {
 	t.Parallel()
 
