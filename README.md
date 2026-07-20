@@ -74,6 +74,10 @@ For the first deployment or a new local database, set `BOOTSTRAP_ADMIN_EMAIL` to
 
 See [docs/api.md](docs/api.md) for request/response examples and the FE server integration pattern.
 
+The Reef Check workflow supports complete survey creation, owner-aware listing and detail
+access, atomic replacement, deletion, and computed survey reports. Report output includes
+substrate coverage, live coral cover, and average/SD/SE values across the four transect segments.
+
 ## Testing
 
 Run the Go test suite:

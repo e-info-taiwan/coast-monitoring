@@ -1,5 +1,12 @@
 # RC Website Requirements To Current Design Mapping
 
+> Status update (2026-07-20): this document began as a pre-implementation gap analysis.
+> The active `reef_check_*` workflow now covers complete four-segment field entry, 160
+> substrate points, recorders, bleaching, taxon/impact counts, survey CRUD, and computed
+> per-survey reports. Historical cross-year charts and event annotations remain a separate
+> reporting milestone. Migration `000004_reef_check_v12_schema.sql` is a target schema and
+> is not yet the persistence path used by the application API.
+
 ## Sources
 
 - `/Users/hcchien/Downloads/RC網站規劃資料.pdf`

@@ -76,6 +76,176 @@ func (r ReefCheckSurveyRepository) CreateReefCheckSurvey(ctx context.Context, re
 	return survey, nil
 }
 
+func (r ReefCheckSurveyRepository) GetReefCheckSurvey(ctx context.Context, id uuid.UUID) (service.ReefCheckSurveyDetail, error) {
+	survey, err := scanReefCheckSurvey(r.db.QueryRow(ctx, `
+		SELECT id, survey_date, site_id, depth_m, country_island, team_leader, survey_time,
+			visibility, temperature, general_comments, substrate_comments, rkc_reason, rkc_bleaching_percent,
+			fish_length_mode, COALESCE(created_by, '00000000-0000-0000-0000-000000000000'::uuid),
+			COALESCE(updated_by, '00000000-0000-0000-0000-000000000000'::uuid), created_at, updated_at
+		FROM reef_check_surveys WHERE id = $1
+	`, id))
+	if err != nil {
+		return service.ReefCheckSurveyDetail{}, err
+	}
+	detail := service.ReefCheckSurveyDetail{Survey: survey}
+	if detail.Recorders, err = r.getRecorders(ctx, id); err != nil {
+		return service.ReefCheckSurveyDetail{}, err
+	}
+	if detail.Segments, err = r.getSegments(ctx, id); err != nil {
+		return service.ReefCheckSurveyDetail{}, err
+	}
+	if detail.SubstratePoints, err = r.getSubstratePoints(ctx, id); err != nil {
+		return service.ReefCheckSurveyDetail{}, err
+	}
+	if detail.SubstrateBleaching, err = r.getSubstrateBleaching(ctx, id); err != nil {
+		return service.ReefCheckSurveyDetail{}, err
+	}
+	if detail.MetricCounts, err = r.getMetricCounts(ctx, id); err != nil {
+		return service.ReefCheckSurveyDetail{}, err
+	}
+	return detail, nil
+}
+
+func (r ReefCheckSurveyRepository) UpdateReefCheckSurvey(ctx context.Context, id uuid.UUID, record service.ReefCheckSurveyRecord) (service.ReefCheckSurvey, error) {
+	survey, err := scanReefCheckSurvey(r.db.QueryRow(ctx, `
+		UPDATE reef_check_surveys SET survey_date=$2, site_id=$3, depth_m=$4, country_island=$5,
+			team_leader=$6, survey_time=$7, visibility=$8, temperature=$9, general_comments=$10,
+			substrate_comments=$11, rkc_reason=$12, rkc_bleaching_percent=$13, fish_length_mode=$14,
+			updated_by=$15, updated_at=now() WHERE id=$1
+		RETURNING id, survey_date, site_id, depth_m, country_island, team_leader, survey_time,
+			visibility, temperature, general_comments, substrate_comments, rkc_reason, rkc_bleaching_percent,
+			fish_length_mode, COALESCE(created_by, '00000000-0000-0000-0000-000000000000'::uuid),
+			COALESCE(updated_by, '00000000-0000-0000-0000-000000000000'::uuid), created_at, updated_at
+	`, id, record.SurveyDate, record.SiteID, record.DepthM, record.CountryIsland, record.TeamLeader,
+		record.SurveyTime, record.Visibility, record.Temperature, record.GeneralComments, record.SubstrateComments,
+		record.RKCReason, nullableFloat64(record.RKCBleachingPercent), string(record.FishLengthMode), nullableUUID(record.UpdatedBy)))
+	if err != nil {
+		return service.ReefCheckSurvey{}, err
+	}
+	if _, err = r.db.Exec(ctx, `DELETE FROM reef_check_survey_recorders WHERE survey_id=$1`, id); err != nil {
+		return service.ReefCheckSurvey{}, translateError(err)
+	}
+	if _, err = r.db.Exec(ctx, `DELETE FROM reef_check_segments WHERE survey_id=$1`, id); err != nil {
+		return service.ReefCheckSurvey{}, translateError(err)
+	}
+	if err = r.insertSurveyRecorders(ctx, id, record.Recorders); err != nil {
+		return service.ReefCheckSurvey{}, err
+	}
+	if err = r.insertSurveySegments(ctx, id, record.Segments); err != nil {
+		return service.ReefCheckSurvey{}, err
+	}
+	if err = r.insertSubstratePoints(ctx, id, record.SubstratePoints); err != nil {
+		return service.ReefCheckSurvey{}, err
+	}
+	if err = r.insertSubstrateBleaching(ctx, id, record.SubstrateBleaching); err != nil {
+		return service.ReefCheckSurvey{}, err
+	}
+	if err = r.insertMetricCounts(ctx, id, record.MetricCounts); err != nil {
+		return service.ReefCheckSurvey{}, err
+	}
+	return survey, nil
+}
+
+func (r ReefCheckSurveyRepository) DeleteReefCheckSurvey(ctx context.Context, id uuid.UUID) error {
+	tag, err := r.db.Exec(ctx, `DELETE FROM reef_check_surveys WHERE id=$1`, id)
+	if err != nil {
+		return translateError(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return service.ErrNotFound
+	}
+	return nil
+}
+
+func (r ReefCheckSurveyRepository) getRecorders(ctx context.Context, id uuid.UUID) ([]service.ReefCheckRecorderInput, error) {
+	rows, err := r.db.Query(ctx, `SELECT role, COALESCE(user_id, '00000000-0000-0000-0000-000000000000'::uuid), recorder_name FROM reef_check_survey_recorders WHERE survey_id=$1 ORDER BY role`, id)
+	if err != nil {
+		return nil, translateError(err)
+	}
+	defer rows.Close()
+	var out []service.ReefCheckRecorderInput
+	for rows.Next() {
+		var v service.ReefCheckRecorderInput
+		var role string
+		if err := rows.Scan(&role, &v.UserID, &v.RecorderName); err != nil {
+			return nil, translateError(err)
+		}
+		v.Role = service.ReefCheckRecorderRole(role)
+		out = append(out, v)
+	}
+	return out, translateError(rows.Err())
+}
+
+func (r ReefCheckSurveyRepository) getSegments(ctx context.Context, id uuid.UUID) ([]service.ReefCheckSegmentInput, error) {
+	rows, err := r.db.Query(ctx, `SELECT segment_index,label,start_m,end_m FROM reef_check_segments WHERE survey_id=$1 ORDER BY segment_index`, id)
+	if err != nil {
+		return nil, translateError(err)
+	}
+	defer rows.Close()
+	var out []service.ReefCheckSegmentInput
+	for rows.Next() {
+		var v service.ReefCheckSegmentInput
+		if err := rows.Scan(&v.Index, &v.Label, &v.StartM, &v.EndM); err != nil {
+			return nil, translateError(err)
+		}
+		out = append(out, v)
+	}
+	return out, translateError(rows.Err())
+}
+
+func (r ReefCheckSurveyRepository) getSubstratePoints(ctx context.Context, id uuid.UUID) ([]service.SubstratePointInput, error) {
+	rows, err := r.db.Query(ctx, `SELECT segment_index,point_index,transect_m,substrate_code FROM substrate_points WHERE survey_id=$1 ORDER BY segment_index,point_index`, id)
+	if err != nil {
+		return nil, translateError(err)
+	}
+	defer rows.Close()
+	var out []service.SubstratePointInput
+	for rows.Next() {
+		var v service.SubstratePointInput
+		if err := rows.Scan(&v.SegmentIndex, &v.PointIndex, &v.TransectM, &v.Code); err != nil {
+			return nil, translateError(err)
+		}
+		out = append(out, v)
+	}
+	return out, translateError(rows.Err())
+}
+
+func (r ReefCheckSurveyRepository) getSubstrateBleaching(ctx context.Context, id uuid.UUID) ([]service.SubstrateBleachingInput, error) {
+	rows, err := r.db.Query(ctx, `SELECT segment_index,hc_bleached_count,sc_bleached_count FROM substrate_bleaching_counts WHERE survey_id=$1 ORDER BY segment_index`, id)
+	if err != nil {
+		return nil, translateError(err)
+	}
+	defer rows.Close()
+	var out []service.SubstrateBleachingInput
+	for rows.Next() {
+		var v service.SubstrateBleachingInput
+		if err := rows.Scan(&v.SegmentIndex, &v.HCBleachedCount, &v.SCBleachedCount); err != nil {
+			return nil, translateError(err)
+		}
+		out = append(out, v)
+	}
+	return out, translateError(rows.Err())
+}
+
+func (r ReefCheckSurveyRepository) getMetricCounts(ctx context.Context, id uuid.UUID) ([]service.ReefCheckMetricCountInput, error) {
+	rows, err := r.db.Query(ctx, `SELECT m.module,m.key,c.segment_index,c.count,c.comment FROM reef_check_metric_counts c JOIN reef_check_metrics m ON m.id=c.metric_id WHERE c.survey_id=$1 ORDER BY m.module,m.sort_order,c.segment_index`, id)
+	if err != nil {
+		return nil, translateError(err)
+	}
+	defer rows.Close()
+	var out []service.ReefCheckMetricCountInput
+	for rows.Next() {
+		var v service.ReefCheckMetricCountInput
+		var module string
+		if err := rows.Scan(&module, &v.MetricKey, &v.SegmentIndex, &v.Count, &v.Comment); err != nil {
+			return nil, translateError(err)
+		}
+		v.Module = service.ReefCheckModule(module)
+		out = append(out, v)
+	}
+	return out, translateError(rows.Err())
+}
+
 func (r ReefCheckSurveyRepository) createSurveyLocation(ctx context.Context, record service.ReefCheckSurveyRecord) (uuid.UUID, error) {
 	var locationID uuid.UUID
 	err := r.db.QueryRow(ctx, `

@@ -98,6 +98,32 @@ func TestReefCheckCreateStoresCompleteSurvey(t *testing.T) {
 	}
 }
 
+func TestReefCheckGetRestrictsVolunteerToOwnSurvey(t *testing.T) {
+	actor := activePolicyVolunteer()
+	repo := &fakeReefCheckSurveyRepository{detail: ReefCheckSurveyDetail{Survey: ReefCheckSurvey{ID: uuid.New(), CreatedBy: uuid.New()}}}
+	_, err := (ReefCheckSurveyService{Surveys: repo}).Get(context.Background(), actor, repo.detail.Survey.ID)
+	if !errors.Is(err, ErrForbidden) {
+		t.Fatalf("Get error = %v, want ErrForbidden", err)
+	}
+}
+
+func TestReefCheckReportCalculatesStoredSurvey(t *testing.T) {
+	actor := activePolicyVolunteer()
+	input := validReefCheckSurveyInput()
+	repo := &fakeReefCheckSurveyRepository{detail: ReefCheckSurveyDetail{
+		Survey:          ReefCheckSurvey{ID: uuid.New(), CreatedBy: actor.ID},
+		SubstratePoints: input.SubstratePoints,
+		MetricCounts:    input.MetricCounts,
+	}}
+	report, err := (ReefCheckSurveyService{Surveys: repo}).Report(context.Background(), actor, repo.detail.Survey.ID)
+	if err != nil {
+		t.Fatalf("Report error = %v", err)
+	}
+	if report.Substrate.LiveCoralCoverPercent <= 0 {
+		t.Fatalf("live coral cover = %v, want > 0", report.Substrate.LiveCoralCoverPercent)
+	}
+}
+
 func TestReefCheckCreateRequiresCoreFields(t *testing.T) {
 	actor := activePolicyVolunteer()
 	tests := []struct {
@@ -442,6 +468,7 @@ func activePolicyVolunteer() policy.User {
 type fakeReefCheckSurveyRepository struct {
 	created bool
 	record  ReefCheckSurveyRecord
+	detail  ReefCheckSurveyDetail
 }
 
 func (r *fakeReefCheckSurveyRepository) ListReefCheckSurveys(ctx context.Context) ([]ReefCheckSurvey, error) {
@@ -460,6 +487,19 @@ func (r *fakeReefCheckSurveyRepository) CreateReefCheckSurvey(ctx context.Contex
 		CreatedBy: record.CreatedBy,
 		UpdatedBy: record.UpdatedBy,
 	}, nil
+}
+
+func (r *fakeReefCheckSurveyRepository) GetReefCheckSurvey(context.Context, uuid.UUID) (ReefCheckSurveyDetail, error) {
+	return r.detail, nil
+}
+
+func (r *fakeReefCheckSurveyRepository) UpdateReefCheckSurvey(_ context.Context, _ uuid.UUID, record ReefCheckSurveyRecord) (ReefCheckSurvey, error) {
+	r.record = record
+	return ReefCheckSurvey{ID: uuid.New(), CreatedBy: record.CreatedBy, UpdatedBy: record.UpdatedBy}, nil
+}
+
+func (r *fakeReefCheckSurveyRepository) DeleteReefCheckSurvey(context.Context, uuid.UUID) error {
+	return nil
 }
 
 func assertFloatNear(t *testing.T, got, want float64) {

@@ -3,6 +3,7 @@ package httpx
 import (
 	"context"
 	"net/http"
+	"sort"
 	"strings"
 
 	"coast-monitoring/internal/policy"
@@ -35,6 +36,10 @@ type AppObservationService interface {
 type AppReefCheckService interface {
 	ListForApp(ctx context.Context, actor policy.User) ([]service.ReefCheckSurvey, error)
 	Create(ctx context.Context, actor policy.User, input service.ReefCheckSurveyInput) (service.ReefCheckSurvey, error)
+	Get(ctx context.Context, actor policy.User, id uuid.UUID) (service.ReefCheckSurveyDetail, error)
+	Update(ctx context.Context, actor policy.User, id uuid.UUID, input service.ReefCheckSurveyInput) (service.ReefCheckSurvey, error)
+	Delete(ctx context.Context, actor policy.User, id uuid.UUID) error
+	Report(ctx context.Context, actor policy.User, id uuid.UUID) (service.ReefCheckSurveyReport, error)
 }
 
 func (h *AppHandlers) Session(w http.ResponseWriter, r *http.Request) {
@@ -151,6 +156,81 @@ func (h *AppHandlers) CreateReefCheckSurvey(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	writeJSON(w, http.StatusCreated, response)
+}
+
+func (h *AppHandlers) GetReefCheckSurvey(w http.ResponseWriter, r *http.Request) {
+	actor, id, ok := requireAppUUID(w, r, h != nil && h.ReefCheck != nil)
+	if !ok {
+		return
+	}
+	detail, err := h.ReefCheck.Get(r.Context(), actor, id)
+	if err != nil {
+		writeServiceError(w, err, "get reef check survey failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, reefCheckSurveyDetailResponse(detail))
+}
+
+func (h *AppHandlers) UpdateReefCheckSurvey(w http.ResponseWriter, r *http.Request) {
+	actor, id, ok := requireAppUUID(w, r, h != nil && h.Mutations != nil)
+	if !ok {
+		return
+	}
+	input, decoded := decodeReefCheckSurveyInput(w, r)
+	if !decoded {
+		return
+	}
+	var response ReefCheckSurveyResponse
+	err := h.Mutations.RunAdminMutation(r.Context(), func(services AdminMutationServices) error {
+		if services.ReefCheck == nil || services.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		survey, err := services.ReefCheck.Update(r.Context(), actor, id, input)
+		if err != nil {
+			return err
+		}
+		response = reefCheckSurveyResponse(survey)
+		return writeAudit(r, services.AuditLogs, actor, repository.AuditActionUpdate, "reef_check_surveys", id, nil, response)
+	})
+	if err != nil {
+		writeServiceError(w, err, "update reef check survey failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *AppHandlers) DeleteReefCheckSurvey(w http.ResponseWriter, r *http.Request) {
+	actor, id, ok := requireAppUUID(w, r, h != nil && h.Mutations != nil)
+	if !ok {
+		return
+	}
+	err := h.Mutations.RunAdminMutation(r.Context(), func(services AdminMutationServices) error {
+		if services.ReefCheck == nil || services.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		if err := services.ReefCheck.Delete(r.Context(), actor, id); err != nil {
+			return err
+		}
+		return writeAudit(r, services.AuditLogs, actor, repository.AuditActionDelete, "reef_check_surveys", id, nil, nil)
+	})
+	if err != nil {
+		writeServiceError(w, err, "delete reef check survey failed")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *AppHandlers) ReefCheckReport(w http.ResponseWriter, r *http.Request) {
+	actor, id, ok := requireAppUUID(w, r, h != nil && h.ReefCheck != nil)
+	if !ok {
+		return
+	}
+	report, err := h.ReefCheck.Report(r.Context(), actor, id)
+	if err != nil {
+		writeServiceError(w, err, "get reef check report failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, reefCheckReportResponse(report))
 }
 
 func (h *AppHandlers) CreateObservation(w http.ResponseWriter, r *http.Request) {
@@ -483,4 +563,68 @@ func reefCheckSurveyResponse(survey service.ReefCheckSurvey) ReefCheckSurveyResp
 		CreatedAt:           formatTime(survey.CreatedAt),
 		UpdatedAt:           formatTime(survey.UpdatedAt),
 	}
+}
+
+func reefCheckSurveyDetailResponse(detail service.ReefCheckSurveyDetail) ReefCheckSurveyDetailResponse {
+	response := ReefCheckSurveyDetailResponse{ReefCheckSurveyResponse: reefCheckSurveyResponse(detail.Survey)}
+	for _, v := range detail.Recorders {
+		response.Recorders = append(response.Recorders, ReefCheckRecorderRequest{Role: string(v.Role), UserID: optionalUUID(v.UserID), RecorderName: v.RecorderName})
+	}
+	for _, v := range detail.Segments {
+		response.Segments = append(response.Segments, ReefCheckSegmentRequest{Index: v.Index, Label: v.Label, StartM: v.StartM, EndM: v.EndM})
+	}
+	for _, v := range detail.SubstratePoints {
+		response.SubstratePoints = append(response.SubstratePoints, SubstratePointRequest{SegmentIndex: v.SegmentIndex, PointIndex: v.PointIndex, TransectM: v.TransectM, Code: v.Code})
+	}
+	for _, v := range detail.SubstrateBleaching {
+		response.SubstrateBleaching = append(response.SubstrateBleaching, SubstrateBleachingRequest{SegmentIndex: v.SegmentIndex, HCBleachedCount: v.HCBleachedCount, SCBleachedCount: v.SCBleachedCount})
+	}
+	for _, v := range detail.MetricCounts {
+		response.MetricCounts = append(response.MetricCounts, ReefCheckMetricCountRequest{Module: string(v.Module), MetricKey: v.MetricKey, SegmentIndex: v.SegmentIndex, Count: v.Count, Comment: v.Comment})
+	}
+	return response
+}
+
+func reefCheckReportResponse(report service.ReefCheckSurveyReport) ReefCheckReportResponse {
+	response := ReefCheckReportResponse{Survey: reefCheckSurveyResponse(report.Survey), LiveCoralCoverPercent: report.Substrate.LiveCoralCoverPercent}
+	categories := make([]string, 0, len(report.Substrate.Categories))
+	for category := range report.Substrate.Categories {
+		categories = append(categories, category)
+	}
+	sort.Strings(categories)
+	for _, category := range categories {
+		v := report.Substrate.Categories[category]
+		response.Substrate = append(response.Substrate, ReefCheckSubstrateSummary{Category: category, CoveragePercent: v.CoveragePercent, SegmentCoveragePercent: v.SegmentCoveragePercent, StandardDeviation: v.StandardDeviation, StandardError: v.StandardError})
+	}
+	metricIDs := make([]service.ReefCheckMetricID, 0, len(report.Metrics))
+	for id := range report.Metrics {
+		metricIDs = append(metricIDs, id)
+	}
+	sort.Slice(metricIDs, func(i, j int) bool {
+		if metricIDs[i].Module == metricIDs[j].Module {
+			return metricIDs[i].MetricKey < metricIDs[j].MetricKey
+		}
+		return metricIDs[i].Module < metricIDs[j].Module
+	})
+	for _, id := range metricIDs {
+		v := report.Metrics[id]
+		response.Metrics = append(response.Metrics, ReefCheckMetricSummaryResponse{Module: string(id.Module), MetricKey: id.MetricKey, SegmentCounts: v.SegmentCounts, Average: v.Average, StandardDeviation: v.StandardDeviation, StandardError: v.StandardError})
+	}
+	impactIDs := make([]service.ReefCheckMetricID, 0, len(report.Impacts))
+	for id := range report.Impacts {
+		impactIDs = append(impactIDs, id)
+	}
+	sort.Slice(impactIDs, func(i, j int) bool { return impactIDs[i].MetricKey < impactIDs[j].MetricKey })
+	for _, id := range impactIDs {
+		v := report.Impacts[id]
+		response.Impacts = append(response.Impacts, ReefCheckImpactSummaryResponse{MetricKey: id.MetricKey, SegmentGrades: v.SegmentGrades, Average: v.Average, StandardDeviation: v.StandardDeviation, StandardError: v.StandardError})
+	}
+	return response
+}
+
+func optionalUUID(id uuid.UUID) string {
+	if id == uuid.Nil {
+		return ""
+	}
+	return id.String()
 }

@@ -424,6 +424,26 @@ App observation response intentionally omits `observerId`:
 
 The server always uses the authenticated user as the observer for app create/update requests. Clients must not send `observerId` to `/api/app/*`.
 
+### Reef Check surveys
+
+Authenticated admins can access every survey. Volunteers can only list, read, update,
+delete, and report on surveys they created.
+
+```text
+GET    /api/app/reef-check/config
+GET    /api/app/reef-check/surveys
+POST   /api/app/reef-check/surveys
+GET    /api/app/reef-check/surveys/{id}
+PUT    /api/app/reef-check/surveys/{id}
+DELETE /api/app/reef-check/surveys/{id}
+GET    /api/app/reef-check/surveys/{id}/report
+```
+
+The detail endpoint returns the survey header plus `recorders`, `segments`, all 160
+`substratePoints`, `substrateBleaching`, and `metricCounts`. `PUT` replaces the complete
+survey payload atomically. The report endpoint returns substrate coverage by segment,
+live coral cover, and average/SD/SE summaries for biological and impact metrics.
+
 ## FE Server Integration Pattern
 
 Recommended same-site browser flow:

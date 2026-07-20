@@ -134,6 +134,48 @@ type ReefCheckSurveyResponse struct {
 	UpdatedAt           string   `json:"updatedAt"`
 }
 
+type ReefCheckSurveyDetailResponse struct {
+	ReefCheckSurveyResponse
+	Recorders          []ReefCheckRecorderRequest    `json:"recorders"`
+	Segments           []ReefCheckSegmentRequest     `json:"segments"`
+	SubstratePoints    []SubstratePointRequest       `json:"substratePoints"`
+	SubstrateBleaching []SubstrateBleachingRequest   `json:"substrateBleaching"`
+	MetricCounts       []ReefCheckMetricCountRequest `json:"metricCounts"`
+}
+
+type ReefCheckReportResponse struct {
+	Survey                ReefCheckSurveyResponse          `json:"survey"`
+	LiveCoralCoverPercent float64                          `json:"liveCoralCoverPercent"`
+	Substrate             []ReefCheckSubstrateSummary      `json:"substrate"`
+	Metrics               []ReefCheckMetricSummaryResponse `json:"metrics"`
+	Impacts               []ReefCheckImpactSummaryResponse `json:"impacts"`
+}
+
+type ReefCheckSubstrateSummary struct {
+	Category               string    `json:"category"`
+	CoveragePercent        float64   `json:"coveragePercent"`
+	SegmentCoveragePercent []float64 `json:"segmentCoveragePercent"`
+	StandardDeviation      float64   `json:"standardDeviation"`
+	StandardError          float64   `json:"standardError"`
+}
+
+type ReefCheckMetricSummaryResponse struct {
+	Module            string  `json:"module"`
+	MetricKey         string  `json:"metricKey"`
+	SegmentCounts     []int   `json:"segmentCounts"`
+	Average           float64 `json:"average"`
+	StandardDeviation float64 `json:"standardDeviation"`
+	StandardError     float64 `json:"standardError"`
+}
+
+type ReefCheckImpactSummaryResponse struct {
+	MetricKey         string  `json:"metricKey"`
+	SegmentGrades     []int   `json:"segmentGrades"`
+	Average           float64 `json:"average"`
+	StandardDeviation float64 `json:"standardDeviation"`
+	StandardError     float64 `json:"standardError"`
+}
+
 type SaveReefCheckSurveyRequest struct {
 	SurveyDate          string                        `json:"surveyDate"`
 	SiteID              string                        `json:"siteId"`

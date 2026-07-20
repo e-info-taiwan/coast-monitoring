@@ -215,6 +215,8 @@ const state = {
   records: {},
   reefCheckConfig: null,
   reefCheckSurveys: [],
+  reefCheckReport: null,
+  reefCheckEditing: null,
   reefCheckActiveSheet: "substrate",
   selectedIds: {},
   history: {},
@@ -1070,6 +1072,7 @@ function renderLegacySpeciesObservation() {
         <button type="submit" class="primary-button" ${disabled ? "disabled" : ""}>Submit observations</button>
       </div>
     </form>
+    ${renderReefCheckReport()}
     <section class="dash-panel">
       <header class="dash-panel-head">
         <div>
@@ -1386,6 +1389,7 @@ function renderReefCheck() {
 
       <div class="entry-actions">
         <span class="submit-hint">${escapeHtml(copy.submitHint)}</span>
+        ${state.reefCheckEditing ? '<button type="button" class="tiny-button" id="rc-cancel-edit">Cancel edit</button>' : ""}
         <button type="submit" class="primary-button">${escapeHtml(copy.submitLabel)}</button>
       </div>
     </form>
@@ -1406,6 +1410,8 @@ function renderReefCheck() {
   $("#reef-check-form")?.addEventListener("submit", handleReefCheckSubmit)
   bindReefCheckDatePicker()
   bindReefCheckSheetTabs()
+  bindReefCheckSurveyActions()
+  populateReefCheckEditForm()
 }
 
 function reefCheckActiveSheet() {
@@ -1839,9 +1845,86 @@ function renderReefCheckMiniRow(survey) {
         <strong>${escapeHtml(survey.surveyDate || "survey")} · ${escapeHtml(survey.fishLengthMode || "")}</strong>
         <p>${escapeHtml(survey.id || "")}</p>
       </div>
-      <time class="audit-mini-time">${escapeHtml(formatRelativeTime(survey.createdAt))}</time>
+      <div class="audit-mini-time">
+        <button type="button" class="tiny-button" data-rc-edit="${escapeHtml(survey.id)}">Edit</button>
+        <button type="button" class="tiny-button" data-rc-report="${escapeHtml(survey.id)}">Report</button>
+        <button type="button" class="tiny-button danger-tiny" data-rc-delete="${escapeHtml(survey.id)}">Delete</button>
+      </div>
     </article>
   `
+}
+
+function renderReefCheckReport() {
+  const report = state.reefCheckReport
+  if (!report) return ""
+  const substrateRows = (report.substrate || []).map((item) => `
+    <tr><td>${escapeHtml(item.category)}</td><td>${Number(item.coveragePercent || 0).toFixed(2)}%</td><td>${Number(item.standardDeviation || 0).toFixed(2)}</td><td>${Number(item.standardError || 0).toFixed(2)}</td></tr>
+  `).join("")
+  return `
+    <section class="dash-panel" aria-live="polite">
+      <header class="dash-panel-head"><div><h2>Survey report</h2><p>${escapeHtml(report.survey?.surveyDate || "")} · live coral cover ${Number(report.liveCoralCoverPercent || 0).toFixed(2)}%</p></div><button type="button" class="tiny-button" id="rc-close-report">Close</button></header>
+      <div class="table-wrap"><table><thead><tr><th>Substrate</th><th>Coverage</th><th>SD</th><th>SE</th></tr></thead><tbody>${substrateRows}</tbody></table></div>
+      <p class="meta-line">${(report.metrics || []).length} biological metrics · ${(report.impacts || []).length} impact metrics</p>
+    </section>
+  `
+}
+
+function bindReefCheckSurveyActions() {
+  resourcePanel.querySelectorAll("[data-rc-edit]").forEach((button) => button.addEventListener("click", async () => {
+    try {
+      state.reefCheckEditing = await apiFetch(`/app/reef-check/surveys/${button.dataset.rcEdit}`)
+      state.reefCheckReport = null
+      renderReefCheck()
+      resourcePanel.querySelector("#reef-check-form")?.scrollIntoView({ behavior: "smooth", block: "start" })
+    } catch (error) {
+      showAlert({ tone: "danger", title: "Survey 載入失敗", message: error?.message || "", id: "reef-check-edit" })
+    }
+  }))
+  resourcePanel.querySelectorAll("[data-rc-report]").forEach((button) => button.addEventListener("click", async () => {
+    try {
+      state.reefCheckReport = await apiFetch(`/app/reef-check/surveys/${button.dataset.rcReport}/report`)
+      renderReefCheck()
+    } catch (error) {
+      showAlert({ tone: "danger", title: "Report 載入失敗", message: error?.message || "", id: "reef-check-report" })
+    }
+  }))
+  resourcePanel.querySelectorAll("[data-rc-delete]").forEach((button) => button.addEventListener("click", async () => {
+    if (!window.confirm("確定刪除這筆 Reef Check survey？此動作無法復原。")) return
+    try {
+      await apiFetch(`/app/reef-check/surveys/${button.dataset.rcDelete}`, { method: "DELETE" })
+      state.reefCheckReport = null
+      await loadReefCheckSurveys()
+      renderReefCheck()
+    } catch (error) {
+      showAlert({ tone: "danger", title: "刪除失敗", message: error?.message || "", id: "reef-check-delete" })
+    }
+  }))
+  $("#rc-close-report")?.addEventListener("click", () => { state.reefCheckReport = null; renderReefCheck() })
+  $("#rc-cancel-edit")?.addEventListener("click", () => { state.reefCheckEditing = null; renderReefCheck() })
+}
+
+function populateReefCheckEditForm() {
+  const detail = state.reefCheckEditing
+  const form = $("#reef-check-form")
+  if (!detail || !form) return
+  const values = {
+    surveyDate: detail.surveyDate, depthM: detail.depthM, countryIsland: detail.countryIsland,
+    teamLeader: detail.teamLeader, surveyTime: detail.surveyTime, visibility: detail.visibility,
+    temperature: detail.temperature, fishLengthMode: detail.fishLengthMode,
+    generalComments: detail.generalComments, substrateComments: detail.substrateComments,
+    rkcReason: detail.rkcReason, rkcBleachingPercent: detail.rkcBleachingPercent,
+  }
+  Object.entries(values).forEach(([name, value]) => { const input = form.elements.namedItem(name); if (input && value != null) input.value = value })
+  ;(detail.recorders || []).forEach((recorder) => { const input = form.elements.namedItem(`recorder_${recorder.role}`); if (input) input.value = recorder.recorderName || "" })
+  ;(detail.substratePoints || []).forEach((point) => { const input = form.elements.namedItem(`substrate_${point.segmentIndex}_${point.pointIndex}`); if (input) input.value = point.code })
+  ;(detail.substrateBleaching || []).forEach((row) => {
+    const hc = form.elements.namedItem(`hc_bleach_${row.segmentIndex}`); if (hc) hc.value = row.hcBleachedCount
+    const sc = form.elements.namedItem(`sc_bleach_${row.segmentIndex}`); if (sc) sc.value = row.scBleachedCount
+  })
+  ;(detail.metricCounts || []).forEach((count) => {
+    const input = form.querySelector(`[data-module="${CSS.escape(count.module)}"][data-key="${CSS.escape(count.metricKey)}"][data-segment="${Number(count.segmentIndex)}"]`)
+    if (input) input.value = count.count
+  })
 }
 
 async function handleReefCheckSubmit(event) {
@@ -1850,6 +1933,7 @@ async function handleReefCheckSubmit(event) {
   const form = event.target
   const formData = new FormData(form)
   const payload = {
+    siteId: state.reefCheckEditing?.siteId || "",
     surveyDate: String(formData.get("surveyDate") || "").trim(),
     depthM: Number(formData.get("depthM") || 0),
     fishLengthMode: String(formData.get("fishLengthMode") || "").trim(),
@@ -1886,7 +1970,9 @@ async function handleReefCheckSubmit(event) {
     submitButton.textContent = "Submitting…"
   }
   try {
-    await apiFetch("/app/reef-check/surveys", { method: "POST", body: payload })
+    const editingID = state.reefCheckEditing?.id
+    await apiFetch(editingID ? `/app/reef-check/surveys/${editingID}` : "/app/reef-check/surveys", { method: editingID ? "PUT" : "POST", body: payload })
+    state.reefCheckEditing = null
     await loadReefCheckSurveys()
     if (isAdmin()) {
       await loadResource("audit_logs")

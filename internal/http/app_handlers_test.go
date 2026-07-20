@@ -496,3 +496,17 @@ func (s *fakeAppReefCheckService) Create(ctx context.Context, actor policy.User,
 		UpdatedBy: actor.ID,
 	}, nil
 }
+
+func (s *fakeAppReefCheckService) Get(context.Context, policy.User, uuid.UUID) (service.ReefCheckSurveyDetail, error) {
+	return service.ReefCheckSurveyDetail{}, nil
+}
+
+func (s *fakeAppReefCheckService) Update(ctx context.Context, actor policy.User, _ uuid.UUID, input service.ReefCheckSurveyInput) (service.ReefCheckSurvey, error) {
+	return s.Create(ctx, actor, input)
+}
+
+func (s *fakeAppReefCheckService) Delete(context.Context, policy.User, uuid.UUID) error { return nil }
+
+func (s *fakeAppReefCheckService) Report(context.Context, policy.User, uuid.UUID) (service.ReefCheckSurveyReport, error) {
+	return service.ReefCheckSurveyReport{}, nil
+}

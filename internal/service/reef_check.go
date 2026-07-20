@@ -63,6 +63,22 @@ type ReefCheckSurvey struct {
 	UpdatedAt           time.Time
 }
 
+type ReefCheckSurveyDetail struct {
+	Survey             ReefCheckSurvey
+	Recorders          []ReefCheckRecorderInput
+	Segments           []ReefCheckSegmentInput
+	SubstratePoints    []SubstratePointInput
+	SubstrateBleaching []SubstrateBleachingInput
+	MetricCounts       []ReefCheckMetricCountInput
+}
+
+type ReefCheckSurveyReport struct {
+	Survey    ReefCheckSurvey
+	Substrate SubstrateSummary
+	Metrics   map[ReefCheckMetricID]MetricSummary
+	Impacts   map[ReefCheckMetricID]ImpactSummary
+}
+
 type ReefCheckSurveyInput struct {
 	SurveyDate          time.Time
 	SiteID              uuid.UUID
@@ -176,6 +192,9 @@ type ReefCheckSurveyRepository interface {
 	ListReefCheckSurveys(ctx context.Context) ([]ReefCheckSurvey, error)
 	ListReefCheckSurveysByCreator(ctx context.Context, creatorID uuid.UUID) ([]ReefCheckSurvey, error)
 	CreateReefCheckSurvey(ctx context.Context, record ReefCheckSurveyRecord) (ReefCheckSurvey, error)
+	GetReefCheckSurvey(ctx context.Context, id uuid.UUID) (ReefCheckSurveyDetail, error)
+	UpdateReefCheckSurvey(ctx context.Context, id uuid.UUID, record ReefCheckSurveyRecord) (ReefCheckSurvey, error)
+	DeleteReefCheckSurvey(ctx context.Context, id uuid.UUID) error
 }
 
 type ReefCheckSurveyService struct {
@@ -201,6 +220,63 @@ func (s ReefCheckSurveyService) ListForApp(ctx context.Context, actor policy.Use
 		return s.Surveys.ListReefCheckSurveysByCreator(ctx, actor.ID)
 	}
 	return s.Surveys.ListReefCheckSurveys(ctx)
+}
+
+func (s ReefCheckSurveyService) Get(ctx context.Context, actor policy.User, id uuid.UUID) (ReefCheckSurveyDetail, error) {
+	if !policy.CanUseAppAPI(actor) {
+		return ReefCheckSurveyDetail{}, ErrForbidden
+	}
+	detail, err := s.Surveys.GetReefCheckSurvey(ctx, id)
+	if err != nil {
+		return ReefCheckSurveyDetail{}, err
+	}
+	if actor.Role != policy.RoleAdmin && detail.Survey.CreatedBy != actor.ID {
+		return ReefCheckSurveyDetail{}, ErrForbidden
+	}
+	return detail, nil
+}
+
+func (s ReefCheckSurveyService) Update(ctx context.Context, actor policy.User, id uuid.UUID, input ReefCheckSurveyInput) (ReefCheckSurvey, error) {
+	detail, err := s.Get(ctx, actor, id)
+	if err != nil {
+		return ReefCheckSurvey{}, err
+	}
+	record, err := validateReefCheckSurveyInput(actor, input)
+	if err != nil {
+		return ReefCheckSurvey{}, err
+	}
+	record.CreatedBy = detail.Survey.CreatedBy
+	if record.SiteID == uuid.Nil {
+		record.SiteID = detail.Survey.SiteID
+	}
+	return s.Surveys.UpdateReefCheckSurvey(ctx, id, record)
+}
+
+func (s ReefCheckSurveyService) Delete(ctx context.Context, actor policy.User, id uuid.UUID) error {
+	if _, err := s.Get(ctx, actor, id); err != nil {
+		return err
+	}
+	return s.Surveys.DeleteReefCheckSurvey(ctx, id)
+}
+
+func (s ReefCheckSurveyService) Report(ctx context.Context, actor policy.User, id uuid.UUID) (ReefCheckSurveyReport, error) {
+	detail, err := s.Get(ctx, actor, id)
+	if err != nil {
+		return ReefCheckSurveyReport{}, err
+	}
+	substrate, err := CalculateSubstrateSummary(detail.SubstratePoints)
+	if err != nil {
+		return ReefCheckSurveyReport{}, err
+	}
+	metrics, err := CalculateMetricSummaries(detail.MetricCounts)
+	if err != nil {
+		return ReefCheckSurveyReport{}, err
+	}
+	impacts, err := CalculateImpactSummaries(detail.MetricCounts)
+	if err != nil {
+		return ReefCheckSurveyReport{}, err
+	}
+	return ReefCheckSurveyReport{Survey: detail.Survey, Substrate: substrate, Metrics: metrics, Impacts: impacts}, nil
 }
 
 func validateReefCheckSurveyInput(actor policy.User, input ReefCheckSurveyInput) (ReefCheckSurveyRecord, error) {
