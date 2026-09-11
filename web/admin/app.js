@@ -1,3 +1,5 @@
+import { createReefData } from "./reef-data.js"
+
 const API_BASE = `${window.location.origin}/api`
 const ADMIN_API_BASE = `${API_BASE}/admin`
 const APP_API_BASE = `${API_BASE}/app`
@@ -41,6 +43,7 @@ const demoClearButton = $("#demo-clear")
 const OVERVIEW_KEY = "overview"
 const ENTRY_KEY = "observation"
 const REEF_CHECK_KEY = "reef_check"
+const REEF_DATA_KEY = "reef_data"
 
 const REEF_CHECK_SHEETS = [
   { key: "substrate", label: "底質", title: "Line Transect" },
@@ -209,7 +212,7 @@ const resourceConfigs = {
 }
 
 const state = {
-  activeKey: ENTRY_KEY,
+  activeKey: REEF_DATA_KEY,
   auth: null,
   csrfToken: "",
   records: {},
@@ -226,6 +229,8 @@ const state = {
   demoLoading: false,
   demoError: false,
 }
+
+const reefData = createReefData({ apiFetch, onCount: () => renderSidebar() })
 
 const NAV_TRANSITION_MS = 300
 const DEMO_LOADING_MS = 2500
@@ -547,7 +552,7 @@ async function loadResource(resourceKey) {
 
 async function loadWorkspace() {
   const keys = Object.keys(resourceConfigs).filter(canLoadResource)
-  await Promise.all([...keys.map((key) => loadResource(key)), loadReefCheckData()])
+  await Promise.all([...keys.map((key) => loadResource(key)), loadReefCheckData(), ...(isAdmin() ? [reefData.load()] : [])])
   if (!keys.includes(ENTRY_KEY)) {
     await loadResource(ENTRY_KEY)
   }
@@ -624,8 +629,9 @@ function renderSessionBadges() {
 
 function renderSidebar() {
   const navItems = [
-    { key: ENTRY_KEY, title: "Observation", count: null },
-    { key: REEF_CHECK_KEY, title: "Reef Check", count: state.reefCheckSurveys.length },
+    ...(isAdmin() ? [{ key: REEF_DATA_KEY, title: "Reef Check 觀測資料", count: reefData.count }] : []),
+    { key: ENTRY_KEY, title: "舊版資料輸入", count: null },
+    { key: REEF_CHECK_KEY, title: "舊版 Reef Check", count: state.reefCheckSurveys.length },
     { key: OVERVIEW_KEY, title: "Overview", count: null },
     ...Object.entries(resourceConfigs)
       .filter(([key]) => key !== ENTRY_KEY)
@@ -650,6 +656,7 @@ function renderSidebar() {
         closeSidebar()
         return
       }
+      if (state.activeKey === REEF_DATA_KEY && !reefData.leave()) return
       state.activeKey = key
       state.draft = null
       closeDrawer({ rerender: false })
@@ -2037,6 +2044,14 @@ function reefCheckMetricPayload(form) {
 }
 
 function renderResource(resourceKey) {
+  if (resourceKey === REEF_DATA_KEY) {
+    sectionEyebrow.textContent = "REEF CHECK"
+    sectionTitle.textContent = "Reef Check 觀測資料"
+    sectionDescription.textContent = "實際調查的場次、穿越線、底質與生物觀測。"
+    if (mobileSectionTitle) mobileSectionTitle.textContent = "Reef Check 觀測資料"
+    reefData.render(resourcePanel)
+    return
+  }
   if (resourceKey === ENTRY_KEY) {
     renderObservation()
     return
@@ -2238,6 +2253,8 @@ function closeSidebar() {
 }
 
 async function signOut() {
+  if (!reefData.leave()) return
+  reefData.reset()
   try {
     await apiFetch("/auth/logout", { method: "POST" })
   } catch (_) {
@@ -2365,6 +2382,7 @@ passwordLoginForm?.addEventListener("submit", async (event) => {
       body: { email, password },
     })
     saveSession(session)
+    state.activeKey = isAdmin() ? REEF_DATA_KEY : ENTRY_KEY
     if (!hasAccess()) {
       showView("access")
       return

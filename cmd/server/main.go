@@ -97,6 +97,7 @@ func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider http
 			Catalog:      service.CatalogService{Catalog: catalogRepo},
 			Observations: service.ObservationService{Observations: observationRepo},
 			ReefCheck:    service.ReefCheckSurveyService{Surveys: reefCheckRepo},
+			ReefData:     repository.NewReefDataRepository(pool),
 			AuditLogs:    auditLogRepo,
 			Mutations:    postgresAdminMutationRunner{pool: pool},
 		},
@@ -137,6 +138,7 @@ func (r postgresAdminMutationRunner) RunAdminMutation(ctx context.Context, fn fu
 		Catalog:      service.CatalogService{Catalog: catalogRepo},
 		Observations: service.ObservationService{Observations: observationRepo},
 		ReefCheck:    service.ReefCheckSurveyService{Surveys: reefCheckRepo},
+		ReefData:     repository.NewReefDataRepository(tx),
 		AuditLogs:    auditLogRepo,
 	}); err != nil {
 		return err

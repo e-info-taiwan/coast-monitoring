@@ -2,6 +2,13 @@
 
 Coast Monitoring is a single Go service backed by PostgreSQL. The server exposes admin APIs under `/api/admin`, app-facing APIs under `/api/app`, authentication endpoints, and the static admin UI from `web/admin`.
 
+## Reef Check v1.7 imported observations
+
+The admin landing page reads imported observations from `survey → event → transect`.
+It supports filtering, detail views, and audited edits of existing transect metadata and observations.
+The legacy `reef_check_surveys` workflow remains separate. See [the v1.7 admin guide](docs/reef-check-v17-admin.md)
+for supported fields, calculation rules, local database verification, and API details.
+
 ## Local Development
 
 1. Copy the example environment file:
@@ -16,7 +23,7 @@ cp .env.example .env
 docker compose up -d db
 ```
 
-3. Initialize the database schema.
+3. Initialize or upgrade the database schema.
 
 The local Docker Compose database applies `migrations/000001_init.sql` automatically when Postgres creates a fresh `postgres_data` volume. If you are using an existing volume or an external database, apply the SQL in `migrations/000001_init.sql` manually before starting the Go server.
 
@@ -90,6 +97,8 @@ For quick frontend syntax checks, run `node --check` against changed JavaScript 
 
 ```bash
 node --check web/admin/app.js
+node --check web/admin/reef-data.js
+node --test web/admin/tests/*.test.mjs
 node --check web/public/species.js
 node --check web/public/location.js
 ```

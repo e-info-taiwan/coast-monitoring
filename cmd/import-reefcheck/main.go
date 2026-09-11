@@ -31,7 +31,7 @@ func main() {
 		*dbURL = os.Getenv("DATABASE_URL")
 	}
 	if *dbURL == "" {
-		*dbURL = "user=coast_app password=UWyU43dOu57XXPcP9CdNjRC6 dbname=coast_monitoring host=127.0.0.1 port=5433 sslmode=disable"
+		log.Fatal("missing --db-url or DATABASE_URL; choose the target database explicitly")
 	}
 
 	ctx := context.Background()

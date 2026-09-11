@@ -7,6 +7,11 @@
 > reporting milestone. Migration `000004_reef_check_v12_schema.sql` is a target schema and
 > is not yet the persistence path used by the application API.
 
+> Update (2026-09-11): the admin now also reads and edits the v1.7 imported
+> `survey → event → transect` data through dedicated admin APIs. The earlier
+> UUID-based workflow below remains separate. See [v1.7 admin guide](reef-check-v17-admin.md)
+> for the current supported scope and verified local dataset counts.
+
 ## Sources
 
 - `/Users/hcchien/Downloads/RC網站規劃資料.pdf`

@@ -18,6 +18,13 @@ substitutions:
   _CONCURRENCY: "20"
 
 steps:
+  - id: test-admin-data
+    name: node:22-alpine
+    entrypoint: sh
+    args:
+      - -c
+      - node --check web/admin/app.js && node --check web/admin/reef-data.js && node --test web/admin/tests/*.test.mjs
+
   - id: test
     name: golang:1.23-alpine
     entrypoint: sh

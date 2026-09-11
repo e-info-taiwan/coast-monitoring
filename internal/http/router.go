@@ -59,6 +59,10 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Patch("/observations/{id}", deps.AdminHandlers.UpdateObservation)
 		r.Delete("/observations/{id}", deps.AdminHandlers.DeleteObservation)
 		r.Get("/audit-logs", deps.AdminHandlers.ListAuditLogs)
+		r.Get("/reef-check-data/events", deps.AdminHandlers.ListReefDataEvents)
+		r.Get("/reef-check-data/codes", deps.AdminHandlers.ReefDataCodes)
+		r.Get("/reef-check-data/events/{id}", deps.AdminHandlers.GetReefDataEvent)
+		r.Patch("/reef-check-data/transects/{id}", deps.AdminHandlers.UpdateReefDataTransect)
 	})
 	r.Route("/api/app", func(r chi.Router) {
 		r.Use(deps.CORS(deps.AppAllowedOrigins))

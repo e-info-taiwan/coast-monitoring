@@ -23,6 +23,7 @@ type AdminHandlers struct {
 	Catalog      AdminCatalogService
 	Observations AdminObservationService
 	ReefCheck    AppReefCheckService
+	ReefData     AdminReefDataService
 	AuditLogs    AdminAuditLogService
 	Mutations    AdminMutationRunner
 }
@@ -66,6 +67,7 @@ type AdminMutationServices struct {
 	Catalog      AdminCatalogService
 	Observations AdminObservationService
 	ReefCheck    AppReefCheckService
+	ReefData     AdminReefDataService
 	AuditLogs    AdminAuditLogService
 }
 

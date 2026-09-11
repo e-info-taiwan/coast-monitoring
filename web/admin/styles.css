@@ -3081,3 +3081,48 @@ p {
 body.no-scroll {
   overflow: hidden;
 }
+
+/* Imported Reef Check data workspace */
+.rd-stats { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1rem; margin:1.5rem 0; }
+.rd-stats > div { padding:1.1rem; border:1px solid var(--line, #dbe5e3); border-radius:14px; background:#f1f7f5; display:grid; gap:.3rem; }
+.rd-stats strong { font-size:1.8rem; color:#135c50; }
+.rd-stats span, .rd-info dt { font-size:.8rem; color:#536d67; }
+.rd-filters { display:flex; flex-wrap:wrap; gap:.8rem; align-items:end; margin:1.5rem 0; }
+.rd-filters label { display:grid; gap:.4rem; font-size:.8rem; min-width:130px; flex:1; }
+.rd-filters input,.rd-filters select,.rd-metadata input,.rd-metadata textarea,.rd-points select,.rd-number { width:100%; box-sizing:border-box; padding:.6rem; border:1px solid #b8ccc6; border-radius:7px; background:white; color:#163d35; font:inherit; }
+.rd-table-scroll { max-width:100%; overflow-x:auto; border:1px solid #dce7e3; border-radius:12px; }
+.rd-table { width:100%; border-collapse:collapse; font-size:.85rem; text-align:left; }
+.rd-table th,.rd-table td { padding:.85rem .7rem; border-bottom:1px solid #e5ede9; min-width:65px; vertical-align:top; }
+.rd-table thead { background:#edf5f1; color:#32594e; }
+.rd-table tbody th { min-width:160px; font-weight:500; }
+.rd-table tr:last-child > * { border-bottom:0; }
+.rd-table small,.rd-info small { display:block; font-size:.73rem; color:#627a71; margin-top:.3rem; }
+.rd-tags { display:flex; gap:.4rem; flex-wrap:wrap; }
+.rd-tags span { font-size:.75rem; border-radius:6px; background:#e8f2ed; padding:.35rem .55rem; }
+.rd-pagination { display:flex; justify-content:end; gap:.5rem; margin:1rem 0; }
+.rd-info { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:1rem; padding:1.2rem; background:#f4f8f5; border-radius:12px; }
+.rd-info dd { margin:.5rem 0 0; overflow-wrap:anywhere; font-size:.85rem; }
+.rd-id { overflow-wrap:anywhere; color:#577569; font-family:monospace; }
+.rd-tabs { display:flex; align-items:center; flex-wrap:wrap; gap:.6rem; margin:1.5rem 0; }
+.rd-tabs .rd-selected { background:#205f50; color:white; }
+.rd-missing { color:#6f7874; font-size:.8rem; }
+.rd-toolbar { display:flex; gap:1rem; justify-content:space-between; align-items:center; flex-wrap:wrap; }
+.rd-section { margin:1.5rem 0; padding-top:1rem; border-top:1px solid #dce6e0; }
+.rd-section h3 { margin-bottom:1rem; }
+.rd-metadata { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; }
+.rd-metadata label { display:grid; gap:.5rem; font-size:.85rem; }
+.rd-value { white-space:pre-wrap; overflow-wrap:anywhere; color:#536a60; }
+.rd-line-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; gap:1rem; margin-top:1rem; }
+.rd-line-grid details { border:1px solid #d7e5dc; border-radius:10px; padding:1rem; }
+.rd-section summary { cursor:pointer; font-weight:600; padding:.3rem 0; }
+.rd-points { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:.5rem; margin-top:1rem; }
+.rd-points label { display:grid; gap:.3rem; font-size:.73rem; }
+.rd-points strong { border-radius:5px; background:#edf4ed; padding:.4rem; font-weight:500; }
+.rd-points .rd-unknown { background:#fff1d6; color:#8d631c; }
+.rd-points select { padding:.4rem .15rem; }
+.rd-number { min-width:72px; max-width:100px; }
+.rd-summary { margin-top:1.3rem; }
+.rd-notice { color:#225e4f; white-space:pre-wrap; }
+.rd-notice[role=alert] { color:#a32d21; }
+@media(max-width:900px) { .rd-info,.rd-stats { grid-template-columns:repeat(2,minmax(0,1fr)); } .rd-line-grid { grid-template-columns:1fr; } }
+@media(max-width:520px) { .rd-metadata { grid-template-columns:1fr; } .rd-stats { gap:.5rem; } .rd-stats > div { padding:.8rem; } .rd-filters label { min-width:100%; } .rd-info { grid-template-columns:1fr; } }
