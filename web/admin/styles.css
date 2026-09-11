@@ -1723,6 +1723,11 @@ p {
   color: var(--caution);
 }
 
+.stat-icon.tone-reef {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
 .stat-label {
   font-size: 13px;
   font-weight: 500;

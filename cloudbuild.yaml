@@ -14,7 +14,7 @@ substitutions:
   _SESSION_SECRET_SECRET: coast-session-secret:latest
   _GOOGLE_CLIENT_SECRET_SECRET: coast-google-client-secret:latest
   _MIN_INSTANCES: "0"
-  _MAX_INSTANCES: "2"
+  _MAX_INSTANCES: "1"
   _CONCURRENCY: "20"
 
 steps:

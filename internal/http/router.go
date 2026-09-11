@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"encoding/json"
+	"mime"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -9,6 +10,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 )
+
+func init() {
+	_ = mime.AddExtensionType(".mjs", "text/javascript; charset=utf-8")
+}
 
 type Dependencies struct {
 	AuthHandlers        *AuthHandlers

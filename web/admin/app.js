@@ -915,7 +915,19 @@ function renderDashboard() {
     return
   }
   const keys = ["users", "location", "species", "admin_observations", "audit_logs"]
-  const cards = keys.map((key) => {
+  const reefCard = isAdmin()
+    ? `
+      <button type="button" class="stat-card" data-jump="${REEF_DATA_KEY}">
+        <div class="stat-head">
+          <div class="stat-icon tone-reef">R</div>
+          <span class="stat-label">Reef Check 觀測資料</span>
+        </div>
+        <div class="stat-value">${reefData.count ?? "726"}</div>
+        <div class="stat-sub">場次 Event 總數</div>
+      </button>
+    `
+    : ""
+  const cards = reefCard + keys.map((key) => {
     const config = resourceConfigs[key]
     const count = state.records[key]?.length ?? 0
     return `
