@@ -20,9 +20,12 @@ type Dependencies struct {
 
 func NewRouter(deps Dependencies) http.Handler {
 	r := chi.NewRouter()
-	r.Get("/healthz", func(w http.ResponseWriter, r *http.Request) {
+	healthHandler := func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
+	}
+	r.Get("/healthz", healthHandler)
+	r.Get("/health", healthHandler)
+	r.Get("/api/healthz", healthHandler)
 	r.Group(func(r chi.Router) {
 		r.Use(deps.CORS(appendOrigins(deps.AdminAllowedOrigins, deps.AppAllowedOrigins)))
 		r.Options("/api/session", noContent)
