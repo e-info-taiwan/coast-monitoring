@@ -89,18 +89,21 @@ func TestCreateUserRejectsInvalidEmail(t *testing.T) {
 	}
 }
 
-func TestCreateActiveUserRequiresLoginMechanism(t *testing.T) {
+func TestCreateActiveUserAllowsNoPasswordForGoogleAuth(t *testing.T) {
 	svc := UserService{Users: &fakeUserRepository{}}
 
-	_, err := svc.CreateUser(context.Background(), activeAdmin(), CreateUserInput{
+	user, err := svc.CreateUser(context.Background(), activeAdmin(), CreateUserInput{
 		Email:  "volunteer@example.com",
 		Name:   "Volunteer",
 		Role:   policy.RoleVolunteer,
 		Status: policy.StatusActive,
 	})
 
-	if !errors.Is(err, ErrValidation) {
-		t.Fatalf("CreateUser error = %v, want %v", err, ErrValidation)
+	if err != nil {
+		t.Fatalf("CreateUser error = %v, want nil", err)
+	}
+	if user.HasPassword {
+		t.Fatal("expected user to not have password")
 	}
 }
 
@@ -228,7 +231,7 @@ func TestUpdateUserNilFieldsPreserveExistingValues(t *testing.T) {
 	}
 }
 
-func TestUpdateUserRejectsActivationWithoutLoginMechanism(t *testing.T) {
+func TestUpdateUserAllowsActivationWithoutLoginMechanism(t *testing.T) {
 	id := uuid.New()
 	repo := &fakeUserRepository{
 		users: []User{
@@ -245,12 +248,15 @@ func TestUpdateUserRejectsActivationWithoutLoginMechanism(t *testing.T) {
 	svc := UserService{Users: repo}
 	status := policy.StatusActive
 
-	_, err := svc.UpdateUser(context.Background(), activeAdmin(), id, UpdateUserInput{
+	user, err := svc.UpdateUser(context.Background(), activeAdmin(), id, UpdateUserInput{
 		Status: &status,
 	})
 
-	if !errors.Is(err, ErrValidation) {
-		t.Fatalf("UpdateUser error = %v, want %v", err, ErrValidation)
+	if err != nil {
+		t.Fatalf("UpdateUser error = %v, want nil", err)
+	}
+	if user.Status != policy.StatusActive {
+		t.Fatalf("user.Status = %v, want %v", user.Status, policy.StatusActive)
 	}
 }
 

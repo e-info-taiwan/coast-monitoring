@@ -86,9 +86,9 @@ const resourceConfigs = {
       },
       {
         key: "password",
-        label: "Password",
+        label: "密碼 Password (選填，Google 登入可留空)",
         type: "password",
-        placeholder: "Set a new password",
+        placeholder: "選填；若使用者使用 Google 登入可直接留空",
         omitWhenBlank: true,
       },
     ],

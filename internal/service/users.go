@@ -104,7 +104,6 @@ func (s UserService) UpdateUser(ctx context.Context, actor policy.User, id uuid.
 	if err != nil {
 		return User{}, err
 	}
-	hasNewPassword := false
 	if input.Password != nil {
 		password := strings.TrimSpace(*input.Password)
 		if password == "" {
@@ -115,10 +114,6 @@ func (s UserService) UpdateUser(ctx context.Context, actor policy.User, id uuid.
 			return User{}, err
 		}
 		record.PasswordHash = &hash
-		hasNewPassword = true
-	}
-	if record.Status == policy.StatusActive && !existing.HasPassword && !hasNewPassword && record.GoogleSub == nil {
-		return User{}, fmt.Errorf("%w: active user requires password or google sub", ErrValidation)
 	}
 	return s.Users.UpdateUser(ctx, id, record)
 }
@@ -145,9 +140,6 @@ func validateCreateUserInput(input CreateUserInput) (CreateUserRecord, error) {
 	googleSub, err := cleanOptionalString(input.GoogleSub, "google sub")
 	if err != nil {
 		return CreateUserRecord{}, err
-	}
-	if input.Status == policy.StatusActive && strings.TrimSpace(input.Password) == "" && googleSub == nil {
-		return CreateUserRecord{}, fmt.Errorf("%w: active user requires password or google sub", ErrValidation)
 	}
 	return CreateUserRecord{
 		Email:     email,
