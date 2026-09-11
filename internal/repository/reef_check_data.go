@@ -116,7 +116,7 @@ func (r ReefDataRepository) Transect(ctx context.Context, id int, lock bool) (se
  'bleaching',COALESCE((SELECT jsonb_agg(to_jsonb(b) ORDER BY b.segment,b.id) FROM substrate_bleaching b WHERE b.transect_id=t.id),'[]'::jsonb),
  'belt',COALESCE((SELECT jsonb_agg(to_jsonb(b)||jsonb_build_object('taxon_group',x.taxon_group,'name_zh',x.name_zh,'name_en',COALESCE(x.name_en,''),'size_class',COALESCE(x.size_class,''),'is_aggregate',x.is_aggregate) ORDER BY x.sort_order,x.id,b.segment,b.id) FROM belt_observation b JOIN taxon x ON x.id=b.taxon_id WHERE b.transect_id=t.id),'[]'::jsonb),
  'impacts',COALESCE((SELECT jsonb_agg(to_jsonb(i)||jsonb_build_object('impact_group',x.impact_group,'name_zh',x.name_zh,'name_en',COALESCE(x.name_en,''),'value_type',x.value_type,'has_raw_count',x.has_raw_count) ORDER BY x.sort_order,x.id,i.segment,i.id) FROM impact_observation i JOIN impact_type x ON x.id=i.impact_type_id WHERE i.transect_id=t.id),'[]'::jsonb),
-  'participants',COALESCE((SELECT jsonb_agg(to_jsonb(p)||jsonb_build_object('name_zh',COALESCE(d.name_zh,''),'name_en',COALESCE(d.name_en,''),'reef_check_code',COALESCE(d.reef_check_code,''),'user_id',COALESCE(p.user_id,d.user_id),'user_email',COALESCE(u.email,''),'user_name',COALESCE(u.display_name,'')) ORDER BY p.role,p.id) FROM transect_participant p JOIN diver d ON d.id=p.diver_id LEFT JOIN users u ON u.id=COALESCE(p.user_id,d.user_id) WHERE p.transect_id=t.id),'[]'::jsonb))
+  'participants',COALESCE((SELECT jsonb_agg(to_jsonb(p)||jsonb_build_object('name_zh',COALESCE(d.name_zh,''),'name_en',COALESCE(d.name_en,''),'reef_check_code',COALESCE(d.reef_check_code,''),'user_id',COALESCE(p.user_id,d.user_id),'user_email',COALESCE(u.email,''),'user_name',COALESCE(u.name,'')) ORDER BY p.role,p.id) FROM transect_participant p JOIN diver d ON d.id=p.diver_id LEFT JOIN users u ON u.id=COALESCE(p.user_id,d.user_id) WHERE p.transect_id=t.id),'[]'::jsonb))
   FROM transect t WHERE t.id=$1 AND t.event_id IS NOT NULL`, id).Scan(&raw)
 	if err != nil {
 		return t, translateError(err)
@@ -369,7 +369,7 @@ func (r ReefDataRepository) Sites(ctx context.Context) ([]service.ReefDataSite, 
 }
 
 func (r ReefDataRepository) Users(ctx context.Context) ([]service.ReefDataUser, error) {
-	rows, err := r.db.Query(ctx, `SELECT id, email, display_name, role FROM users WHERE status = 'active' ORDER BY email`)
+	rows, err := r.db.Query(ctx, `SELECT id, email, name, role FROM users WHERE status = 'active' ORDER BY email`)
 	if err != nil {
 		return nil, translateError(err)
 	}
@@ -413,7 +413,7 @@ func (r ReefDataRepository) AddParticipant(ctx context.Context, transectID int, 
 		err := r.db.QueryRow(ctx, `SELECT id FROM diver WHERE user_id=$1`, p.UserID).Scan(&diverID)
 		if err != nil {
 			var name, email string
-			if err := r.db.QueryRow(ctx, `SELECT display_name, email FROM users WHERE id=$1`, p.UserID).Scan(&name, &email); err != nil {
+			if err := r.db.QueryRow(ctx, `SELECT name, email FROM users WHERE id=$1`, p.UserID).Scan(&name, &email); err != nil {
 				return translateError(err)
 			}
 			displayName := p.NameZH

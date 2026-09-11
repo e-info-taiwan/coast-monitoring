@@ -186,16 +186,17 @@ export function createReefData({ apiFetch, onCount }) {
       const detail = await apiFetch(`/admin/reef-check-data/events/${id}`)
       if (request !== requestID || current !== panel) return
       s.detail = detail
-      s.transectID = detail.transects[0]?.id
+      s.transectID = detail.transects?.[0]?.id || null
       s.notice = ""
       renderDetail()
     } catch (error) {
+      console.error("Failed to load event:", error)
       if (request !== requestID || current !== panel) return
       renderList()
       const notice = document.createElement("p")
       notice.setAttribute("role", "alert")
       notice.className = "rd-notice"
-      notice.textContent = error.message
+      notice.textContent = `無法載入場次觀測 (${error.message})`
       panel.prepend(notice)
     }
   }
@@ -205,8 +206,19 @@ export function createReefData({ apiFetch, onCount }) {
   }
 
   function renderDetail() {
-    const e = s.detail.event
+    const e = s.detail?.event
+    if (!e) {
+      renderList()
+      return
+    }
     const t = currentTransect()
+    if (t) {
+      t.points = t.points || []
+      t.bleaching = t.bleaching || []
+      t.belt = t.belt || []
+      t.impacts = t.impacts || []
+      t.participants = t.participants || []
+    }
     panel.innerHTML = `
       <div class="panel-header">
         <div>
