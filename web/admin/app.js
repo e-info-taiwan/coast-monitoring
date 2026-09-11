@@ -46,7 +46,7 @@ const REEF_DATA_KEY = "reef_data"
 
 const resourceConfigs = {
   users: {
-    title: "Users",
+    title: "Users 使用者管理",
     eyebrow: "People",
     description: "Login users and their admin or volunteer role.",
     note: "Create password users or maintain role, status, and display name.",
@@ -95,7 +95,7 @@ const resourceConfigs = {
     canCreate: true,
   },
   location: {
-    title: "Location",
+    title: "Location 一般樣區",
     eyebrow: "Places",
     description: "Location names in Chinese and English.",
     note: "Use this table for bilingual location naming.",
@@ -128,7 +128,7 @@ const resourceConfigs = {
     canCreate: true,
   },
   species: {
-    title: "Species",
+    title: "Species 一般物種",
     eyebrow: "Biodiversity",
     description: "Species names in Chinese and English.",
     note: "Keep canonical species names here so other workflows can reference them cleanly.",
@@ -161,17 +161,17 @@ const resourceConfigs = {
     canCreate: true,
   },
   admin_observations: {
-    title: "Observation Records",
-    eyebrow: "Operations",
-    description: "Admin-wide observation review and correction.",
-    note: "Use the field entry page for daily entry; use this table for admin corrections.",
+    title: "Observations",
+    eyebrow: "Admin",
+    description: "All observation records with creator metadata.",
+    note: "Admin overview of raw observation entries across all locations.",
     listPath: "/admin/observations",
-    updatePath: (id) => `/admin/observations/${id}`,
     deletePath: (id) => `/admin/observations/${id}`,
     tableColumns: [
-      { key: "observedOn", label: "Observed on" },
+      { key: "observedOn", label: "Observed" },
       { key: "locationLabel", label: "Location" },
       { key: "speciesLabel", label: "Species" },
+      { key: "observerEmail", label: "Observer" },
       { key: "count", label: "Count" },
       { key: "updatedAt", label: "Updated" },
     ],
@@ -186,7 +186,7 @@ const resourceConfigs = {
     canCreate: false,
   },
   audit_logs: {
-    title: "Audit Logs",
+    title: "Audit Logs 審計日誌",
     eyebrow: "Operations",
     description: "System-generated operation history.",
     note: "Read-only trail of create, update, and delete operations.",
@@ -600,14 +600,14 @@ function canSeeNav(key) {
   if (isAdmin()) {
     return true
   }
-  return key === ENTRY_KEY
+  return key === "species" || key === "location"
 }
 
 function canLoadResource(key) {
   if (isAdmin()) {
     return true
   }
-  return ["location", "species", ENTRY_KEY].includes(key)
+  return ["location", "species"].includes(key)
 }
 
 function resourceListPath(key) {
@@ -796,9 +796,6 @@ async function loadResource(resourceKey) {
 async function loadWorkspace() {
   const keys = Object.keys(resourceConfigs).filter(canLoadResource)
   await Promise.all([...keys.map((key) => loadResource(key)), ...(isAdmin() ? [reefData.load()] : [])])
-  if (!keys.includes(ENTRY_KEY)) {
-    await loadResource(ENTRY_KEY)
-  }
 }
 
 function renderProviderList() {
@@ -856,20 +853,18 @@ function renderSidebar() {
       ],
     },
     {
-      title: "一般調查",
+      title: "基礎字典設定",
       items: [
-        { key: ENTRY_KEY, title: "一般物種觀測輸入", count: null },
-        { key: "species", title: resourceConfigs.species.title, count: state.records.species?.length ?? 0 },
-        { key: "location", title: resourceConfigs.location.title, count: state.records.location?.length ?? 0 },
-        { key: "admin_observations", title: resourceConfigs.admin_observations.title, count: state.records.admin_observations?.length ?? 0 },
+        { key: "species", title: "一般物種 (Species)", count: state.records.species?.length ?? 0 },
+        { key: "location", title: "一般樣區 (Locations)", count: state.records.location?.length ?? 0 },
       ],
     },
     {
       title: "系統管理",
       items: [
-        { key: OVERVIEW_KEY, title: "Overview", count: null },
-        { key: "users", title: resourceConfigs.users.title, count: state.records.users?.length ?? 0 },
-        { key: "audit_logs", title: resourceConfigs.audit_logs.title, count: state.records.audit_logs?.length ?? 0 },
+        { key: OVERVIEW_KEY, title: "系統總覽 (Overview)", count: null },
+        { key: "users", title: "使用者管理 (Users)", count: state.records.users?.length ?? 0 },
+        { key: "audit_logs", title: "審計日誌 (Audit Logs)", count: state.records.audit_logs?.length ?? 0 },
       ],
     },
   ]
@@ -1199,7 +1194,7 @@ function renderDashboard() {
     })
     return
   }
-  const keys = ["users", "location", "species", "admin_observations", "audit_logs"]
+  const keys = ["divers", "sites", "taxa", "substrate_types", "impact_types", "species", "location", "users", "audit_logs"]
   const reefCard = isAdmin()
     ? `
       <button type="button" class="stat-card" data-jump="${REEF_DATA_KEY}">
@@ -1795,7 +1790,7 @@ async function boot() {
       return
     }
     if (!canSeeNav(state.activeKey)) {
-      state.activeKey = ENTRY_KEY
+      state.activeKey = isAdmin() ? REEF_DATA_KEY : "species"
     }
     showView("app")
     await loadWorkspace()
@@ -1819,7 +1814,7 @@ passwordLoginForm?.addEventListener("submit", async (event) => {
       body: { email, password },
     })
     saveSession(session)
-    state.activeKey = isAdmin() ? REEF_DATA_KEY : ENTRY_KEY
+    state.activeKey = isAdmin() ? REEF_DATA_KEY : "species"
     if (!hasAccess()) {
       showView("access")
       return
