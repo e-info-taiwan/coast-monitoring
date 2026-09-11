@@ -575,6 +575,20 @@ func safeRedirectPath(value string) string {
 }
 
 func remoteIP(r *http.Request) string {
+	if xff := strings.TrimSpace(r.Header.Get("X-Forwarded-For")); xff != "" {
+		for _, part := range strings.Split(xff, ",") {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				continue
+			}
+			if host, _, err := net.SplitHostPort(part); err == nil {
+				part = host
+			}
+			if ip := net.ParseIP(part); ip != nil {
+				return ip.String()
+			}
+		}
+	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err == nil {
 		return host

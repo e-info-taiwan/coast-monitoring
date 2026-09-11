@@ -892,3 +892,89 @@ func stringPtr(value string) *string {
 func boolPtr(value bool) *bool {
 	return &value
 }
+
+func TestRemoteIP(t *testing.T) {
+	tests := []struct {
+		name       string
+		xff        string
+		remoteAddr string
+		want       string
+	}{
+		{
+			name:       "prefers first valid IP from X-Forwarded-For",
+			xff:        "203.0.113.195, 70.41.3.18, 150.172.238.178",
+			remoteAddr: "192.0.2.10:12345",
+			want:       "203.0.113.195",
+		},
+		{
+			name:       "handles single IP in X-Forwarded-For",
+			xff:        "203.0.113.195",
+			remoteAddr: "192.0.2.10:12345",
+			want:       "203.0.113.195",
+		},
+		{
+			name:       "handles IP with port in X-Forwarded-For",
+			xff:        "203.0.113.195:8080",
+			remoteAddr: "192.0.2.10:12345",
+			want:       "203.0.113.195",
+		},
+		{
+			name:       "handles IPv6 in X-Forwarded-For",
+			xff:        "2001:db8::1",
+			remoteAddr: "192.0.2.10:12345",
+			want:       "2001:db8::1",
+		},
+		{
+			name:       "skips invalid entries in X-Forwarded-For",
+			xff:        "unknown, 203.0.113.195",
+			remoteAddr: "192.0.2.10:12345",
+			want:       "203.0.113.195",
+		},
+		{
+			name:       "falls back to RemoteAddr when X-Forwarded-For is empty",
+			xff:        "",
+			remoteAddr: "192.0.2.10:12345",
+			want:       "192.0.2.10",
+		},
+		{
+			name:       "falls back to RemoteAddr without port",
+			xff:        "",
+			remoteAddr: "192.0.2.10",
+			want:       "192.0.2.10",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.RemoteAddr = tc.remoteAddr
+			if tc.xff != "" {
+				req.Header.Set("X-Forwarded-For", tc.xff)
+			}
+			got := remoteIP(req)
+			if got != tc.want {
+				t.Errorf("remoteIP() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestPasswordLoginUsesXForwardedForIP(t *testing.T) {
+	handlers := testAuthHandlers()
+	attempts := &fakeHTTPLoginAttemptRecorder{recentFailedCount: 10}
+	handlers.LoginAttempts = attempts
+	handlers.Config.LoginAttemptLimit = 5
+	handlers.Config.LoginAttemptTTL = 15 * time.Minute
+
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/password", bytes.NewBufferString(`{"email":"user@example.com","password":"wrong-password"}`))
+	req.RemoteAddr = "10.0.0.1:12345"
+	req.Header.Set("X-Forwarded-For", "203.0.113.195, 10.0.0.1")
+	rec := httptest.NewRecorder()
+
+	handlers.PasswordLogin(rec, req)
+
+	if !attempts.counted || attempts.countIP != "203.0.113.195" {
+		t.Fatalf("expected countIP = %q, got %q", "203.0.113.195", attempts.countIP)
+	}
+}
+
