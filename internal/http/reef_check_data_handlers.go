@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 )
 
 type AdminReefDataService interface {
@@ -28,6 +29,36 @@ type AdminReefDataService interface {
 	Divers(context.Context) ([]service.ReefDataDiver, error)
 	AddParticipant(context.Context, int, service.ReefDataParticipantInput) error
 	RemoveParticipant(context.Context, int) error
+
+	ListDivers(context.Context) ([]service.ReefDataDiver, error)
+	GetDiver(context.Context, int) (service.ReefDataDiver, error)
+	CreateDiver(context.Context, service.ReefDataDiverInput) (service.ReefDataDiver, error)
+	UpdateDiver(context.Context, int, service.ReefDataDiverInput) (service.ReefDataDiver, error)
+	DeleteDiver(context.Context, int) (service.ReefDataDiver, error)
+
+	ListSites(context.Context) ([]service.ReefDataSite, error)
+	GetSite(context.Context, int) (service.ReefDataSite, error)
+	CreateSite(context.Context, service.ReefDataSiteInput) (service.ReefDataSite, error)
+	UpdateSite(context.Context, int, service.ReefDataSiteInput) (service.ReefDataSite, error)
+	DeleteSite(context.Context, int) (service.ReefDataSite, error)
+
+	ListTaxa(context.Context) ([]service.ReefDataTaxon, error)
+	GetTaxon(context.Context, int) (service.ReefDataTaxon, error)
+	CreateTaxon(context.Context, service.ReefDataTaxonInput) (service.ReefDataTaxon, error)
+	UpdateTaxon(context.Context, int, service.ReefDataTaxonInput) (service.ReefDataTaxon, error)
+	DeleteTaxon(context.Context, int) (service.ReefDataTaxon, error)
+
+	ListSubstrateTypes(context.Context) ([]service.ReefDataSubstrateType, error)
+	GetSubstrateType(context.Context, string) (service.ReefDataSubstrateType, error)
+	CreateSubstrateType(context.Context, service.ReefDataSubstrateTypeInput) (service.ReefDataSubstrateType, error)
+	UpdateSubstrateType(context.Context, string, service.ReefDataSubstrateTypeInput) (service.ReefDataSubstrateType, error)
+	DeleteSubstrateType(context.Context, string) (service.ReefDataSubstrateType, error)
+
+	ListImpactTypes(context.Context) ([]service.ReefDataImpactType, error)
+	GetImpactType(context.Context, int) (service.ReefDataImpactType, error)
+	CreateImpactType(context.Context, service.ReefDataImpactTypeInput) (service.ReefDataImpactType, error)
+	UpdateImpactType(context.Context, int, service.ReefDataImpactTypeInput) (service.ReefDataImpactType, error)
+	DeleteImpactType(context.Context, int) (service.ReefDataImpactType, error)
 }
 
 func (h *AdminHandlers) ListReefDataEvents(w http.ResponseWriter, r *http.Request) {
@@ -330,6 +361,16 @@ func reefDataID(w http.ResponseWriter, r *http.Request) (int, bool) {
 	}
 	return id, true
 }
+
+func reefDataCodeParam(w http.ResponseWriter, r *http.Request) (string, bool) {
+	code := strings.TrimSpace(chi.URLParam(r, "code"))
+	if code == "" {
+		writeError(w, http.StatusBadRequest, "無效代碼")
+		return "", false
+	}
+	return code, true
+}
+
 func requireReefDataAdmin(w http.ResponseWriter, r *http.Request, configured bool) (policy.User, bool) {
 	actor, ok := requireAdminHandlerService(w, r, configured)
 	if !ok {
@@ -341,3 +382,549 @@ func requireReefDataAdmin(w http.ResponseWriter, r *http.Request, configured boo
 	}
 	return actor, true
 }
+
+// Divers
+func (h *AdminHandlers) ListDivers(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireReefDataAdmin(w, r, h != nil && h.ReefData != nil); !ok {
+		return
+	}
+	data, err := h.ReefData.ListDivers(r.Context())
+	if err != nil {
+		writeServiceError(w, err, "無法載入潛水員清單")
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func (h *AdminHandlers) CreateDiver(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	var input service.ReefDataDiverInput
+	r.Body = http.MaxBytesReader(w, r.Body, maxAdminRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "無效的建立內容")
+		return
+	}
+	var result service.ReefDataDiver
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		var createErr error
+		result, createErr = s.ReefData.CreateDiver(r.Context(), input)
+		if createErr != nil {
+			return createErr
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:diver:"+strconv.Itoa(result.ID)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionCreate, "diver", target, nil, result)
+	})
+	if err != nil {
+		writeServiceError(w, err, "建立潛水員失敗")
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (h *AdminHandlers) UpdateDiver(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	id, ok := reefDataID(w, r)
+	if !ok {
+		return
+	}
+	var input service.ReefDataDiverInput
+	r.Body = http.MaxBytesReader(w, r.Body, maxAdminRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "無效的修改內容")
+		return
+	}
+	var result service.ReefDataDiver
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		before, err := s.ReefData.GetDiver(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		result, err = s.ReefData.UpdateDiver(r.Context(), id, input)
+		if err != nil {
+			return err
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:diver:"+strconv.Itoa(id)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionUpdate, "diver", target, before, result)
+	})
+	if err != nil {
+		writeServiceError(w, err, "更新潛水員失敗")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *AdminHandlers) DeleteDiver(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	id, ok := reefDataID(w, r)
+	if !ok {
+		return
+	}
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		deleted, err := s.ReefData.DeleteDiver(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:diver:"+strconv.Itoa(id)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionDelete, "diver", target, deleted, nil)
+	})
+	if err != nil {
+		writeServiceError(w, err, "刪除潛水員失敗")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Sites
+func (h *AdminHandlers) ListSites(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireReefDataAdmin(w, r, h != nil && h.ReefData != nil); !ok {
+		return
+	}
+	data, err := h.ReefData.ListSites(r.Context())
+	if err != nil {
+		writeServiceError(w, err, "無法載入樣點清單")
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func (h *AdminHandlers) CreateSite(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	var input service.ReefDataSiteInput
+	r.Body = http.MaxBytesReader(w, r.Body, maxAdminRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "無效的建立內容")
+		return
+	}
+	var result service.ReefDataSite
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		var createErr error
+		result, createErr = s.ReefData.CreateSite(r.Context(), input)
+		if createErr != nil {
+			return createErr
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:site:"+strconv.Itoa(result.ID)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionCreate, "site", target, nil, result)
+	})
+	if err != nil {
+		writeServiceError(w, err, "建立樣點失敗")
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (h *AdminHandlers) UpdateSite(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	id, ok := reefDataID(w, r)
+	if !ok {
+		return
+	}
+	var input service.ReefDataSiteInput
+	r.Body = http.MaxBytesReader(w, r.Body, maxAdminRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "無效的修改內容")
+		return
+	}
+	var result service.ReefDataSite
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		before, err := s.ReefData.GetSite(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		result, err = s.ReefData.UpdateSite(r.Context(), id, input)
+		if err != nil {
+			return err
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:site:"+strconv.Itoa(id)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionUpdate, "site", target, before, result)
+	})
+	if err != nil {
+		writeServiceError(w, err, "更新樣點失敗")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *AdminHandlers) DeleteSite(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	id, ok := reefDataID(w, r)
+	if !ok {
+		return
+	}
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		deleted, err := s.ReefData.DeleteSite(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:site:"+strconv.Itoa(id)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionDelete, "site", target, deleted, nil)
+	})
+	if err != nil {
+		writeServiceError(w, err, "刪除樣點失敗")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Taxa
+func (h *AdminHandlers) ListTaxa(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireReefDataAdmin(w, r, h != nil && h.ReefData != nil); !ok {
+		return
+	}
+	data, err := h.ReefData.ListTaxa(r.Context())
+	if err != nil {
+		writeServiceError(w, err, "無法載入物種指標清單")
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func (h *AdminHandlers) CreateTaxon(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	var input service.ReefDataTaxonInput
+	r.Body = http.MaxBytesReader(w, r.Body, maxAdminRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "無效的建立內容")
+		return
+	}
+	var result service.ReefDataTaxon
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		var createErr error
+		result, createErr = s.ReefData.CreateTaxon(r.Context(), input)
+		if createErr != nil {
+			return createErr
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:taxon:"+strconv.Itoa(result.ID)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionCreate, "taxon", target, nil, result)
+	})
+	if err != nil {
+		writeServiceError(w, err, "建立物種指標失敗")
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (h *AdminHandlers) UpdateTaxon(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	id, ok := reefDataID(w, r)
+	if !ok {
+		return
+	}
+	var input service.ReefDataTaxonInput
+	r.Body = http.MaxBytesReader(w, r.Body, maxAdminRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "無效的修改內容")
+		return
+	}
+	var result service.ReefDataTaxon
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		before, err := s.ReefData.GetTaxon(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		result, err = s.ReefData.UpdateTaxon(r.Context(), id, input)
+		if err != nil {
+			return err
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:taxon:"+strconv.Itoa(id)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionUpdate, "taxon", target, before, result)
+	})
+	if err != nil {
+		writeServiceError(w, err, "更新物種指標失敗")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *AdminHandlers) DeleteTaxon(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	id, ok := reefDataID(w, r)
+	if !ok {
+		return
+	}
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		deleted, err := s.ReefData.DeleteTaxon(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:taxon:"+strconv.Itoa(id)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionDelete, "taxon", target, deleted, nil)
+	})
+	if err != nil {
+		writeServiceError(w, err, "刪除物種指標失敗")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// SubstrateTypes
+func (h *AdminHandlers) ListSubstrateTypes(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireReefDataAdmin(w, r, h != nil && h.ReefData != nil); !ok {
+		return
+	}
+	data, err := h.ReefData.ListSubstrateTypes(r.Context())
+	if err != nil {
+		writeServiceError(w, err, "無法載入底質代碼清單")
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func (h *AdminHandlers) CreateSubstrateType(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	var input service.ReefDataSubstrateTypeInput
+	r.Body = http.MaxBytesReader(w, r.Body, maxAdminRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "無效的建立內容")
+		return
+	}
+	var result service.ReefDataSubstrateType
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		var createErr error
+		result, createErr = s.ReefData.CreateSubstrateType(r.Context(), input)
+		if createErr != nil {
+			return createErr
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:substrate_type:"+result.Code))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionCreate, "substrate_type", target, nil, result)
+	})
+	if err != nil {
+		writeServiceError(w, err, "建立底質代碼失敗")
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (h *AdminHandlers) UpdateSubstrateType(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	code, ok := reefDataCodeParam(w, r)
+	if !ok {
+		return
+	}
+	var input service.ReefDataSubstrateTypeInput
+	r.Body = http.MaxBytesReader(w, r.Body, maxAdminRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "無效的修改內容")
+		return
+	}
+	var result service.ReefDataSubstrateType
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		before, err := s.ReefData.GetSubstrateType(r.Context(), code)
+		if err != nil {
+			return err
+		}
+		result, err = s.ReefData.UpdateSubstrateType(r.Context(), code, input)
+		if err != nil {
+			return err
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:substrate_type:"+code))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionUpdate, "substrate_type", target, before, result)
+	})
+	if err != nil {
+		writeServiceError(w, err, "更新底質代碼失敗")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *AdminHandlers) DeleteSubstrateType(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	code, ok := reefDataCodeParam(w, r)
+	if !ok {
+		return
+	}
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		deleted, err := s.ReefData.DeleteSubstrateType(r.Context(), code)
+		if err != nil {
+			return err
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:substrate_type:"+code))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionDelete, "substrate_type", target, deleted, nil)
+	})
+	if err != nil {
+		writeServiceError(w, err, "刪除底質代碼失敗")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// ImpactTypes
+func (h *AdminHandlers) ListImpactTypes(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireReefDataAdmin(w, r, h != nil && h.ReefData != nil); !ok {
+		return
+	}
+	data, err := h.ReefData.ListImpactTypes(r.Context())
+	if err != nil {
+		writeServiceError(w, err, "無法載入環境影響指標清單")
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func (h *AdminHandlers) CreateImpactType(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	var input service.ReefDataImpactTypeInput
+	r.Body = http.MaxBytesReader(w, r.Body, maxAdminRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "無效的建立內容")
+		return
+	}
+	var result service.ReefDataImpactType
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		var createErr error
+		result, createErr = s.ReefData.CreateImpactType(r.Context(), input)
+		if createErr != nil {
+			return createErr
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:impact_type:"+strconv.Itoa(result.ID)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionCreate, "impact_type", target, nil, result)
+	})
+	if err != nil {
+		writeServiceError(w, err, "建立環境影響指標失敗")
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (h *AdminHandlers) UpdateImpactType(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	id, ok := reefDataID(w, r)
+	if !ok {
+		return
+	}
+	var input service.ReefDataImpactTypeInput
+	r.Body = http.MaxBytesReader(w, r.Body, maxAdminRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "無效的修改內容")
+		return
+	}
+	var result service.ReefDataImpactType
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		before, err := s.ReefData.GetImpactType(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		result, err = s.ReefData.UpdateImpactType(r.Context(), id, input)
+		if err != nil {
+			return err
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:impact_type:"+strconv.Itoa(id)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionUpdate, "impact_type", target, before, result)
+	})
+	if err != nil {
+		writeServiceError(w, err, "更新環境影響指標失敗")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *AdminHandlers) DeleteImpactType(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	id, ok := reefDataID(w, r)
+	if !ok {
+		return
+	}
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		deleted, err := s.ReefData.DeleteImpactType(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:impact_type:"+strconv.Itoa(id)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionDelete, "impact_type", target, deleted, nil)
+	})
+	if err != nil {
+		writeServiceError(w, err, "刪除環境影響指標失敗")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+

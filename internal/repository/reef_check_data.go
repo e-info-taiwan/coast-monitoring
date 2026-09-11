@@ -4,9 +4,12 @@ import (
 	"coast-monitoring/internal/service"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 type ReefDataRepository struct{ db DBTX }
@@ -352,7 +355,7 @@ func (r ReefDataRepository) DeleteEvent(ctx context.Context, id int) (service.Re
 }
 
 func (r ReefDataRepository) Sites(ctx context.Context) ([]service.ReefDataSite, error) {
-	rows, err := r.db.Query(ctx, `SELECT id, name_zh, COALESCE(name_en, ''), COALESCE(region, ''), COALESCE(county, ''), COALESCE(location, ''), latitude, longitude FROM site WHERE is_active ORDER BY name_zh`)
+	rows, err := r.db.Query(ctx, `SELECT id, name_zh, COALESCE(name_en, ''), COALESCE(region, ''), COALESCE(county, ''), COALESCE(location, ''), latitude, longitude, is_active FROM site WHERE is_active ORDER BY name_zh`)
 	if err != nil {
 		return nil, translateError(err)
 	}
@@ -360,7 +363,7 @@ func (r ReefDataRepository) Sites(ctx context.Context) ([]service.ReefDataSite, 
 	var out []service.ReefDataSite
 	for rows.Next() {
 		var s service.ReefDataSite
-		if err := rows.Scan(&s.ID, &s.NameZH, &s.NameEN, &s.Region, &s.County, &s.Location, &s.Latitude, &s.Longitude); err != nil {
+		if err := rows.Scan(&s.ID, &s.NameZH, &s.NameEN, &s.Region, &s.County, &s.Location, &s.Latitude, &s.Longitude, &s.IsActive); err != nil {
 			return nil, err
 		}
 		out = append(out, s)
@@ -386,7 +389,7 @@ func (r ReefDataRepository) Users(ctx context.Context) ([]service.ReefDataUser, 
 }
 
 func (r ReefDataRepository) Divers(ctx context.Context) ([]service.ReefDataDiver, error) {
-	rows, err := r.db.Query(ctx, `SELECT d.id, COALESCE(d.name_zh, ''), COALESCE(d.name_en, ''), COALESCE(d.reef_check_code, ''), d.user_id, COALESCE(u.email, '') FROM diver d LEFT JOIN users u ON u.id = d.user_id WHERE d.is_active ORDER BY d.name_zh, d.name_en`)
+	rows, err := r.db.Query(ctx, `SELECT d.id, COALESCE(d.name_zh, ''), COALESCE(d.name_en, ''), COALESCE(d.reef_check_code, ''), d.user_id, COALESCE(u.email, ''), d.is_active FROM diver d LEFT JOIN users u ON u.id = d.user_id WHERE d.is_active ORDER BY d.name_zh, d.name_en`)
 	if err != nil {
 		return nil, translateError(err)
 	}
@@ -394,7 +397,7 @@ func (r ReefDataRepository) Divers(ctx context.Context) ([]service.ReefDataDiver
 	var out []service.ReefDataDiver
 	for rows.Next() {
 		var d service.ReefDataDiver
-		if err := rows.Scan(&d.ID, &d.NameZH, &d.NameEN, &d.ReefCheckCode, &d.UserID, &d.UserEmail); err != nil {
+		if err := rows.Scan(&d.ID, &d.NameZH, &d.NameEN, &d.ReefCheckCode, &d.UserID, &d.UserEmail, &d.IsActive); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
@@ -429,7 +432,7 @@ func (r ReefDataRepository) AddParticipant(ctx context.Context, transectID int, 
 			}
 		}
 	} else if p.NameZH != "" || p.NameEN != "" {
-		err := r.db.QueryRow(ctx, `INSERT INTO diver (name_zh, name_en) VALUES ($1, $2) RETURNING id`, p.NameZH, p.NameEN).Scan(&diverID)
+		err := r.db.QueryRow(ctx, `INSERT INTO diver (name_zh, name_en, reef_check_code) VALUES (NULLIF($1, ''), NULLIF($2, ''), NULLIF($3, '')) RETURNING id`, p.NameZH, p.NameEN, p.ReefCheckCode).Scan(&diverID)
 		if err != nil {
 			return translateError(err)
 		}
@@ -459,3 +462,631 @@ func (r ReefDataRepository) RemoveParticipant(ctx context.Context, participantID
 	}
 	return nil
 }
+
+func isForeignKeyError(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23503"
+}
+
+func (r ReefDataRepository) ListDivers(ctx context.Context) ([]service.ReefDataDiver, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT d.id, COALESCE(d.name_zh, ''), COALESCE(d.name_en, ''), COALESCE(d.reef_check_code, ''), d.user_id, COALESCE(u.email, ''), d.is_active
+		FROM diver d
+		LEFT JOIN users u ON u.id = d.user_id
+		ORDER BY d.id DESC
+	`)
+	if err != nil {
+		return nil, translateError(err)
+	}
+	defer rows.Close()
+	var out []service.ReefDataDiver
+	for rows.Next() {
+		var d service.ReefDataDiver
+		if err := rows.Scan(&d.ID, &d.NameZH, &d.NameEN, &d.ReefCheckCode, &d.UserID, &d.UserEmail, &d.IsActive); err != nil {
+			return nil, err
+		}
+		out = append(out, d)
+	}
+	return out, translateError(rows.Err())
+}
+
+func (r ReefDataRepository) GetDiver(ctx context.Context, id int) (service.ReefDataDiver, error) {
+	var d service.ReefDataDiver
+	err := r.db.QueryRow(ctx, `
+		SELECT d.id, COALESCE(d.name_zh, ''), COALESCE(d.name_en, ''), COALESCE(d.reef_check_code, ''), d.user_id, COALESCE(u.email, ''), d.is_active
+		FROM diver d
+		LEFT JOIN users u ON u.id = d.user_id
+		WHERE d.id = $1
+	`, id).Scan(&d.ID, &d.NameZH, &d.NameEN, &d.ReefCheckCode, &d.UserID, &d.UserEmail, &d.IsActive)
+	return d, translateError(err)
+}
+
+func (r ReefDataRepository) CreateDiver(ctx context.Context, input service.ReefDataDiverInput) (service.ReefDataDiver, error) {
+	nameZH := strings.TrimSpace(input.NameZH)
+	nameEN := strings.TrimSpace(input.NameEN)
+	if nameZH == "" && nameEN == "" {
+		return service.ReefDataDiver{}, fmt.Errorf("%w: 中文姓名與英文姓名至少需填寫一項", service.ErrValidation)
+	}
+	isActive := true
+	if input.IsActive != nil {
+		isActive = *input.IsActive
+	}
+	var id int
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO diver (name_zh, name_en, reef_check_code, user_id, is_active)
+		VALUES (NULLIF($1, ''), NULLIF($2, ''), NULLIF($3, ''), $4, $5)
+		RETURNING id
+	`, nameZH, nameEN, strings.TrimSpace(input.ReefCheckCode), input.UserID, isActive).Scan(&id)
+	if err != nil {
+		return service.ReefDataDiver{}, translateError(err)
+	}
+	return r.GetDiver(ctx, id)
+}
+
+func (r ReefDataRepository) UpdateDiver(ctx context.Context, id int, input service.ReefDataDiverInput) (service.ReefDataDiver, error) {
+	existing, err := r.GetDiver(ctx, id)
+	if err != nil {
+		return service.ReefDataDiver{}, err
+	}
+	nameZH := strings.TrimSpace(input.NameZH)
+	nameEN := strings.TrimSpace(input.NameEN)
+	if nameZH == "" && nameEN == "" {
+		nameZH = existing.NameZH
+		nameEN = existing.NameEN
+	}
+	if nameZH == "" && nameEN == "" {
+		return service.ReefDataDiver{}, fmt.Errorf("%w: 中文姓名與英文姓名至少需填寫一項", service.ErrValidation)
+	}
+	isActive := existing.IsActive
+	if input.IsActive != nil {
+		isActive = *input.IsActive
+	}
+	userID := input.UserID
+	if userID == nil {
+		userID = existing.UserID
+	}
+	_, err = r.db.Exec(ctx, `
+		UPDATE diver
+		SET name_zh = NULLIF($2, ''),
+			name_en = NULLIF($3, ''),
+			reef_check_code = NULLIF($4, ''),
+			user_id = $5,
+			is_active = $6
+		WHERE id = $1
+	`, id, nameZH, nameEN, strings.TrimSpace(input.ReefCheckCode), userID, isActive)
+	if err != nil {
+		return service.ReefDataDiver{}, translateError(err)
+	}
+	return r.GetDiver(ctx, id)
+}
+
+func (r ReefDataRepository) DeleteDiver(ctx context.Context, id int) (service.ReefDataDiver, error) {
+	existing, err := r.GetDiver(ctx, id)
+	if err != nil {
+		return service.ReefDataDiver{}, err
+	}
+	tag, err := r.db.Exec(ctx, `DELETE FROM diver WHERE id = $1`, id)
+	if err != nil {
+		if isForeignKeyError(err) {
+			if _, sErr := r.db.Exec(ctx, `UPDATE diver SET is_active = false WHERE id = $1`, id); sErr != nil {
+				return service.ReefDataDiver{}, translateError(sErr)
+			}
+			existing.IsActive = false
+			return existing, nil
+		}
+		return service.ReefDataDiver{}, translateError(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return service.ReefDataDiver{}, service.ErrNotFound
+	}
+	return existing, nil
+}
+
+func (r ReefDataRepository) ListSites(ctx context.Context) ([]service.ReefDataSite, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, name_zh, COALESCE(name_en, ''), COALESCE(region, ''), COALESCE(county, ''), COALESCE(location, ''), latitude, longitude, is_active
+		FROM site
+		ORDER BY id DESC
+	`)
+	if err != nil {
+		return nil, translateError(err)
+	}
+	defer rows.Close()
+	var out []service.ReefDataSite
+	for rows.Next() {
+		var s service.ReefDataSite
+		if err := rows.Scan(&s.ID, &s.NameZH, &s.NameEN, &s.Region, &s.County, &s.Location, &s.Latitude, &s.Longitude, &s.IsActive); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, translateError(rows.Err())
+}
+
+func (r ReefDataRepository) GetSite(ctx context.Context, id int) (service.ReefDataSite, error) {
+	var s service.ReefDataSite
+	err := r.db.QueryRow(ctx, `
+		SELECT id, name_zh, COALESCE(name_en, ''), COALESCE(region, ''), COALESCE(county, ''), COALESCE(location, ''), latitude, longitude, is_active
+		FROM site
+		WHERE id = $1
+	`, id).Scan(&s.ID, &s.NameZH, &s.NameEN, &s.Region, &s.County, &s.Location, &s.Latitude, &s.Longitude, &s.IsActive)
+	return s, translateError(err)
+}
+
+func (r ReefDataRepository) CreateSite(ctx context.Context, input service.ReefDataSiteInput) (service.ReefDataSite, error) {
+	nameZH := strings.TrimSpace(input.NameZH)
+	if nameZH == "" {
+		return service.ReefDataSite{}, fmt.Errorf("%w: 樣點中文名稱不能為空", service.ErrValidation)
+	}
+	isActive := true
+	if input.IsActive != nil {
+		isActive = *input.IsActive
+	}
+	var id int
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO site (region, county, location, name_zh, name_en, latitude, longitude, is_active)
+		VALUES (NULLIF($1, ''), NULLIF($2, ''), NULLIF($3, ''), $4, NULLIF($5, ''), $6, $7, $8)
+		RETURNING id
+	`, strings.TrimSpace(input.Region), strings.TrimSpace(input.County), strings.TrimSpace(input.Location), nameZH, strings.TrimSpace(input.NameEN), input.Latitude, input.Longitude, isActive).Scan(&id)
+	if err != nil {
+		return service.ReefDataSite{}, translateError(err)
+	}
+	return r.GetSite(ctx, id)
+}
+
+func (r ReefDataRepository) UpdateSite(ctx context.Context, id int, input service.ReefDataSiteInput) (service.ReefDataSite, error) {
+	existing, err := r.GetSite(ctx, id)
+	if err != nil {
+		return service.ReefDataSite{}, err
+	}
+	nameZH := strings.TrimSpace(input.NameZH)
+	if nameZH == "" {
+		nameZH = existing.NameZH
+	}
+	nameEN := strings.TrimSpace(input.NameEN)
+	if nameEN == "" {
+		nameEN = existing.NameEN
+	}
+	isActive := existing.IsActive
+	if input.IsActive != nil {
+		isActive = *input.IsActive
+	}
+	_, err = r.db.Exec(ctx, `
+		UPDATE site
+		SET region = NULLIF($2, ''),
+			county = NULLIF($3, ''),
+			location = NULLIF($4, ''),
+			name_zh = $5,
+			name_en = NULLIF($6, ''),
+			latitude = $7,
+			longitude = $8,
+			is_active = $9
+		WHERE id = $1
+	`, id, strings.TrimSpace(input.Region), strings.TrimSpace(input.County), strings.TrimSpace(input.Location), nameZH, nameEN, input.Latitude, input.Longitude, isActive)
+	if err != nil {
+		return service.ReefDataSite{}, translateError(err)
+	}
+	return r.GetSite(ctx, id)
+}
+
+func (r ReefDataRepository) DeleteSite(ctx context.Context, id int) (service.ReefDataSite, error) {
+	existing, err := r.GetSite(ctx, id)
+	if err != nil {
+		return service.ReefDataSite{}, err
+	}
+	tag, err := r.db.Exec(ctx, `DELETE FROM site WHERE id = $1`, id)
+	if err != nil {
+		if isForeignKeyError(err) {
+			if _, sErr := r.db.Exec(ctx, `UPDATE site SET is_active = false WHERE id = $1`, id); sErr != nil {
+				return service.ReefDataSite{}, translateError(sErr)
+			}
+			existing.IsActive = false
+			return existing, nil
+		}
+		return service.ReefDataSite{}, translateError(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return service.ReefDataSite{}, service.ErrNotFound
+	}
+	return existing, nil
+}
+
+func (r ReefDataRepository) ListTaxa(ctx context.Context) ([]service.ReefDataTaxon, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, taxon_group::text, name_zh, COALESCE(name_en, ''), COALESCE(size_class, ''), is_aggregate, COALESCE(aggregate_of, ''), sort_order, is_active
+		FROM taxon
+		ORDER BY sort_order, id
+	`)
+	if err != nil {
+		return nil, translateError(err)
+	}
+	defer rows.Close()
+	var out []service.ReefDataTaxon
+	for rows.Next() {
+		var t service.ReefDataTaxon
+		if err := rows.Scan(&t.ID, &t.TaxonGroup, &t.NameZH, &t.NameEN, &t.SizeClass, &t.IsAggregate, &t.AggregateOf, &t.SortOrder, &t.IsActive); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, translateError(rows.Err())
+}
+
+func (r ReefDataRepository) GetTaxon(ctx context.Context, id int) (service.ReefDataTaxon, error) {
+	var t service.ReefDataTaxon
+	err := r.db.QueryRow(ctx, `
+		SELECT id, taxon_group::text, name_zh, COALESCE(name_en, ''), COALESCE(size_class, ''), is_aggregate, COALESCE(aggregate_of, ''), sort_order, is_active
+		FROM taxon
+		WHERE id = $1
+	`, id).Scan(&t.ID, &t.TaxonGroup, &t.NameZH, &t.NameEN, &t.SizeClass, &t.IsAggregate, &t.AggregateOf, &t.SortOrder, &t.IsActive)
+	return t, translateError(err)
+}
+
+func (r ReefDataRepository) CreateTaxon(ctx context.Context, input service.ReefDataTaxonInput) (service.ReefDataTaxon, error) {
+	nameZH := strings.TrimSpace(input.NameZH)
+	if nameZH == "" {
+		return service.ReefDataTaxon{}, fmt.Errorf("%w: 物種中文名稱不能為空", service.ErrValidation)
+	}
+	group := strings.TrimSpace(input.TaxonGroup)
+	if group != "fish" && group != "invert" && group != "rare" {
+		return service.ReefDataTaxon{}, fmt.Errorf("%w: taxon_group 必須為 fish, invert 或 rare", service.ErrValidation)
+	}
+	isAggregate := false
+	if input.IsAggregate != nil {
+		isAggregate = *input.IsAggregate
+	}
+	sortOrder := 0
+	if input.SortOrder != nil {
+		sortOrder = *input.SortOrder
+	}
+	isActive := true
+	if input.IsActive != nil {
+		isActive = *input.IsActive
+	}
+	var id int
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO taxon (taxon_group, name_zh, name_en, size_class, is_aggregate, aggregate_of, sort_order, is_active)
+		VALUES ($1::taxon_group, $2, NULLIF($3, ''), NULLIF($4, ''), $5, NULLIF($6, ''), $7, $8)
+		RETURNING id
+	`, group, nameZH, strings.TrimSpace(input.NameEN), strings.TrimSpace(input.SizeClass), isAggregate, strings.TrimSpace(input.AggregateOf), sortOrder, isActive).Scan(&id)
+	if err != nil {
+		return service.ReefDataTaxon{}, translateError(err)
+	}
+	return r.GetTaxon(ctx, id)
+}
+
+func (r ReefDataRepository) UpdateTaxon(ctx context.Context, id int, input service.ReefDataTaxonInput) (service.ReefDataTaxon, error) {
+	existing, err := r.GetTaxon(ctx, id)
+	if err != nil {
+		return service.ReefDataTaxon{}, err
+	}
+	nameZH := strings.TrimSpace(input.NameZH)
+	if nameZH == "" {
+		nameZH = existing.NameZH
+	}
+	group := strings.TrimSpace(input.TaxonGroup)
+	if group == "" {
+		group = existing.TaxonGroup
+	}
+	if group != "fish" && group != "invert" && group != "rare" {
+		return service.ReefDataTaxon{}, fmt.Errorf("%w: taxon_group 必須為 fish, invert 或 rare", service.ErrValidation)
+	}
+	isAggregate := existing.IsAggregate
+	if input.IsAggregate != nil {
+		isAggregate = *input.IsAggregate
+	}
+	sortOrder := existing.SortOrder
+	if input.SortOrder != nil {
+		sortOrder = *input.SortOrder
+	}
+	isActive := existing.IsActive
+	if input.IsActive != nil {
+		isActive = *input.IsActive
+	}
+	_, err = r.db.Exec(ctx, `
+		UPDATE taxon
+		SET taxon_group = $2::taxon_group,
+			name_zh = $3,
+			name_en = NULLIF($4, ''),
+			size_class = NULLIF($5, ''),
+			is_aggregate = $6,
+			aggregate_of = NULLIF($7, ''),
+			sort_order = $8,
+			is_active = $9
+		WHERE id = $1
+	`, id, group, nameZH, strings.TrimSpace(input.NameEN), strings.TrimSpace(input.SizeClass), isAggregate, strings.TrimSpace(input.AggregateOf), sortOrder, isActive)
+	if err != nil {
+		return service.ReefDataTaxon{}, translateError(err)
+	}
+	return r.GetTaxon(ctx, id)
+}
+
+func (r ReefDataRepository) DeleteTaxon(ctx context.Context, id int) (service.ReefDataTaxon, error) {
+	existing, err := r.GetTaxon(ctx, id)
+	if err != nil {
+		return service.ReefDataTaxon{}, err
+	}
+	tag, err := r.db.Exec(ctx, `DELETE FROM taxon WHERE id = $1`, id)
+	if err != nil {
+		if isForeignKeyError(err) {
+			if _, sErr := r.db.Exec(ctx, `UPDATE taxon SET is_active = false WHERE id = $1`, id); sErr != nil {
+				return service.ReefDataTaxon{}, translateError(sErr)
+			}
+			existing.IsActive = false
+			return existing, nil
+		}
+		return service.ReefDataTaxon{}, translateError(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return service.ReefDataTaxon{}, service.ErrNotFound
+	}
+	return existing, nil
+}
+
+func (r ReefDataRepository) ListSubstrateTypes(ctx context.Context) ([]service.ReefDataSubstrateType, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT code, numeric_code, name_zh, name_en, sort_order, is_active
+		FROM substrate_type
+		ORDER BY sort_order, numeric_code
+	`)
+	if err != nil {
+		return nil, translateError(err)
+	}
+	defer rows.Close()
+	var out []service.ReefDataSubstrateType
+	for rows.Next() {
+		var s service.ReefDataSubstrateType
+		if err := rows.Scan(&s.Code, &s.NumericCode, &s.NameZH, &s.NameEN, &s.SortOrder, &s.IsActive); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, translateError(rows.Err())
+}
+
+func (r ReefDataRepository) GetSubstrateType(ctx context.Context, code string) (service.ReefDataSubstrateType, error) {
+	var s service.ReefDataSubstrateType
+	err := r.db.QueryRow(ctx, `
+		SELECT code, numeric_code, name_zh, name_en, sort_order, is_active
+		FROM substrate_type
+		WHERE code = $1
+	`, strings.TrimSpace(code)).Scan(&s.Code, &s.NumericCode, &s.NameZH, &s.NameEN, &s.SortOrder, &s.IsActive)
+	return s, translateError(err)
+}
+
+func (r ReefDataRepository) CreateSubstrateType(ctx context.Context, input service.ReefDataSubstrateTypeInput) (service.ReefDataSubstrateType, error) {
+	code := strings.TrimSpace(input.Code)
+	if code == "" {
+		return service.ReefDataSubstrateType{}, fmt.Errorf("%w: 代碼 (code) 不能為空", service.ErrValidation)
+	}
+	nameZH := strings.TrimSpace(input.NameZH)
+	nameEN := strings.TrimSpace(input.NameEN)
+	if nameZH == "" || nameEN == "" {
+		return service.ReefDataSubstrateType{}, fmt.Errorf("%w: 中文名稱與英文名稱不能為空", service.ErrValidation)
+	}
+	numericCode := 0
+	if input.NumericCode != nil {
+		numericCode = *input.NumericCode
+	}
+	sortOrder := 0
+	if input.SortOrder != nil {
+		sortOrder = *input.SortOrder
+	}
+	isActive := true
+	if input.IsActive != nil {
+		isActive = *input.IsActive
+	}
+	_, err := r.db.Exec(ctx, `
+		INSERT INTO substrate_type (code, numeric_code, name_zh, name_en, sort_order, is_active)
+		VALUES ($1, $2, $3, $4, $5, $6)
+	`, code, numericCode, nameZH, nameEN, sortOrder, isActive)
+	if err != nil {
+		return service.ReefDataSubstrateType{}, translateError(err)
+	}
+	return r.GetSubstrateType(ctx, code)
+}
+
+func (r ReefDataRepository) UpdateSubstrateType(ctx context.Context, code string, input service.ReefDataSubstrateTypeInput) (service.ReefDataSubstrateType, error) {
+	existing, err := r.GetSubstrateType(ctx, code)
+	if err != nil {
+		return service.ReefDataSubstrateType{}, err
+	}
+	nameZH := strings.TrimSpace(input.NameZH)
+	if nameZH == "" {
+		nameZH = existing.NameZH
+	}
+	nameEN := strings.TrimSpace(input.NameEN)
+	if nameEN == "" {
+		nameEN = existing.NameEN
+	}
+	numericCode := existing.NumericCode
+	if input.NumericCode != nil {
+		numericCode = *input.NumericCode
+	}
+	sortOrder := existing.SortOrder
+	if input.SortOrder != nil {
+		sortOrder = *input.SortOrder
+	}
+	isActive := existing.IsActive
+	if input.IsActive != nil {
+		isActive = *input.IsActive
+	}
+	_, err = r.db.Exec(ctx, `
+		UPDATE substrate_type
+		SET numeric_code = $2,
+			name_zh = $3,
+			name_en = $4,
+			sort_order = $5,
+			is_active = $6
+		WHERE code = $1
+	`, existing.Code, numericCode, nameZH, nameEN, sortOrder, isActive)
+	if err != nil {
+		return service.ReefDataSubstrateType{}, translateError(err)
+	}
+	return r.GetSubstrateType(ctx, existing.Code)
+}
+
+func (r ReefDataRepository) DeleteSubstrateType(ctx context.Context, code string) (service.ReefDataSubstrateType, error) {
+	existing, err := r.GetSubstrateType(ctx, code)
+	if err != nil {
+		return service.ReefDataSubstrateType{}, err
+	}
+	tag, err := r.db.Exec(ctx, `DELETE FROM substrate_type WHERE code = $1`, existing.Code)
+	if err != nil {
+		if isForeignKeyError(err) {
+			if _, sErr := r.db.Exec(ctx, `UPDATE substrate_type SET is_active = false WHERE code = $1`, existing.Code); sErr != nil {
+				return service.ReefDataSubstrateType{}, translateError(sErr)
+			}
+			existing.IsActive = false
+			return existing, nil
+		}
+		return service.ReefDataSubstrateType{}, translateError(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return service.ReefDataSubstrateType{}, service.ErrNotFound
+	}
+	return existing, nil
+}
+
+func (r ReefDataRepository) ListImpactTypes(ctx context.Context) ([]service.ReefDataImpactType, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, impact_group::text, name_zh, COALESCE(name_en, ''), value_type::text, has_raw_count, sort_order, is_active
+		FROM impact_type
+		ORDER BY sort_order, id
+	`)
+	if err != nil {
+		return nil, translateError(err)
+	}
+	defer rows.Close()
+	var out []service.ReefDataImpactType
+	for rows.Next() {
+		var i service.ReefDataImpactType
+		if err := rows.Scan(&i.ID, &i.ImpactGroup, &i.NameZH, &i.NameEN, &i.ValueType, &i.HasRawCount, &i.SortOrder, &i.IsActive); err != nil {
+			return nil, err
+		}
+		out = append(out, i)
+	}
+	return out, translateError(rows.Err())
+}
+
+func (r ReefDataRepository) GetImpactType(ctx context.Context, id int) (service.ReefDataImpactType, error) {
+	var i service.ReefDataImpactType
+	err := r.db.QueryRow(ctx, `
+		SELECT id, impact_group::text, name_zh, COALESCE(name_en, ''), value_type::text, has_raw_count, sort_order, is_active
+		FROM impact_type
+		WHERE id = $1
+	`, id).Scan(&i.ID, &i.ImpactGroup, &i.NameZH, &i.NameEN, &i.ValueType, &i.HasRawCount, &i.SortOrder, &i.IsActive)
+	return i, translateError(err)
+}
+
+func (r ReefDataRepository) CreateImpactType(ctx context.Context, input service.ReefDataImpactTypeInput) (service.ReefDataImpactType, error) {
+	nameZH := strings.TrimSpace(input.NameZH)
+	if nameZH == "" {
+		return service.ReefDataImpactType{}, fmt.Errorf("%w: 指標中文名稱不能為空", service.ErrValidation)
+	}
+	group := strings.TrimSpace(input.ImpactGroup)
+	if group != "coral_damage" && group != "trash" && group != "bleaching" && group != "disease" {
+		return service.ReefDataImpactType{}, fmt.Errorf("%w: impact_group 必須為 coral_damage, trash, bleaching 或 disease", service.ErrValidation)
+	}
+	valType := strings.TrimSpace(input.ValueType)
+	if valType != "level" && valType != "count" && valType != "percent" {
+		return service.ReefDataImpactType{}, fmt.Errorf("%w: value_type 必須為 level, count 或 percent", service.ErrValidation)
+	}
+	hasRawCount := false
+	if input.HasRawCount != nil {
+		hasRawCount = *input.HasRawCount
+	}
+	sortOrder := 0
+	if input.SortOrder != nil {
+		sortOrder = *input.SortOrder
+	}
+	isActive := true
+	if input.IsActive != nil {
+		isActive = *input.IsActive
+	}
+	var id int
+	err := r.db.QueryRow(ctx, `
+		INSERT INTO impact_type (impact_group, name_zh, name_en, value_type, has_raw_count, sort_order, is_active)
+		VALUES ($1::impact_group, $2, NULLIF($3, ''), $4::impact_value_type, $5, $6, $7)
+		RETURNING id
+	`, group, nameZH, strings.TrimSpace(input.NameEN), valType, hasRawCount, sortOrder, isActive).Scan(&id)
+	if err != nil {
+		return service.ReefDataImpactType{}, translateError(err)
+	}
+	return r.GetImpactType(ctx, id)
+}
+
+func (r ReefDataRepository) UpdateImpactType(ctx context.Context, id int, input service.ReefDataImpactTypeInput) (service.ReefDataImpactType, error) {
+	existing, err := r.GetImpactType(ctx, id)
+	if err != nil {
+		return service.ReefDataImpactType{}, err
+	}
+	nameZH := strings.TrimSpace(input.NameZH)
+	if nameZH == "" {
+		nameZH = existing.NameZH
+	}
+	group := strings.TrimSpace(input.ImpactGroup)
+	if group == "" {
+		group = existing.ImpactGroup
+	}
+	if group != "coral_damage" && group != "trash" && group != "bleaching" && group != "disease" {
+		return service.ReefDataImpactType{}, fmt.Errorf("%w: impact_group 必須為 coral_damage, trash, bleaching 或 disease", service.ErrValidation)
+	}
+	valType := strings.TrimSpace(input.ValueType)
+	if valType == "" {
+		valType = existing.ValueType
+	}
+	if valType != "level" && valType != "count" && valType != "percent" {
+		return service.ReefDataImpactType{}, fmt.Errorf("%w: value_type 必須為 level, count 或 percent", service.ErrValidation)
+	}
+	hasRawCount := existing.HasRawCount
+	if input.HasRawCount != nil {
+		hasRawCount = *input.HasRawCount
+	}
+	sortOrder := existing.SortOrder
+	if input.SortOrder != nil {
+		sortOrder = *input.SortOrder
+	}
+	isActive := existing.IsActive
+	if input.IsActive != nil {
+		isActive = *input.IsActive
+	}
+	_, err = r.db.Exec(ctx, `
+		UPDATE impact_type
+		SET impact_group = $2::impact_group,
+			name_zh = $3,
+			name_en = NULLIF($4, ''),
+			value_type = $5::impact_value_type,
+			has_raw_count = $6,
+			sort_order = $7,
+			is_active = $8
+		WHERE id = $1
+	`, id, group, nameZH, strings.TrimSpace(input.NameEN), valType, hasRawCount, sortOrder, isActive)
+	if err != nil {
+		return service.ReefDataImpactType{}, translateError(err)
+	}
+	return r.GetImpactType(ctx, id)
+}
+
+func (r ReefDataRepository) DeleteImpactType(ctx context.Context, id int) (service.ReefDataImpactType, error) {
+	existing, err := r.GetImpactType(ctx, id)
+	if err != nil {
+		return service.ReefDataImpactType{}, err
+	}
+	tag, err := r.db.Exec(ctx, `DELETE FROM impact_type WHERE id = $1`, id)
+	if err != nil {
+		if isForeignKeyError(err) {
+			if _, sErr := r.db.Exec(ctx, `UPDATE impact_type SET is_active = false WHERE id = $1`, id); sErr != nil {
+				return service.ReefDataImpactType{}, translateError(sErr)
+			}
+			existing.IsActive = false
+			return existing, nil
+		}
+		return service.ReefDataImpactType{}, translateError(err)
+	}
+	if tag.RowsAffected() == 0 {
+		return service.ReefDataImpactType{}, service.ErrNotFound
+	}
+	return existing, nil
+}
+

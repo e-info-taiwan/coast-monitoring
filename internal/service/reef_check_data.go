@@ -102,6 +102,18 @@ type ReefDataSite struct {
 	Location  string   `json:"location"`
 	Latitude  *float64 `json:"latitude"`
 	Longitude *float64 `json:"longitude"`
+	IsActive  bool     `json:"is_active"`
+}
+
+type ReefDataSiteInput struct {
+	Region    string   `json:"region"`
+	County    string   `json:"county"`
+	Location  string   `json:"location"`
+	NameZH    string   `json:"name_zh"`
+	NameEN    string   `json:"name_en"`
+	Latitude  *float64 `json:"latitude,omitempty"`
+	Longitude *float64 `json:"longitude,omitempty"`
+	IsActive  *bool    `json:"is_active,omitempty"`
 }
 
 type ReefDataUser struct {
@@ -118,14 +130,86 @@ type ReefDataDiver struct {
 	ReefCheckCode string     `json:"reef_check_code"`
 	UserID        *uuid.UUID `json:"user_id,omitempty"`
 	UserEmail     string     `json:"user_email,omitempty"`
+	IsActive      bool       `json:"is_active"`
+}
+
+type ReefDataDiverInput struct {
+	NameZH        string     `json:"name_zh"`
+	NameEN        string     `json:"name_en"`
+	ReefCheckCode string     `json:"reef_check_code"`
+	UserID        *uuid.UUID `json:"user_id,omitempty"`
+	IsActive      *bool      `json:"is_active,omitempty"`
+}
+
+type ReefDataTaxon struct {
+	ID          int    `json:"id"`
+	TaxonGroup  string `json:"taxon_group"`
+	NameZH      string `json:"name_zh"`
+	NameEN      string `json:"name_en"`
+	SizeClass   string `json:"size_class"`
+	IsAggregate bool   `json:"is_aggregate"`
+	AggregateOf string `json:"aggregate_of"`
+	SortOrder   int    `json:"sort_order"`
+	IsActive    bool   `json:"is_active"`
+}
+
+type ReefDataTaxonInput struct {
+	TaxonGroup  string `json:"taxon_group"`
+	NameZH      string `json:"name_zh"`
+	NameEN      string `json:"name_en"`
+	SizeClass   string `json:"size_class"`
+	IsAggregate *bool  `json:"is_aggregate,omitempty"`
+	AggregateOf string `json:"aggregate_of"`
+	SortOrder   *int   `json:"sort_order,omitempty"`
+	IsActive    *bool  `json:"is_active,omitempty"`
+}
+
+type ReefDataSubstrateType struct {
+	Code        string `json:"code"`
+	NumericCode int    `json:"numeric_code"`
+	NameZH      string `json:"name_zh"`
+	NameEN      string `json:"name_en"`
+	SortOrder   int    `json:"sort_order"`
+	IsActive    bool   `json:"is_active"`
+}
+
+type ReefDataSubstrateTypeInput struct {
+	Code        string `json:"code"`
+	NumericCode *int   `json:"numeric_code,omitempty"`
+	NameZH      string `json:"name_zh"`
+	NameEN      string `json:"name_en"`
+	SortOrder   *int   `json:"sort_order,omitempty"`
+	IsActive    *bool  `json:"is_active,omitempty"`
+}
+
+type ReefDataImpactType struct {
+	ID          int    `json:"id"`
+	ImpactGroup string `json:"impact_group"`
+	NameZH      string `json:"name_zh"`
+	NameEN      string `json:"name_en"`
+	ValueType   string `json:"value_type"`
+	HasRawCount bool   `json:"has_raw_count"`
+	SortOrder   int    `json:"sort_order"`
+	IsActive    bool   `json:"is_active"`
+}
+
+type ReefDataImpactTypeInput struct {
+	ImpactGroup string `json:"impact_group"`
+	NameZH      string `json:"name_zh"`
+	NameEN      string `json:"name_en"`
+	ValueType   string `json:"value_type"`
+	HasRawCount *bool  `json:"has_raw_count,omitempty"`
+	SortOrder   *int   `json:"sort_order,omitempty"`
+	IsActive    *bool  `json:"is_active,omitempty"`
 }
 
 type ReefDataParticipantInput struct {
-	DiverID *int       `json:"diver_id,omitempty"`
-	UserID  *uuid.UUID `json:"user_id,omitempty"`
-	NameZH  string     `json:"name_zh,omitempty"`
-	NameEN  string     `json:"name_en,omitempty"`
-	Role    string     `json:"role"`
+	DiverID       *int       `json:"diver_id,omitempty"`
+	UserID        *uuid.UUID `json:"user_id,omitempty"`
+	NameZH        string     `json:"name_zh,omitempty"`
+	NameEN        string     `json:"name_en,omitempty"`
+	ReefCheckCode string     `json:"reef_check_code,omitempty"`
+	Role          string     `json:"role"`
 }
 
 type ReefDataCreateInput struct {

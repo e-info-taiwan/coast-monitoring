@@ -75,6 +75,31 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/reef-check-data/divers", deps.AdminHandlers.ReefDataDivers)
 		r.Post("/reef-check-data/transects/{id}/participants", deps.AdminHandlers.AddReefDataParticipant)
 		r.Delete("/reef-check-data/participants/{id}", deps.AdminHandlers.RemoveReefDataParticipant)
+
+		r.Get("/divers", deps.AdminHandlers.ListDivers)
+		r.Post("/divers", deps.AdminHandlers.CreateDiver)
+		r.Patch("/divers/{id}", deps.AdminHandlers.UpdateDiver)
+		r.Delete("/divers/{id}", deps.AdminHandlers.DeleteDiver)
+
+		r.Get("/sites", deps.AdminHandlers.ListSites)
+		r.Post("/sites", deps.AdminHandlers.CreateSite)
+		r.Patch("/sites/{id}", deps.AdminHandlers.UpdateSite)
+		r.Delete("/sites/{id}", deps.AdminHandlers.DeleteSite)
+
+		r.Get("/taxa", deps.AdminHandlers.ListTaxa)
+		r.Post("/taxa", deps.AdminHandlers.CreateTaxon)
+		r.Patch("/taxa/{id}", deps.AdminHandlers.UpdateTaxon)
+		r.Delete("/taxa/{id}", deps.AdminHandlers.DeleteTaxon)
+
+		r.Get("/substrate-types", deps.AdminHandlers.ListSubstrateTypes)
+		r.Post("/substrate-types", deps.AdminHandlers.CreateSubstrateType)
+		r.Patch("/substrate-types/{code}", deps.AdminHandlers.UpdateSubstrateType)
+		r.Delete("/substrate-types/{code}", deps.AdminHandlers.DeleteSubstrateType)
+
+		r.Get("/impact-types", deps.AdminHandlers.ListImpactTypes)
+		r.Post("/impact-types", deps.AdminHandlers.CreateImpactType)
+		r.Patch("/impact-types/{id}", deps.AdminHandlers.UpdateImpactType)
+		r.Delete("/impact-types/{id}", deps.AdminHandlers.DeleteImpactType)
 	})
 	r.Route("/api/app", func(r chi.Router) {
 		r.Use(deps.CORS(deps.AppAllowedOrigins))

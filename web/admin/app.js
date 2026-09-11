@@ -202,6 +202,235 @@ const resourceConfigs = {
     canCreate: false,
     readOnly: true,
   },
+  divers: {
+    title: "Divers 潛水員名冊",
+    eyebrow: "Reef Check",
+    description: "珊瑚礁體檢潛水員名冊與識別編號。",
+    note: "維護潛水員中英文姓名、Reef Check 識別代碼與啟用狀態。",
+    listPath: "/admin/divers",
+    createPath: "/admin/divers",
+    updatePath: (id) => `/admin/divers/${id}`,
+    deletePath: (id) => `/admin/divers/${id}`,
+    tableColumns: [
+      { key: "nameZh", label: "中文姓名" },
+      { key: "nameEn", label: "英文姓名" },
+      { key: "reefCheckCode", label: "識別代碼" },
+      { key: "statusLabel", label: "狀態" },
+    ],
+    editableFields: [
+      { key: "name_zh", label: "中文姓名", type: "text", placeholder: "中文姓名，例如：陳小明" },
+      { key: "name_en", label: "英文姓名", type: "text", placeholder: "英文姓名，例如：Xiao-Ming Chen" },
+      { key: "reef_check_code", label: "Reef Check 識別代碼", type: "text", placeholder: "例如：TW-001" },
+      {
+        key: "is_active",
+        label: "啟用狀態",
+        type: "select",
+        valueType: "boolean",
+        options: [
+          { value: "true", label: "啟用 (active)" },
+          { value: "false", label: "停用 (disabled)" },
+        ],
+      },
+    ],
+    canCreate: true,
+  },
+  sites: {
+    title: "Sites 調查樣點",
+    eyebrow: "Reef Check",
+    description: "珊瑚礁體檢固定調查樣點與地理資訊。",
+    note: "維護樣點中英文名稱、分區、縣市、位置與經緯度。",
+    listPath: "/admin/sites",
+    createPath: "/admin/sites",
+    updatePath: (id) => `/admin/sites/${id}`,
+    deletePath: (id) => `/admin/sites/${id}`,
+    tableColumns: [
+      { key: "nameZh", label: "中文名稱" },
+      { key: "nameEn", label: "英文名稱" },
+      { key: "region", label: "分區" },
+      { key: "county", label: "縣市" },
+      { key: "location", label: "地區／樣區" },
+      { key: "statusLabel", label: "狀態" },
+    ],
+    editableFields: [
+      { key: "name_zh", label: "中文名稱", type: "text", required: true, placeholder: "例如：軟珊瑚區" },
+      { key: "name_en", label: "英文名稱", type: "text", placeholder: "例如：Soft Coral Area" },
+      { key: "region", label: "分區", type: "text", placeholder: "例如：綠島、墾丁、蘭嶼、澎湖、北部、東部" },
+      { key: "county", label: "縣市", type: "text", placeholder: "例如：台東縣" },
+      { key: "location", label: "地區／樣區", type: "text", placeholder: "例如：綠島" },
+      { key: "latitude", label: "緯度 Latitude", type: "number", valueType: "float", placeholder: "例如：22.665" },
+      { key: "longitude", label: "經度 Longitude", type: "number", valueType: "float", placeholder: "例如：121.482" },
+      {
+        key: "is_active",
+        label: "啟用狀態",
+        type: "select",
+        valueType: "boolean",
+        options: [
+          { value: "true", label: "啟用 (active)" },
+          { value: "false", label: "停用 (disabled)" },
+        ],
+      },
+    ],
+    canCreate: true,
+  },
+  taxa: {
+    title: "Taxa 指標物種",
+    eyebrow: "Reef Check 字典",
+    description: "魚類、無脊椎與珍稀生物指標物種清單。",
+    note: "維護調查類別、物種名稱、體長級距、是否為加總列與排序權重。",
+    listPath: "/admin/taxa",
+    createPath: "/admin/taxa",
+    updatePath: (id) => `/admin/taxa/${id}`,
+    deletePath: (id) => `/admin/taxa/${id}`,
+    tableColumns: [
+      { key: "taxonGroupLabel", label: "類別" },
+      { key: "nameZh", label: "中文名稱" },
+      { key: "nameEn", label: "英文名稱" },
+      { key: "sizeClass", label: "體長級距" },
+      { key: "sortOrder", label: "排序" },
+      { key: "statusLabel", label: "狀態" },
+    ],
+    editableFields: [
+      {
+        key: "taxon_group",
+        label: "調查類別",
+        type: "select",
+        required: true,
+        options: [
+          { value: "fish", label: "魚類 (fish)" },
+          { value: "invert", label: "無脊椎動物 (invert)" },
+          { value: "rare", label: "珍稀生物 (rare)" },
+        ],
+      },
+      { key: "name_zh", label: "中文名稱", type: "text", required: true, placeholder: "例如：蝶魚" },
+      { key: "name_en", label: "英文名稱", type: "text", placeholder: "例如：Butterflyfish" },
+      { key: "size_class", label: "體長級距 (選填)", type: "text", placeholder: "例如：<= 10 cm, 10-20 cm" },
+      { key: "sort_order", label: "排序權重", type: "number", valueType: "number", placeholder: "數字越小越前面" },
+      {
+        key: "is_aggregate",
+        label: "是否為加總列",
+        type: "select",
+        valueType: "boolean",
+        options: [
+          { value: "false", label: "否 (一般物種指標)" },
+          { value: "true", label: "是 (總數列)" },
+        ],
+      },
+      {
+        key: "is_active",
+        label: "啟用狀態",
+        type: "select",
+        valueType: "boolean",
+        options: [
+          { value: "true", label: "啟用 (active)" },
+          { value: "false", label: "停用 (disabled)" },
+        ],
+      },
+    ],
+    canCreate: true,
+  },
+  substrate_types: {
+    title: "Substrates 底質代碼",
+    eyebrow: "Reef Check 字典",
+    description: "珊瑚礁體檢點截法底質代碼表。",
+    note: "維護代碼 (Code)、數字代號、中英文名稱與排序權重。",
+    listPath: "/admin/substrate-types",
+    createPath: "/admin/substrate-types",
+    updatePath: (id) => `/admin/substrate-types/${encodeURIComponent(id)}`,
+    deletePath: (id) => `/admin/substrate-types/${encodeURIComponent(id)}`,
+    tableColumns: [
+      { key: "code", label: "代碼" },
+      { key: "numericCode", label: "數字代號" },
+      { key: "nameZh", label: "中文名稱" },
+      { key: "nameEn", label: "英文名稱" },
+      { key: "sortOrder", label: "排序" },
+      { key: "statusLabel", label: "狀態" },
+    ],
+    editableFields: [
+      { key: "code", label: "代碼 (Code)", type: "text", required: true, placeholder: "例如：HC, SC, SI(HC)" },
+      { key: "numeric_code", label: "數字代號", type: "number", required: true, valueType: "number", placeholder: "例如：1, 2, 91" },
+      { key: "name_zh", label: "中文名稱", type: "text", required: true, placeholder: "例如：硬珊瑚" },
+      { key: "name_en", label: "英文名稱", type: "text", required: true, placeholder: "例如：hard coral" },
+      { key: "sort_order", label: "排序權重", type: "number", valueType: "number", placeholder: "數字越小越前面" },
+      {
+        key: "is_active",
+        label: "啟用狀態",
+        type: "select",
+        valueType: "boolean",
+        options: [
+          { value: "true", label: "啟用 (active)" },
+          { value: "false", label: "停用 (disabled)" },
+        ],
+      },
+    ],
+    canCreate: true,
+  },
+  impact_types: {
+    title: "Impacts 環境影響指標",
+    eyebrow: "Reef Check 字典",
+    description: "珊瑚礁環境威脅與衝擊指標設定。",
+    note: "維護衝擊類別、指標名稱、數值格式（等級／件數／百分比）與排序權重。",
+    listPath: "/admin/impact-types",
+    createPath: "/admin/impact-types",
+    updatePath: (id) => `/admin/impact-types/${id}`,
+    deletePath: (id) => `/admin/impact-types/${id}`,
+    tableColumns: [
+      { key: "impactGroupLabel", label: "衝擊類別" },
+      { key: "nameZh", label: "中文名稱" },
+      { key: "nameEn", label: "英文名稱" },
+      { key: "valueTypeLabel", label: "數值格式" },
+      { key: "sortOrder", label: "排序" },
+      { key: "statusLabel", label: "狀態" },
+    ],
+    editableFields: [
+      {
+        key: "impact_group",
+        label: "衝擊類別",
+        type: "select",
+        required: true,
+        options: [
+          { value: "coral_damage", label: "珊瑚受損 (coral_damage)" },
+          { value: "trash", label: "垃圾 (trash)" },
+          { value: "bleaching", label: "珊瑚白化 (bleaching)" },
+          { value: "disease", label: "珊瑚疾病 (disease)" },
+        ],
+      },
+      { key: "name_zh", label: "中文名稱", type: "text", required: true, placeholder: "例如：一般垃圾" },
+      { key: "name_en", label: "英文名稱", type: "text", placeholder: "例如：general trash" },
+      {
+        key: "value_type",
+        label: "數值格式",
+        type: "select",
+        required: true,
+        options: [
+          { value: "level", label: "等級 0-3 (level)" },
+          { value: "count", label: "件數 (count)" },
+          { value: "percent", label: "百分比 0-100% (percent)" },
+        ],
+      },
+      {
+        key: "has_raw_count",
+        label: "具備原始件數",
+        type: "select",
+        valueType: "boolean",
+        options: [
+          { value: "false", label: "否" },
+          { value: "true", label: "是 (有件數並自動衍生等級)" },
+        ],
+      },
+      { key: "sort_order", label: "排序權重", type: "number", valueType: "number", placeholder: "數字越小越前面" },
+      {
+        key: "is_active",
+        label: "啟用狀態",
+        type: "select",
+        valueType: "boolean",
+        options: [
+          { value: "true", label: "啟用 (active)" },
+          { value: "false", label: "停用 (disabled)" },
+        ],
+      },
+    ],
+    canCreate: true,
+  },
 }
 
 const state = {
@@ -498,10 +727,36 @@ function normalizeRecord(resourceKey, record) {
   if (!record || typeof record !== "object") {
     return record
   }
+  const id = record.id ?? record.code
   const normalized = {
     ...record,
+    id: id != null ? String(id) : "",
+    realId: record.id,
+    code: record.code,
     createDate: record.createdAt || record.createDate,
     updateDate: record.updatedAt || record.updateDate,
+    nameZh: record.name_zh ?? record.nameZh ?? record.chineseName,
+    nameEn: record.name_en ?? record.nameEn ?? record.englishName,
+    reefCheckCode: record.reef_check_code ?? record.reefCheckCode ?? "",
+    numericCode: record.numeric_code ?? record.numericCode,
+    sortOrder: record.sort_order ?? record.sortOrder,
+    sizeClass: record.size_class ?? record.sizeClass,
+    taxonGroup: record.taxon_group ?? record.taxonGroup,
+    impactGroup: record.impact_group ?? record.impactGroup,
+    valueType: record.value_type ?? record.valueType,
+    hasRawCount: record.has_raw_count ?? record.hasRawCount,
+    isAggregate: record.is_aggregate ?? record.isAggregate,
+    isActive: record.is_active != null ? String(record.is_active) : (record.isActive != null ? String(record.isActive) : "true"),
+    statusLabel: (record.is_active === false || record.status === "disabled") ? "停用" : "啟用",
+  }
+  if (normalized.taxonGroup) {
+    normalized.taxonGroupLabel = { fish: "魚類", invert: "無脊椎", rare: "珍稀物種" }[normalized.taxonGroup] || normalized.taxonGroup
+  }
+  if (normalized.impactGroup) {
+    normalized.impactGroupLabel = { coral_damage: "珊瑚受損", trash: "垃圾", bleaching: "白化", disease: "疾病" }[normalized.impactGroup] || normalized.impactGroup
+  }
+  if (normalized.valueType) {
+    normalized.valueTypeLabel = { level: "等級 (0-3)", count: "件數", percent: "百分比 (%)" }[normalized.valueType] || normalized.valueType
   }
   if (resourceKey === "admin_observations" || resourceKey === ENTRY_KEY) {
     return mapObservation(normalized)
@@ -583,25 +838,55 @@ function renderSessionBadges() {
 }
 
 function renderSidebar() {
-  const navItems = [
-    ...(isAdmin() ? [{ key: REEF_DATA_KEY, title: "Reef Check 觀測資料", count: reefData.count }] : []),
-    { key: ENTRY_KEY, title: "一般物種觀測輸入", count: null },
-    { key: OVERVIEW_KEY, title: "Overview", count: null },
-    ...Object.entries(resourceConfigs)
-      .filter(([key]) => key !== ENTRY_KEY)
-      .map(([key, config]) => ({
-        key,
-        title: config.title,
-        count: state.records[key]?.length ?? 0,
-      })),
-  ].filter(({ key }) => key === OVERVIEW_KEY ? isAdmin() : canSeeNav(key))
+  const sections = [
+    {
+      title: "Reef Check 調查",
+      items: [
+        ...(isAdmin() ? [{ key: REEF_DATA_KEY, title: "Reef Check 觀測資料", count: reefData.count }] : []),
+        { key: "divers", title: "潛水員名冊 (Divers)", count: state.records.divers?.length ?? 0 },
+        { key: "sites", title: "調查樣點 (Sites)", count: state.records.sites?.length ?? 0 },
+      ],
+    },
+    {
+      title: "Reef Check 字典設定",
+      items: [
+        { key: "taxa", title: "指標物種 (Taxa)", count: state.records.taxa?.length ?? 0 },
+        { key: "substrate_types", title: "底質代碼 (Substrates)", count: state.records.substrate_types?.length ?? 0 },
+        { key: "impact_types", title: "環境影響指標 (Impacts)", count: state.records.impact_types?.length ?? 0 },
+      ],
+    },
+    {
+      title: "一般調查",
+      items: [
+        { key: ENTRY_KEY, title: "一般物種觀測輸入", count: null },
+        { key: "species", title: resourceConfigs.species.title, count: state.records.species?.length ?? 0 },
+        { key: "location", title: resourceConfigs.location.title, count: state.records.location?.length ?? 0 },
+        { key: "admin_observations", title: resourceConfigs.admin_observations.title, count: state.records.admin_observations?.length ?? 0 },
+      ],
+    },
+    {
+      title: "系統管理",
+      items: [
+        { key: OVERVIEW_KEY, title: "Overview", count: null },
+        { key: "users", title: resourceConfigs.users.title, count: state.records.users?.length ?? 0 },
+        { key: "audit_logs", title: resourceConfigs.audit_logs.title, count: state.records.audit_logs?.length ?? 0 },
+      ],
+    },
+  ]
 
-  resourceNav.innerHTML = navItems
-    .map(({ key, title, count }) => {
+  const visibleSections = sections.map((sec) => ({
+    ...sec,
+    items: sec.items.filter(({ key }) => key === OVERVIEW_KEY ? isAdmin() : canSeeNav(key)),
+  })).filter((sec) => sec.items.length > 0)
+
+  resourceNav.innerHTML = visibleSections.map((sec) => {
+    const headerHtml = `<div class="nav-section-title">${escapeHtml(sec.title)}</div>`
+    const buttonsHtml = sec.items.map(({ key, title, count }) => {
       const countHtml = count === null ? "" : `<span>${count}</span>`
       return `<button type="button" class="nav-button ${state.activeKey === key ? "active" : ""}" data-nav="${escapeHtml(key)}"><span>${escapeHtml(title)}</span>${countHtml}</button>`
-    })
-    .join("")
+    }).join("")
+    return headerHtml + buttonsHtml
+  }).join("")
 
   resourceNav.querySelectorAll("[data-nav]").forEach((button) => {
     button.addEventListener("click", () => {
@@ -663,9 +948,26 @@ function renderTableRows(resourceKey) {
   }).join("")
 }
 
+function snakeToCamel(s) {
+  return typeof s === "string" ? s.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase()) : s
+}
+
 function parseFieldValue(field, rawValue) {
+  if (field.valueType === "boolean") {
+    return rawValue === "true" || rawValue === true
+  }
   if (field.valueType === "number") {
-    const parsed = Number(rawValue)
+    if (rawValue === "" || rawValue == null) {
+      return null
+    }
+    const parsed = parseInt(rawValue, 10)
+    return Number.isFinite(parsed) ? parsed : rawValue
+  }
+  if (field.valueType === "float") {
+    if (rawValue === "" || rawValue == null) {
+      return null
+    }
+    const parsed = parseFloat(rawValue)
     return Number.isFinite(parsed) ? parsed : rawValue
   }
   return rawValue
@@ -698,15 +1000,24 @@ function renderEditor(resourceKey) {
     `
   }
   const fields = config.editableFields.map((field) => {
-    const currentValue = draft ? draft[field.key] ?? "" : ""
+    let currentValue = ""
+    if (draft) {
+      const val = draft[field.key] ?? draft[snakeToCamel(field.key)]
+      if (typeof val === "boolean") {
+        currentValue = String(val)
+      } else if (val != null) {
+        currentValue = val
+      }
+    }
     let control
     if (field.type === "textarea") {
       control = `<textarea id="${field.key}" name="${field.key}" placeholder="${escapeHtml(field.placeholder || "")}" ${field.required ? "required" : ""}>${escapeHtml(currentValue)}</textarea>`
     } else if (field.type === "select") {
-      control = `<select id="${field.key}" name="${field.key}" ${field.required ? "required" : ""}>${field.options.map((option) => `<option value="${escapeHtml(option.value)}" ${currentValue === option.value ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>`
+      control = `<select id="${field.key}" name="${field.key}" ${field.required ? "required" : ""}>${field.options.map((option) => `<option value="${escapeHtml(option.value)}" ${String(currentValue) === String(option.value) ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select>`
     } else {
       const type = field.type === "number" ? "number" : field.type === "email" ? "email" : field.type === "password" ? "password" : field.type === "date" ? "date" : "text"
-      control = `<input id="${field.key}" name="${field.key}" type="${type}" value="${escapeHtml(currentValue)}" placeholder="${escapeHtml(field.placeholder || "")}" ${field.required ? "required" : ""} />`
+      const step = field.valueType === "float" ? ' step="any"' : ""
+      control = `<input id="${field.key}" name="${field.key}" type="${type}"${step} value="${escapeHtml(currentValue)}" placeholder="${escapeHtml(field.placeholder || "")}" ${field.required ? "required" : ""} />`
     }
     return `
       <div class="form-field">
@@ -734,9 +1045,24 @@ function renderRecordHistory(resourceKey) {
   if (!draft || resourceKey === "audit_logs" || !isAdmin()) {
     return ""
   }
-  const entries = (state.records.audit_logs || []).filter(
-    (entry) => entry.targetTable === resourceApiTable(resourceKey) && entry.targetId === draft.id,
-  )
+  const expectedTable = resourceApiTable(resourceKey)
+  const entries = (state.records.audit_logs || []).filter((entry) => {
+    if (entry.targetTable !== expectedTable && entry.targetTable !== resourceKey) {
+      return false
+    }
+    if (entry.targetId === draft.id) {
+      return true
+    }
+    const before = entry.beforeData || {}
+    const after = entry.afterData || {}
+    if (draft.realId != null && (before.id === draft.realId || after.id === draft.realId)) {
+      return true
+    }
+    if (draft.code && (before.code === draft.code || after.code === draft.code)) {
+      return true
+    }
+    return false
+  })
   return `
     <section class="history-card">
       <div class="resource-toolbar">
@@ -763,6 +1089,11 @@ function resourceApiTable(resourceKey) {
     species: "species",
     admin_observations: "observations",
     observation: "observations",
+    divers: "diver",
+    sites: "site",
+    taxa: "taxon",
+    substrate_types: "substrate_type",
+    impact_types: "impact_type",
   }[resourceKey] || resourceKey
 }
 
@@ -1264,7 +1595,7 @@ function bindResourceEvents(resourceKey) {
       }
       if (action === "delete") {
         event.stopPropagation()
-        const label = record.email || record.chineseName || record.englishName || record.id
+        const label = record.nameZh || record.nameEn || record.chineseName || record.englishName || record.email || record.code || record.id
         if (!window.confirm(`Delete ${label}?`)) {
           return
         }

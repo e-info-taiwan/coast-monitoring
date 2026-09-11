@@ -56,6 +56,85 @@ func (s *dataHandlerStub) AddParticipant(context.Context, int, service.ReefDataP
 func (s *dataHandlerStub) RemoveParticipant(context.Context, int) error {
 	return nil
 }
+func (s *dataHandlerStub) ListDivers(context.Context) ([]service.ReefDataDiver, error) {
+	return []service.ReefDataDiver{{ID: 1, NameZH: "Diver 1", IsActive: true}}, nil
+}
+func (s *dataHandlerStub) GetDiver(_ context.Context, id int) (service.ReefDataDiver, error) {
+	return service.ReefDataDiver{ID: id, NameZH: "Diver 1", IsActive: true}, nil
+}
+func (s *dataHandlerStub) CreateDiver(_ context.Context, in service.ReefDataDiverInput) (service.ReefDataDiver, error) {
+	return service.ReefDataDiver{ID: 2, NameZH: in.NameZH, IsActive: true}, nil
+}
+func (s *dataHandlerStub) UpdateDiver(_ context.Context, id int, in service.ReefDataDiverInput) (service.ReefDataDiver, error) {
+	return service.ReefDataDiver{ID: id, NameZH: in.NameZH, IsActive: true}, nil
+}
+func (s *dataHandlerStub) DeleteDiver(_ context.Context, id int) (service.ReefDataDiver, error) {
+	return service.ReefDataDiver{ID: id, NameZH: "Deleted Diver"}, nil
+}
+
+func (s *dataHandlerStub) ListSites(context.Context) ([]service.ReefDataSite, error) {
+	return []service.ReefDataSite{{ID: 1, NameZH: "Site 1", IsActive: true}}, nil
+}
+func (s *dataHandlerStub) GetSite(_ context.Context, id int) (service.ReefDataSite, error) {
+	return service.ReefDataSite{ID: id, NameZH: "Site 1", IsActive: true}, nil
+}
+func (s *dataHandlerStub) CreateSite(_ context.Context, in service.ReefDataSiteInput) (service.ReefDataSite, error) {
+	return service.ReefDataSite{ID: 2, NameZH: in.NameZH, IsActive: true}, nil
+}
+func (s *dataHandlerStub) UpdateSite(_ context.Context, id int, in service.ReefDataSiteInput) (service.ReefDataSite, error) {
+	return service.ReefDataSite{ID: id, NameZH: in.NameZH, IsActive: true}, nil
+}
+func (s *dataHandlerStub) DeleteSite(_ context.Context, id int) (service.ReefDataSite, error) {
+	return service.ReefDataSite{ID: id, NameZH: "Deleted Site"}, nil
+}
+
+func (s *dataHandlerStub) ListTaxa(context.Context) ([]service.ReefDataTaxon, error) {
+	return []service.ReefDataTaxon{{ID: 1, NameZH: "Taxon 1", TaxonGroup: "fish", IsActive: true}}, nil
+}
+func (s *dataHandlerStub) GetTaxon(_ context.Context, id int) (service.ReefDataTaxon, error) {
+	return service.ReefDataTaxon{ID: id, NameZH: "Taxon 1", TaxonGroup: "fish", IsActive: true}, nil
+}
+func (s *dataHandlerStub) CreateTaxon(_ context.Context, in service.ReefDataTaxonInput) (service.ReefDataTaxon, error) {
+	return service.ReefDataTaxon{ID: 2, NameZH: in.NameZH, TaxonGroup: in.TaxonGroup, IsActive: true}, nil
+}
+func (s *dataHandlerStub) UpdateTaxon(_ context.Context, id int, in service.ReefDataTaxonInput) (service.ReefDataTaxon, error) {
+	return service.ReefDataTaxon{ID: id, NameZH: in.NameZH, TaxonGroup: in.TaxonGroup, IsActive: true}, nil
+}
+func (s *dataHandlerStub) DeleteTaxon(_ context.Context, id int) (service.ReefDataTaxon, error) {
+	return service.ReefDataTaxon{ID: id, NameZH: "Deleted Taxon"}, nil
+}
+
+func (s *dataHandlerStub) ListSubstrateTypes(context.Context) ([]service.ReefDataSubstrateType, error) {
+	return []service.ReefDataSubstrateType{{Code: "HC", NameZH: "硬珊瑚", IsActive: true}}, nil
+}
+func (s *dataHandlerStub) GetSubstrateType(_ context.Context, code string) (service.ReefDataSubstrateType, error) {
+	return service.ReefDataSubstrateType{Code: code, NameZH: "硬珊瑚", IsActive: true}, nil
+}
+func (s *dataHandlerStub) CreateSubstrateType(_ context.Context, in service.ReefDataSubstrateTypeInput) (service.ReefDataSubstrateType, error) {
+	return service.ReefDataSubstrateType{Code: in.Code, NameZH: in.NameZH, IsActive: true}, nil
+}
+func (s *dataHandlerStub) UpdateSubstrateType(_ context.Context, code string, in service.ReefDataSubstrateTypeInput) (service.ReefDataSubstrateType, error) {
+	return service.ReefDataSubstrateType{Code: code, NameZH: in.NameZH, IsActive: true}, nil
+}
+func (s *dataHandlerStub) DeleteSubstrateType(_ context.Context, code string) (service.ReefDataSubstrateType, error) {
+	return service.ReefDataSubstrateType{Code: code, NameZH: "Deleted Substrate"}, nil
+}
+
+func (s *dataHandlerStub) ListImpactTypes(context.Context) ([]service.ReefDataImpactType, error) {
+	return []service.ReefDataImpactType{{ID: 1, NameZH: "Impact 1", ImpactGroup: "trash", ValueType: "count", IsActive: true}}, nil
+}
+func (s *dataHandlerStub) GetImpactType(_ context.Context, id int) (service.ReefDataImpactType, error) {
+	return service.ReefDataImpactType{ID: id, NameZH: "Impact 1", ImpactGroup: "trash", ValueType: "count", IsActive: true}, nil
+}
+func (s *dataHandlerStub) CreateImpactType(_ context.Context, in service.ReefDataImpactTypeInput) (service.ReefDataImpactType, error) {
+	return service.ReefDataImpactType{ID: 2, NameZH: in.NameZH, ImpactGroup: in.ImpactGroup, ValueType: in.ValueType, IsActive: true}, nil
+}
+func (s *dataHandlerStub) UpdateImpactType(_ context.Context, id int, in service.ReefDataImpactTypeInput) (service.ReefDataImpactType, error) {
+	return service.ReefDataImpactType{ID: id, NameZH: in.NameZH, ImpactGroup: in.ImpactGroup, ValueType: in.ValueType, IsActive: true}, nil
+}
+func (s *dataHandlerStub) DeleteImpactType(_ context.Context, id int) (service.ReefDataImpactType, error) {
+	return service.ReefDataImpactType{ID: id, NameZH: "Deleted Impact"}, nil
+}
 func dataHandlerRequest(method, path, body string, role policy.Role) *http.Request {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	return req.WithContext(withCurrentUser(req.Context(), policy.User{ID: uuid.New(), Email: "test@example.test", Role: role, Status: policy.StatusActive}))
@@ -257,5 +336,85 @@ func TestReefDataSitesUsersDiversEndpoints(t *testing.T) {
 	h.ReefDataDivers(wDivers, dataHandlerRequest("GET", "/divers", "", policy.RoleAdmin))
 	if wDivers.Code != http.StatusOK {
 		t.Fatalf("divers status = %d", wDivers.Code)
+	}
+}
+
+func TestAdminResourceCRUD(t *testing.T) {
+	stub := &dataHandlerStub{}
+	audit := &dataAuditStub{}
+	runner := &dataMutationStub{services: AdminMutationServices{ReefData: stub, AuditLogs: audit}}
+	h := &AdminHandlers{
+		ReefData:  stub,
+		AuditLogs: audit,
+		Mutations: runner,
+	}
+
+	// 1. Divers List & Create
+	w := httptest.NewRecorder()
+	h.ListDivers(w, dataHandlerRequest("GET", "/api/admin/divers", "", policy.RoleAdmin))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListDivers status = %d", w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	h.CreateDiver(w, dataHandlerRequest("POST", "/api/admin/divers", `{"name_zh":"測試潛水員","name_en":"Test Diver"}`, policy.RoleAdmin))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateDiver status = %d, body %s", w.Code, w.Body)
+	}
+
+	// 2. Sites List & Create
+	w = httptest.NewRecorder()
+	h.ListSites(w, dataHandlerRequest("GET", "/api/admin/sites", "", policy.RoleAdmin))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListSites status = %d", w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	h.CreateSite(w, dataHandlerRequest("POST", "/api/admin/sites", `{"name_zh":"測試樣點","name_en":"Test Site"}`, policy.RoleAdmin))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateSite status = %d, body %s", w.Code, w.Body)
+	}
+
+	// 3. Taxa List & Create
+	w = httptest.NewRecorder()
+	h.ListTaxa(w, dataHandlerRequest("GET", "/api/admin/taxa", "", policy.RoleAdmin))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListTaxa status = %d", w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	h.CreateTaxon(w, dataHandlerRequest("POST", "/api/admin/taxa", `{"name_zh":"蝶魚","taxon_group":"fish"}`, policy.RoleAdmin))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateTaxon status = %d, body %s", w.Code, w.Body)
+	}
+
+	// 4. Substrate Types List & Create
+	w = httptest.NewRecorder()
+	h.ListSubstrateTypes(w, dataHandlerRequest("GET", "/api/admin/substrate-types", "", policy.RoleAdmin))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListSubstrateTypes status = %d", w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	h.CreateSubstrateType(w, dataHandlerRequest("POST", "/api/admin/substrate-types", `{"code":"TEST","name_zh":"測試","name_en":"Test"}`, policy.RoleAdmin))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateSubstrateType status = %d, body %s", w.Code, w.Body)
+	}
+
+	// 5. Impact Types List & Create
+	w = httptest.NewRecorder()
+	h.ListImpactTypes(w, dataHandlerRequest("GET", "/api/admin/impact-types", "", policy.RoleAdmin))
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListImpactTypes status = %d", w.Code)
+	}
+
+	w = httptest.NewRecorder()
+	h.CreateImpactType(w, dataHandlerRequest("POST", "/api/admin/impact-types", `{"name_zh":"廢棄漁網","impact_group":"trash","value_type":"count"}`, policy.RoleAdmin))
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateImpactType status = %d, body %s", w.Code, w.Body)
+	}
+
+	if len(audit.created) != 5 {
+		t.Fatalf("expected 5 audit log entries, got %d", len(audit.created))
 	}
 }

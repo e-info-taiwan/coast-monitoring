@@ -654,16 +654,18 @@ export function createReefData({ apiFetch, onCount }) {
   }
 
   async function showAddParticipantModal(t) {
-    let lookups = { users: [], divers: [] }
+    let divers = []
     try {
-      lookups = await getParticipantsLookup()
+      if (!s.divers || !s.divers.length) {
+        s.divers = await apiFetch("/admin/reef-check-data/divers") || []
+      }
+      divers = s.divers
     } catch (err) {
       alert("無法載入名冊: " + err.message)
       return
     }
 
-    const userOptions = lookups.users.map(u => `<option value="${u.id}">${esc(u.name || u.email)} (${esc(u.email)})</option>`).join("")
-    const diverOptions = lookups.divers.map(d => `<option value="${d.id}">${esc(d.name_zh || d.name_en)}${d.reef_check_code ? ` · ${esc(d.reef_check_code)}` : ""}${d.user_email ? ` (已連結 ${esc(d.user_email)})` : ""}</option>`).join("")
+    const diverOptions = divers.map(d => `<option value="${d.id}">${esc(d.name_zh || d.name_en)}${d.reef_check_code ? ` · ${esc(d.reef_check_code)}` : ""}</option>`).join("")
 
     const bodyHTML = `
       <label>
@@ -675,35 +677,18 @@ export function createReefData({ apiFetch, onCount }) {
         </select>
       </label>
       <div>
-        <span style="font-size:0.85rem;font-weight:500;color:var(--text,#27473e);">人員來源模式 *</span>
+        <span style="font-size:0.85rem;font-weight:500;color:var(--text,#27473e);">指派方式 *</span>
         <div class="rd-tabs-group" style="margin-top:0.3rem;">
-          <button type="button" class="rd-tab-btn active" data-mode="user">系統使用者 (連結帳號)</button>
-          <button type="button" class="rd-tab-btn" data-mode="diver">既有潛水員名冊</button>
-          <button type="button" class="rd-tab-btn" data-mode="new">手動建立新潛水員</button>
+          <button type="button" class="rd-tab-btn active" data-mode="diver">既有潛水員名冊</button>
+          <button type="button" class="rd-tab-btn" data-mode="new">快速建立新潛水員</button>
         </div>
       </div>
-      <div id="rd-mode-user" class="rd-mode-section">
+      <div id="rd-mode-diver" class="rd-mode-section">
         <label>
-          選擇系統使用者 (自動建立或關聯潛水員名冊)
-          <select name="user_id">
-            <option value="">請選擇系統使用者</option>
-            ${userOptions}
-          </select>
-        </label>
-      </div>
-      <div id="rd-mode-diver" class="rd-mode-section" style="display:none;">
-        <label>
-          選擇既有潛水員
+          選擇潛水員 *
           <select name="diver_id">
             <option value="">請選擇潛水員</option>
             ${diverOptions}
-          </select>
-        </label>
-        <label style="margin-top:0.6rem;">
-          同時連結至系統使用者帳號 (選填)
-          <select name="diver_user_id">
-            <option value="">不連結帳號</option>
-            ${userOptions}
           </select>
         </label>
       </div>
@@ -717,16 +702,13 @@ export function createReefData({ apiFetch, onCount }) {
           <input type="text" name="name_en" placeholder="英文姓名">
         </label>
         <label>
-          連結至系統使用者帳號 (選填)
-          <select name="new_user_id">
-            <option value="">不連結帳號</option>
-            ${userOptions}
-          </select>
+          Reef Check 識別代碼 (選填)
+          <input type="text" name="reef_check_code" placeholder="例如：TW-001">
         </label>
       </div>
     `
 
-    let activeMode = "user"
+    let activeMode = "diver"
     showDialog({
       title: `指派參與人員 — ${methods[t.method]}`,
       bodyHTML,
@@ -734,24 +716,18 @@ export function createReefData({ apiFetch, onCount }) {
       onSubmit: async (f, close) => {
         const role = String(f.get("role") || "member")
         const body = { role }
-        if (activeMode === "user") {
-          const uid = f.get("user_id")
-          if (!uid) throw new Error("請選擇系統使用者")
-          body.user_id = uid
-        } else if (activeMode === "diver") {
+        if (activeMode === "diver") {
           const did = Number(f.get("diver_id"))
-          if (!did) throw new Error("請選擇既有潛水員")
+          if (!did) throw new Error("請選擇潛水員")
           body.diver_id = did
-          const uid = f.get("diver_user_id")
-          if (uid) body.user_id = uid
         } else {
           const nameZh = String(f.get("name_zh") || "").trim()
           const nameEn = String(f.get("name_en") || "").trim()
+          const code = String(f.get("reef_check_code") || "").trim()
           if (!nameZh && !nameEn) throw new Error("請輸入中文或英文姓名")
           body.name_zh = nameZh
           body.name_en = nameEn
-          const uid = f.get("new_user_id")
-          if (uid) body.user_id = uid
+          body.reef_check_code = code
         }
 
         const updatedTransect = await apiFetch(`/admin/reef-check-data/transects/${t.id}/participants`, {
@@ -760,7 +736,6 @@ export function createReefData({ apiFetch, onCount }) {
         })
         close()
         s.detail.transects = s.detail.transects.map(row => row.id === updatedTransect.id ? updatedTransect : row)
-        // Refresh divers lookup in background so any new/linked diver shows up next time
         s.divers = []
         s.notice = "參與人員已成功指派。"
         renderDetail()
@@ -771,7 +746,6 @@ export function createReefData({ apiFetch, onCount }) {
     if (dialog) {
       const tabBtns = dialog.querySelectorAll(".rd-tab-btn")
       const sections = {
-        user: dialog.querySelector("#rd-mode-user"),
         diver: dialog.querySelector("#rd-mode-diver"),
         new: dialog.querySelector("#rd-mode-new"),
       }
