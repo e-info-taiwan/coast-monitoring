@@ -35,6 +35,27 @@ func (s *dataHandlerStub) Update(_ context.Context, _ int, u service.ReefDataUpd
 	s.updates++
 	return s.current, nil
 }
+func (s *dataHandlerStub) CreateEvent(context.Context, service.ReefDataCreateInput) (service.ReefDataDetail, error) {
+	return service.ReefDataDetail{Event: service.ReefDataEvent{ID: 10, EventID: "site_test"}}, nil
+}
+func (s *dataHandlerStub) DeleteEvent(context.Context, int) (service.ReefDataDetail, error) {
+	return service.ReefDataDetail{Event: service.ReefDataEvent{ID: 10}}, nil
+}
+func (s *dataHandlerStub) Sites(context.Context) ([]service.ReefDataSite, error) {
+	return []service.ReefDataSite{{ID: 1, NameZH: "Site 1"}}, nil
+}
+func (s *dataHandlerStub) Users(context.Context) ([]service.ReefDataUser, error) {
+	return []service.ReefDataUser{{ID: uuid.New(), Email: "diver@example.com", Name: "Diver"}}, nil
+}
+func (s *dataHandlerStub) Divers(context.Context) ([]service.ReefDataDiver, error) {
+	return []service.ReefDataDiver{{ID: 1, NameZH: "Diver 1"}}, nil
+}
+func (s *dataHandlerStub) AddParticipant(context.Context, int, service.ReefDataParticipantInput) error {
+	return nil
+}
+func (s *dataHandlerStub) RemoveParticipant(context.Context, int) error {
+	return nil
+}
 func dataHandlerRequest(method, path, body string, role policy.Role) *http.Request {
 	req := httptest.NewRequest(method, path, strings.NewReader(body))
 	return req.WithContext(withCurrentUser(req.Context(), policy.User{ID: uuid.New(), Email: "test@example.test", Role: role, Status: policy.StatusActive}))
@@ -113,14 +134,128 @@ func TestReefDataAuditFailureFailsMutation(t *testing.T) {
 	}
 }
 
-type dataAuditStub struct{ fail bool }
+type dataAuditStub struct {
+	fail    bool
+	created []repository.CreateAuditLogRecord
+}
 
 func (s *dataAuditStub) ListAuditLogs(context.Context) ([]repository.AuditLog, error) {
 	return nil, nil
 }
-func (s *dataAuditStub) CreateAuditLog(context.Context, repository.CreateAuditLogRecord) (repository.AuditLog, error) {
+func (s *dataAuditStub) CreateAuditLog(_ context.Context, r repository.CreateAuditLogRecord) (repository.AuditLog, error) {
 	if s.fail {
 		return repository.AuditLog{}, errors.New("audit failed")
 	}
+	s.created = append(s.created, r)
 	return repository.AuditLog{}, nil
+}
+
+func TestCreateReefDataEvent(t *testing.T) {
+	stub := &dataHandlerStub{}
+	audit := &dataAuditStub{}
+	runner := &dataMutationStub{services: AdminMutationServices{ReefData: stub, AuditLogs: audit}}
+	h := &AdminHandlers{ReefData: stub, Mutations: runner}
+
+	body := `{"site_id":1,"survey_date":"2026-06-01","depth_m":5,"methods":["line","belt_fish"]}`
+	req := dataHandlerRequest("POST", "/api/admin/reef-check-data/events", body, policy.RoleAdmin)
+	w := httptest.NewRecorder()
+	h.CreateReefDataEvent(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d, body %s", w.Code, http.StatusCreated, w.Body)
+	}
+	if len(audit.created) != 1 {
+		t.Fatalf("audit count = %d, want 1", len(audit.created))
+	}
+	if audit.created[0].Action != repository.AuditActionCreate || audit.created[0].TargetTable != "event" {
+		t.Fatalf("unexpected audit record: %+v", audit.created[0])
+	}
+}
+
+func TestDeleteReefDataEvent(t *testing.T) {
+	stub := &dataHandlerStub{}
+	audit := &dataAuditStub{}
+	runner := &dataMutationStub{services: AdminMutationServices{ReefData: stub, AuditLogs: audit}}
+	h := &AdminHandlers{ReefData: stub, Mutations: runner}
+
+	req := dataHandlerRequest("DELETE", "/api/admin/reef-check-data/events/10", "", policy.RoleAdmin)
+	route := chi.NewRouteContext()
+	route.URLParams.Add("id", "10")
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, route))
+	w := httptest.NewRecorder()
+	h.DeleteReefDataEvent(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want %d, body %s", w.Code, http.StatusNoContent, w.Body)
+	}
+	if len(audit.created) != 1 {
+		t.Fatalf("audit count = %d, want 1", len(audit.created))
+	}
+	if audit.created[0].Action != repository.AuditActionDelete || audit.created[0].TargetTable != "event" {
+		t.Fatalf("unexpected audit record: %+v", audit.created[0])
+	}
+}
+
+func TestAddAndRemoveReefDataParticipant(t *testing.T) {
+	stub := &dataHandlerStub{}
+	audit := &dataAuditStub{}
+	runner := &dataMutationStub{services: AdminMutationServices{ReefData: stub, AuditLogs: audit}}
+	h := &AdminHandlers{ReefData: stub, Mutations: runner}
+
+	// Add participant
+	addBody := `{"role":"member","name_zh":"Test Diver"}`
+	addReq := dataHandlerRequest("POST", "/api/admin/reef-check-data/transects/1/participants", addBody, policy.RoleAdmin)
+	route := chi.NewRouteContext()
+	route.URLParams.Add("id", "1")
+	addReq = addReq.WithContext(context.WithValue(addReq.Context(), chi.RouteCtxKey, route))
+	addW := httptest.NewRecorder()
+	h.AddReefDataParticipant(addW, addReq)
+
+	if addW.Code != http.StatusOK {
+		t.Fatalf("add participant status = %d, want %d, body %s", addW.Code, http.StatusOK, addW.Body)
+	}
+	if len(audit.created) != 1 || audit.created[0].Action != repository.AuditActionUpdate || audit.created[0].TargetTable != "transect_participant" {
+		t.Fatalf("unexpected audit record for add: %+v", audit.created)
+	}
+
+	// Remove participant
+	delReq := dataHandlerRequest("DELETE", "/api/admin/reef-check-data/participants/100", "", policy.RoleAdmin)
+	delRoute := chi.NewRouteContext()
+	delRoute.URLParams.Add("id", "100")
+	delReq = delReq.WithContext(context.WithValue(delReq.Context(), chi.RouteCtxKey, delRoute))
+	delW := httptest.NewRecorder()
+	h.RemoveReefDataParticipant(delW, delReq)
+
+	if delW.Code != http.StatusNoContent {
+		t.Fatalf("remove participant status = %d, want %d, body %s", delW.Code, http.StatusNoContent, delW.Body)
+	}
+	if len(audit.created) != 2 || audit.created[1].Action != repository.AuditActionDelete || audit.created[1].TargetTable != "transect_participant" {
+		t.Fatalf("unexpected audit record for remove: %+v", audit.created)
+	}
+}
+
+func TestReefDataSitesUsersDiversEndpoints(t *testing.T) {
+	stub := &dataHandlerStub{}
+	h := &AdminHandlers{ReefData: stub}
+
+	// Sites
+	wSites := httptest.NewRecorder()
+	h.ReefDataSites(wSites, dataHandlerRequest("GET", "/sites", "", policy.RoleAdmin))
+	if wSites.Code != http.StatusOK {
+		t.Fatalf("sites status = %d", wSites.Code)
+	}
+
+	// Users
+	wUsers := httptest.NewRecorder()
+	h.ReefDataUsers(wUsers, dataHandlerRequest("GET", "/users", "", policy.RoleAdmin))
+	if wUsers.Code != http.StatusOK {
+		t.Fatalf("users status = %d", wUsers.Code)
+	}
+
+	// Divers
+	wDivers := httptest.NewRecorder()
+	h.ReefDataDivers(wDivers, dataHandlerRequest("GET", "/divers", "", policy.RoleAdmin))
+	if wDivers.Code != http.StatusOK {
+		t.Fatalf("divers status = %d", wDivers.Code)
+	}
 }

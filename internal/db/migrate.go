@@ -94,7 +94,6 @@ func initialSchemaAlreadyPresent(ctx context.Context, pool *pgxpool.Pool) (bool,
 	var present bool
 	err := pool.QueryRow(ctx, `
 		SELECT to_regclass('public.users') IS NOT NULL
-			AND to_regclass('public.reef_check_surveys') IS NOT NULL
 	`).Scan(&present)
 	if err != nil {
 		return false, fmt.Errorf("check existing initial schema: %w", err)

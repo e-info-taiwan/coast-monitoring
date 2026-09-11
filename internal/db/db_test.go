@@ -287,3 +287,25 @@ func TestCloudBuildConfigBuildsPushesAndDeploysToCloudRun(t *testing.T) {
 		}
 	}
 }
+
+func TestRemoveLegacyReefCheckAndLinkUsersMigration(t *testing.T) {
+	t.Parallel()
+
+	migration, err := os.ReadFile("../../migrations/000006_remove_legacy_reef_check_and_link_users.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sql := string(migration)
+	for _, want := range []string{
+		"ALTER TABLE diver ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES users(id)",
+		"ALTER TABLE transect_participant ADD COLUMN IF NOT EXISTS user_id uuid REFERENCES users(id)",
+		"DROP TABLE IF EXISTS reef_check_metric_counts CASCADE;",
+		"DROP TABLE IF EXISTS reef_check_surveys CASCADE;",
+		"DROP TABLE IF EXISTS reef_check_metrics CASCADE;",
+		"DROP TABLE IF EXISTS substrate_codes CASCADE;",
+	} {
+		if !strings.Contains(sql, want) {
+			t.Fatalf("migration missing %q", want)
+		}
+	}
+}

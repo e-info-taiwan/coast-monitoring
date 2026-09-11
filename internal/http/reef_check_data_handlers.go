@@ -21,6 +21,13 @@ type AdminReefDataService interface {
 	Event(context.Context, int) (service.ReefDataDetail, error)
 	Transect(context.Context, int, bool) (service.ReefDataTransect, error)
 	Update(context.Context, int, service.ReefDataUpdate) (service.ReefDataTransect, error)
+	CreateEvent(context.Context, service.ReefDataCreateInput) (service.ReefDataDetail, error)
+	DeleteEvent(context.Context, int) (service.ReefDataDetail, error)
+	Sites(context.Context) ([]service.ReefDataSite, error)
+	Users(context.Context) ([]service.ReefDataUser, error)
+	Divers(context.Context) ([]service.ReefDataDiver, error)
+	AddParticipant(context.Context, int, service.ReefDataParticipantInput) error
+	RemoveParticipant(context.Context, int) error
 }
 
 func (h *AdminHandlers) ListReefDataEvents(w http.ResponseWriter, r *http.Request) {
@@ -139,6 +146,181 @@ func (h *AdminHandlers) UpdateReefDataTransect(w http.ResponseWriter, r *http.Re
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *AdminHandlers) CreateReefDataEvent(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	var input service.ReefDataCreateInput
+	r.Body = http.MaxBytesReader(w, r.Body, maxAdminRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "無效的建立內容")
+		return
+	}
+	sites, err := h.ReefData.Sites(r.Context())
+	if err != nil {
+		writeServiceError(w, err, "無法驗證樣點")
+		return
+	}
+	validSites := make(map[int]bool, len(sites))
+	for _, s := range sites {
+		validSites[s.ID] = true
+	}
+	if err := input.Validate(validSites); err != nil {
+		writeServiceError(w, err, "驗證失敗")
+		return
+	}
+
+	var result service.ReefDataDetail
+	err = h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		var createErr error
+		result, createErr = s.ReefData.CreateEvent(r.Context(), input)
+		if createErr != nil {
+			return createErr
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:event:"+strconv.Itoa(result.Event.ID)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionCreate, "event", target, nil, result)
+	})
+	if err != nil {
+		writeServiceError(w, err, "建立失敗")
+		return
+	}
+	writeJSON(w, http.StatusCreated, result)
+}
+
+func (h *AdminHandlers) DeleteReefDataEvent(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	id, ok := reefDataID(w, r)
+	if !ok {
+		return
+	}
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		deleted, err := s.ReefData.DeleteEvent(r.Context(), id)
+		if err != nil {
+			return err
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:event:"+strconv.Itoa(id)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionDelete, "event", target, deleted, nil)
+	})
+	if err != nil {
+		writeServiceError(w, err, "刪除失敗")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *AdminHandlers) ReefDataSites(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireReefDataAdmin(w, r, h != nil && h.ReefData != nil); !ok {
+		return
+	}
+	data, err := h.ReefData.Sites(r.Context())
+	if err != nil {
+		writeServiceError(w, err, "無法載入樣點清單")
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func (h *AdminHandlers) ReefDataUsers(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireReefDataAdmin(w, r, h != nil && h.ReefData != nil); !ok {
+		return
+	}
+	data, err := h.ReefData.Users(r.Context())
+	if err != nil {
+		writeServiceError(w, err, "無法載入使用者清單")
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func (h *AdminHandlers) ReefDataDivers(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireReefDataAdmin(w, r, h != nil && h.ReefData != nil); !ok {
+		return
+	}
+	data, err := h.ReefData.Divers(r.Context())
+	if err != nil {
+		writeServiceError(w, err, "無法載入潛水員清單")
+		return
+	}
+	writeJSON(w, http.StatusOK, data)
+}
+
+func (h *AdminHandlers) AddReefDataParticipant(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	transectID, ok := reefDataID(w, r)
+	if !ok {
+		return
+	}
+	var input service.ReefDataParticipantInput
+	r.Body = http.MaxBytesReader(w, r.Body, maxAdminRequestBodyBytes)
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "無效的參與人員資料")
+		return
+	}
+	var result service.ReefDataTransect
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		before, err := s.ReefData.Transect(r.Context(), transectID, true)
+		if err != nil {
+			return err
+		}
+		if err := s.ReefData.AddParticipant(r.Context(), transectID, input); err != nil {
+			return err
+		}
+		result, err = s.ReefData.Transect(r.Context(), transectID, false)
+		if err != nil {
+			return err
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:transect:"+strconv.Itoa(transectID)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionUpdate, "transect_participant", target, before.Participants, result.Participants)
+	})
+	if err != nil {
+		writeServiceError(w, err, "新增參與人員失敗")
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (h *AdminHandlers) RemoveReefDataParticipant(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Mutations != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	participantID, ok := reefDataID(w, r)
+	if !ok {
+		return
+	}
+	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
+		if s.ReefData == nil || s.AuditLogs == nil {
+			return errAdminMutationUnavailable
+		}
+		if err := s.ReefData.RemoveParticipant(r.Context(), participantID); err != nil {
+			return err
+		}
+		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:participant:"+strconv.Itoa(participantID)))
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionDelete, "transect_participant", target, nil, nil)
+	})
+	if err != nil {
+		writeServiceError(w, err, "移除參與人員失敗")
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 func reefDataID(w http.ResponseWriter, r *http.Request) (int, bool) {
 	id, err := strconv.Atoi(chi.URLParam(r, "id"))

@@ -6,6 +6,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 // ReefData types describe the imported v1.7 domain, independent of the legacy UUID surveys.
@@ -79,12 +82,92 @@ type ReefDataImpact struct {
 }
 
 type ReefDataParticipant struct {
-	ID      int    `json:"id"`
-	DiverID int    `json:"diver_id"`
-	Role    string `json:"role"`
-	NameZH  string `json:"name_zh"`
-	NameEN  string `json:"name_en"`
-	Code    string `json:"reef_check_code"`
+	ID        int        `json:"id"`
+	DiverID   int        `json:"diver_id"`
+	UserID    *uuid.UUID `json:"user_id,omitempty"`
+	Role      string     `json:"role"`
+	NameZH    string     `json:"name_zh"`
+	NameEN    string     `json:"name_en"`
+	Code      string     `json:"reef_check_code"`
+	UserEmail string     `json:"user_email,omitempty"`
+	UserName  string     `json:"user_name,omitempty"`
+}
+
+type ReefDataSite struct {
+	ID        int      `json:"id"`
+	NameZH    string   `json:"name_zh"`
+	NameEN    string   `json:"name_en"`
+	Region    string   `json:"region"`
+	County    string   `json:"county"`
+	Location  string   `json:"location"`
+	Latitude  *float64 `json:"latitude"`
+	Longitude *float64 `json:"longitude"`
+}
+
+type ReefDataUser struct {
+	ID    uuid.UUID `json:"id"`
+	Email string    `json:"email"`
+	Name  string    `json:"name"`
+	Role  string    `json:"role"`
+}
+
+type ReefDataDiver struct {
+	ID            int        `json:"id"`
+	NameZH        string     `json:"name_zh"`
+	NameEN        string     `json:"name_en"`
+	ReefCheckCode string     `json:"reef_check_code"`
+	UserID        *uuid.UUID `json:"user_id,omitempty"`
+	UserEmail     string     `json:"user_email,omitempty"`
+}
+
+type ReefDataParticipantInput struct {
+	DiverID *int       `json:"diver_id,omitempty"`
+	UserID  *uuid.UUID `json:"user_id,omitempty"`
+	NameZH  string     `json:"name_zh,omitempty"`
+	NameEN  string     `json:"name_en,omitempty"`
+	Role    string     `json:"role"`
+}
+
+type ReefDataCreateInput struct {
+	SiteID     int      `json:"site_id"`
+	SurveyDate string   `json:"survey_date"`
+	StartDate  string   `json:"start_date,omitempty"`
+	EndDate    string   `json:"end_date,omitempty"`
+	EventTime  string   `json:"event_time"`
+	DepthM     float64  `json:"depth_m"`
+	Label      string   `json:"label,omitempty"`
+	Methods    []string `json:"methods"`
+}
+
+func (c *ReefDataCreateInput) Validate(validSiteIDs map[int]bool) error {
+	if c.SiteID <= 0 || (validSiteIDs != nil && !validSiteIDs[c.SiteID]) {
+		return fmt.Errorf("%w: 請選擇有效樣點", ErrValidation)
+	}
+	if _, err := time.Parse("2006-01-02", c.SurveyDate); err != nil {
+		return fmt.Errorf("%w: 調查日期格式錯誤 (YYYY-MM-DD)", ErrValidation)
+	}
+	if c.StartDate == "" {
+		c.StartDate = c.SurveyDate
+	}
+	if c.EndDate == "" {
+		c.EndDate = c.StartDate
+	}
+	if c.EventTime == "" {
+		c.EventTime = "na"
+	}
+	if !finite(c.DepthM) || c.DepthM <= 0 || c.DepthM > 100 {
+		return fmt.Errorf("%w: 水深必須介於 0–100 公尺", ErrValidation)
+	}
+	if len(c.Methods) == 0 {
+		return fmt.Errorf("%w: 請至少勾選一種調查方法", ErrValidation)
+	}
+	allowedMethods := map[string]bool{"line": true, "belt_fish": true, "belt_invert": true}
+	for _, m := range c.Methods {
+		if !allowedMethods[m] {
+			return fmt.Errorf("%w: 未知的調查方法 %s", ErrValidation, m)
+		}
+	}
+	return nil
 }
 
 type ReefDataTransect struct {
