@@ -9,3 +9,6 @@
 .claude/
 pb_data/
 pocketbase-local
+
+# Local database exports and verification artifacts
+.local/

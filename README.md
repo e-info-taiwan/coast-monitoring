@@ -6,49 +6,54 @@ Coast Monitoring is a single Go service backed by PostgreSQL. The server exposes
 
 The admin landing page reads imported observations from `survey → event → transect`.
 It supports filtering, detail views, and audited edits of existing transect metadata and observations.
-The legacy `reef_check_surveys` workflow remains separate. See [the v1.7 admin guide](docs/reef-check-v17-admin.md)
+Migration `000006` removes the legacy Reef Check tables and links participants to users. See [the v1.7 admin guide](docs/reef-check-v17-admin.md)
 for supported fields, calculation rules, local database verification, and API details.
 
 ## Local Development
 
-1. Copy the example environment file:
+The local base is `coast_v17` on native PostgreSQL at `127.0.0.1:5432`.
+Keep its imported observations as well as its schema. The old local `coast_monitoring`
+database has been retired; GCP database names and connection settings are unchanged.
 
-```bash
-cp .env.example .env
-```
+1. Use the existing gitignored `.env`. On a new checkout only, copy `.env.example`
+   to `.env`, set `DATABASE_URL` for the local PostgreSQL user, and configure a random
+   `SESSION_SECRET` of at least 32 characters. An empty database can be created with
+   `createdb -h 127.0.0.1 coast_v17`; migrations create schema and seeds, but do not
+   restore imported observations. Restore a data backup when the full local base is needed.
 
-2. Start PostgreSQL:
-
-```bash
-docker compose up -d db
-```
-
-3. Initialize or upgrade the database schema.
-
-The local Docker Compose database applies `migrations/000001_init.sql` automatically when Postgres creates a fresh `postgres_data` volume. If you are using an existing volume or an external database, apply the SQL in `migrations/000001_init.sql` manually before starting the Go server.
-
-The Go server also runs checked-in SQL migrations at startup before serving web traffic. For a completely empty database, starting the service is enough to create the schema and seed data. Pre-applying SQL remains useful for production change control, but the web UI does not need a separate manual init button.
-
-4. Load the environment and run the service:
+2. Load the environment and apply pending migrations without starting the server:
 
 ```bash
 set -a
 source .env
 set +a
+go run ./cmd/migrate
+```
+
+3. Start the service when needed:
+
+```bash
 go run ./cmd/server
 ```
 
-5. Open the admin UI:
+The server also applies pending migrations at startup. Open the address configured
+by `HTTP_ADDR` (`127.0.0.1:8091` in the current local `.env`; the example uses `8090`).
+Keep OAuth redirect URLs and allowed origins aligned with that address.
 
-```text
-http://127.0.0.1:8090/
-```
+For future schema changes, add the next numbered SQL file under `migrations/`, apply
+it to this same database, and verify locally before pushing for CI/CD. Do not edit
+already-applied migrations or maintain a separate manual schema.
 
-When the Docker daemon is available, you can also run the app through Docker Compose:
+Docker Compose is an optional isolated sandbox, activated explicitly:
 
 ```bash
-docker compose up --build
+docker compose --profile isolated up --build
 ```
+
+Its database uses host port `55440` and a separate Docker volume; it is not the daily
+local base. The application applies all migrations on startup. A fresh volume contains
+schema and seeds only. Changing `POSTGRES_DB` does not rename databases in an existing
+Docker volume.
 
 ## Configuration
 

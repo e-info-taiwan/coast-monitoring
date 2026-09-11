@@ -4,9 +4,10 @@
 
 2026-09-11 的 confirmed-only 匯入包使用單數表 `site → survey → event → transect`。
 舊介面使用 UUID 表 `sites → reef_check_surveys`，所以匯入完成後舊列表仍可能顯示 0。
-新版管理員預設開啟「Reef Check 觀測資料」，直接查詢 v1.7 表；舊資料輸入及既有志工 API 保留。
+新版管理員預設開啟「Reef Check 觀測資料」，直接查詢 v1.7 表。
+Migration `000006` 移除舊 Reef Check 表，並在 `diver` 與 `transect_participant` 加入 `user_id` 關聯。
 
-既有 migrations `000001`–`000005` 已足以建立這個管理介面的資料結構，本次不另加 schema migration。
+目前本機基準套用 migrations `000001`–`000006`。
 程式啟動會依 `schema_migrations` 套用尚未執行的 SQL。
 
 ## 管理功能
@@ -23,8 +24,7 @@
 - 更新與 audit 在同一 PostgreSQL transaction 中執行，失敗一起 rollback。
 - 以穿越線及其明細的 SHA-256 指紋拒絕過期編輯；更新前鎖定 parent transect。
 
-本次編輯限於現有穿越線與觀測列。新增出動、場次、方法，以及樣點／人員主檔維護與重新配對不在這次介面內。
-既有舊版輸入仍寫入舊表，不會自動轉成 v1.7。
+以下觀測編輯 API 限於現有穿越線與觀測列；樣點、人員與字典主檔另由管理介面維護。
 
 ## 衍生統計
 
@@ -62,11 +62,27 @@ JSON 使用 v1.7 的 snake_case；數字 ID 是資料表 integer/bigserial ID。
 
 ## 驗證結果（2026-09-11）
 
-專用本機 DB：`127.0.0.1:55439/coast_v17`，與 GCP/dev 分離。
-套用全部 5 個 migrations 後匯入使用者提供的 v1.7 confirmed-only CSV。
-本次本機設定保存在已被 git 忽略的 `.env.local.v17`。可用 `set -a; source .env.local.v17; set +a` 後執行 `go run ./cmd/server`。
-本機 PostgreSQL data directory 為 `/tmp/coast-v17-pg`；唯讀 UI 預覽為 `http://127.0.0.1:8092/`，資料快照在 `/tmp/coast-v17-preview`。
-這些 `/tmp` 資料屬於可重建的驗證環境，不應作為唯一備份。
+日常本機唯一基準 DB：`127.0.0.1:5432/coast_v17`，與 GCP/dev 分離。
+使用 Homebrew PostgreSQL 的持久儲存，保留完整匯入資料及 schema。
+原 `55439` 驗證資料庫的 32 張 public 表已逐表比對筆數、完整列內容雜湊及 schema 後搬移，再套用 `000006`。
+本機設定統一使用 gitignored `.env`；原 `.env.local.v17` 已移除。
+
+```bash
+set -a
+source .env
+set +a
+go run ./cmd/migrate
+# 需要開啟服務時才執行：
+go run ./cmd/server
+```
+
+未來 schema 調整新增下一個編號的 migration，對同一個 `coast_v17` 套用並驗證；不要修改已套用的 SQL 或另外手改 schema。
+舊本機 `coast_monitoring` 與原 `55439` 的驗證副本已退役；本機 Web server 保持停止。
+已確認目前 schema 與空資料庫執行全部 `000001`–`000006` migrations 的結果完全一致；
+升級後亦逐表核對保留欄位與完整資料內容。Go 全套（含 PostgreSQL 整合測試）及前端統計測試通過。
+搬移前完整備份保存在 gitignored `.local/backups/coast_v17-before-consolidation.dump`；
+舊 DB 的封存備份為 `.local/backups/coast_monitoring-retired.dump`。
+GCP 的資料庫名稱與連線設定不受本機整理影響。
 
 | 資料 | 資料包／本機／明細 API repository 核對 |
 | --- | ---: |
