@@ -95,6 +95,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
+		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
 		adminFiles.ServeHTTP(w, r)
 	})
 	return r
