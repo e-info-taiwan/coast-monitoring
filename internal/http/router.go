@@ -19,6 +19,7 @@ type Dependencies struct {
 	AuthHandlers        *AuthHandlers
 	AdminHandlers       *AdminHandlers
 	AppHandlers         *AppHandlers
+	CronHandlers        *CronHandlers
 	AdminAllowedOrigins []string
 	AppAllowedOrigins   []string
 }
@@ -100,7 +101,15 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Post("/impact-types", deps.AdminHandlers.CreateImpactType)
 		r.Patch("/impact-types/{id}", deps.AdminHandlers.UpdateImpactType)
 		r.Delete("/impact-types/{id}", deps.AdminHandlers.DeleteImpactType)
+
+		r.Get("/cwa-marine/stations", deps.AdminHandlers.ListCWAMarineStations)
+		r.Get("/cwa-marine/sea-temp", deps.AdminHandlers.GetCWAMarineSeaTemp)
+		r.Post("/cwa-marine/sync", deps.AdminHandlers.SyncCWAMarine)
 	})
+	if deps.CronHandlers != nil {
+		r.Post("/api/cron/sync-cwa-marine", deps.CronHandlers.SyncCWAMarine)
+		r.Get("/api/cron/sync-cwa-marine", deps.CronHandlers.SyncCWAMarine)
+	}
 	r.Route("/api/app", func(r chi.Router) {
 		r.Use(deps.CORS(deps.AppAllowedOrigins))
 		r.Use(deps.RequireSession)

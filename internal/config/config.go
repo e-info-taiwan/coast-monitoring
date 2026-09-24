@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"strings"
+	"time"
 )
 
 type Config struct {
@@ -19,10 +20,17 @@ type Config struct {
 	SecureCookies       bool
 	AdminAllowedOrigins []string
 	AppAllowedOrigins   []string
+	EnableCWACron       bool
+	CWASyncInterval     time.Duration
+	CronSecret          string
 }
 
 func Load() (Config, error) {
 	secureCookies, err := boolEnv("SECURE_COOKIES", true)
+	if err != nil {
+		return Config{}, err
+	}
+	enableCWACron, err := boolEnv("ENABLE_CWA_CRON", true)
 	if err != nil {
 		return Config{}, err
 	}
@@ -43,6 +51,9 @@ func Load() (Config, error) {
 		SecureCookies:       secureCookies,
 		AdminAllowedOrigins: splitCSV(os.Getenv("ADMIN_ALLOWED_ORIGINS")),
 		AppAllowedOrigins:   splitCSV(os.Getenv("APP_ALLOWED_ORIGINS")),
+		EnableCWACron:       enableCWACron,
+		CWASyncInterval:     parseDurationEnv("CWA_SYNC_INTERVAL", 1*time.Hour),
+		CronSecret:          strings.TrimSpace(os.Getenv("CRON_SECRET")),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -101,4 +112,16 @@ func splitCSV(value string) []string {
 		}
 	}
 	return out
+}
+
+func parseDurationEnv(key string, fallback time.Duration) time.Duration {
+	val := strings.TrimSpace(os.Getenv(key))
+	if val == "" {
+		return fallback
+	}
+	d, err := time.ParseDuration(val)
+	if err != nil {
+		return fallback
+	}
+	return d
 }

@@ -334,6 +334,85 @@ Response:
 
 Password hashes and Google subjects are stripped from audit JSON responses.
 
+### Admin CWA Marine Sea Temperatures
+
+List CWA Marine stations:
+
+```http
+GET /api/admin/cwa-marine/stations
+```
+
+Response:
+
+```json
+{
+  "stations": [
+    {
+      "station_id": "C0W150",
+      "station_name": "綠島柴口",
+      "area_id": "11",
+      "area_name": "綠島蘭嶼海面",
+      "station_type": "浮標",
+      "latitude": 22.6738,
+      "longitude": 121.4883,
+      "is_active": true
+    }
+  ]
+}
+```
+
+Query nearest sea temperature for a station on a given date/time:
+
+```http
+GET /api/admin/cwa-marine/sea-temp?station_id=C0W150&date=2026-09-24&time=09:00
+```
+
+Response:
+
+```json
+{
+  "station_id": "C0W150",
+  "date": "2026-09-24",
+  "time": "09:00",
+  "temperature_c": 28.3,
+  "observed_at": "2026-09-24T09:00:00+08:00",
+  "source": "cwa_obs_marine"
+}
+```
+
+Trigger immediate manual CWA marine data sync:
+
+```http
+POST /api/admin/cwa-marine/sync
+```
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "synced_at": "2026-09-24T13:40:00Z"
+}
+```
+
+### Cron Webhooks
+
+Trigger scheduled CWA marine data sync from Cloud Scheduler or external runner:
+
+```http
+POST /api/cron/sync-cwa-marine
+X-Cron-Secret: <CRON_SECRET>
+```
+
+Response:
+
+```json
+{
+  "status": "ok",
+  "synced_at": "2026-09-24T13:40:00Z"
+}
+```
+
 ## App-Facing API
 
 The app-facing API is for the separate frontend / FE server. It does not expose user management data.

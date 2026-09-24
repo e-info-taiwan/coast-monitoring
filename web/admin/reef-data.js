@@ -17,6 +17,7 @@ export function createReefData({ apiFetch, onCount }) {
     sites: [],
     users: [],
     divers: [],
+    cwaStations: [],
     error: "",
     loading: false,
     loaded: false,
@@ -59,6 +60,19 @@ export function createReefData({ apiFetch, onCount }) {
       s.sites = (await apiFetch("/admin/reef-check-data/sites")) || []
     }
     return s.sites
+  }
+
+  async function getCWAStations() {
+    if (!s.cwaStations.length) {
+      try {
+        const res = await apiFetch("/admin/cwa-marine/stations")
+        s.cwaStations = res?.stations || []
+      } catch (err) {
+        console.warn("無法取得氣象署測站清單", err)
+        s.cwaStations = []
+      }
+    }
+    return s.cwaStations
   }
 
   async function getParticipantsLookup() {
@@ -235,6 +249,7 @@ export function createReefData({ apiFetch, onCount }) {
         <div><dt>調查地點</dt><dd>${esc([e.region, e.county, e.location].filter(Boolean).join(" / "))}<small>${esc(e.site_english)}</small></dd></div>
         <div><dt>場次時間</dt><dd>${e.event_time === "na" ? "未記錄" : esc(e.event_time.replaceAll("-", ":"))}</dd></div>
         <div><dt>樣點座標</dt><dd>${e.latitude == null || e.longitude == null ? "未提供座標" : `${esc(e.latitude)}, ${esc(e.longitude)}`}</dd></div>
+        <div><dt>氣象署測站</dt><dd>${e.cwa_station_name ? `${esc(e.cwa_station_name)} <small>(${esc(e.cwa_station_id)})</small>` : (e.cwa_station_id ? esc(e.cwa_station_id) : "未指定測站")}</dd></div>
       </dl>
       <div class="rd-tabs" role="group" aria-label="調查方法">
         ${Object.entries(methods).map(([method, label]) => {
@@ -490,7 +505,7 @@ export function createReefData({ apiFetch, onCount }) {
     }
   }
 
-  function showDialog({ title, bodyHTML, onSubmit, submitText = "確認" }) {
+  function showDialog({ title, bodyHTML, onReady, onSubmit, submitText = "確認" }) {
     const overlay = document.createElement("div")
     overlay.className = "rd-dialog-overlay"
     overlay.innerHTML = `
@@ -510,6 +525,10 @@ export function createReefData({ apiFetch, onCount }) {
       </div>
     `
     document.body.appendChild(overlay)
+
+    if (typeof onReady === "function") {
+      onReady(overlay)
+    }
 
     function close() {
       overlay.remove()
@@ -541,8 +560,12 @@ export function createReefData({ apiFetch, onCount }) {
 
   async function showCreateEventModal() {
     let sites = []
+    let stations = []
     try {
-      sites = await getSites()
+      [sites, stations] = await Promise.all([
+        getSites(),
+        getCWAStations(),
+      ])
     } catch (err) {
       alert("無法載入樣點清單: " + err.message)
       return
@@ -557,27 +580,58 @@ export function createReefData({ apiFetch, onCount }) {
 
     const siteOptions = sortedSites.map(site => {
       const loc = [site.region, site.county].filter(Boolean).join(" · ")
-      const label = `${site.name_zh} (${site.name_en || ""}) ${loc ? `[${loc}]` : ""}`
+      const stationTag = site.cwa_station_name ? ` · 測站: ${site.cwa_station_name}` : ""
+      const label = `${site.name_zh} (${site.name_en || ""}) ${loc ? `[${loc}]` : ""}${stationTag}`
       return `<option value="${site.id}">${esc(label)}</option>`
+    }).join("")
+
+    const sortedStations = [...stations].sort((a, b) => {
+      const areaA = a.area_name || ""
+      const areaB = b.area_name || ""
+      const cmp = areaA.localeCompare(areaB, "zh-TW")
+      return cmp !== 0 ? cmp : (a.station_name || "").localeCompare(b.station_name || "", "zh-TW")
+    })
+
+    const stationOptions = sortedStations.map(st => {
+      const area = st.area_name ? `[${st.area_name}] ` : ""
+      const type = st.station_type ? ` · ${st.station_type}` : ""
+      const label = `${area}${st.station_name} (${st.station_id}${type})`
+      return `<option value="${esc(st.station_id)}">${esc(label)}</option>`
     }).join("")
 
     const today = new Date().toISOString().slice(0, 10)
     const bodyHTML = `
       <label>
         樣點 (Site) *
-        <select name="site_id" required>
+        <select name="site_id" id="rd-create-site" required>
           <option value="">請選擇樣點</option>
           ${siteOptions}
         </select>
       </label>
       <label>
         調查日期 (Survey Date) *
-        <input type="date" name="survey_date" value="${today}" required>
+        <input type="date" name="survey_date" id="rd-create-date" value="${today}" required>
       </label>
       <label>
         場次時間 (Event Time)
-        <input type="text" name="event_time" value="09:00" placeholder="例如 09:00 或 na">
+        <input type="text" name="event_time" id="rd-create-time" value="09:00" placeholder="例如 09:00 或 na">
         <small class="meta-line">未記錄請輸入 na</small>
+      </label>
+      <label>
+        氣象署海象測站 (CWA Station)
+        <select name="cwa_station_id" id="rd-create-station">
+          <option value="">(不指定 / 無對應測站)</option>
+          ${stationOptions}
+        </select>
+        <small class="meta-line">選擇樣點時將自動帶入預設推薦測站，亦可自由手動更換</small>
+      </label>
+      <label>
+        當日水溫 (°C)
+        <div style="display:flex;gap:0.5rem;align-items:center;">
+          <input type="number" name="water_temp_c" id="rd-create-water-temp" step="0.1" min="0" max="45" placeholder="例如 26.5" style="flex:1;">
+          <button type="button" class="tiny-button" id="rd-fetch-temp-btn" style="white-space:nowrap;">查詢海溫</button>
+        </div>
+        <small class="meta-line" id="rd-cwa-temp-hint">選擇測站與日期後，系統將自動從中央氣象署檢索最接近海溫</small>
       </label>
       <label>
         水深 (Depth m) *
@@ -601,6 +655,87 @@ export function createReefData({ apiFetch, onCount }) {
       title: "新增 Reef Check 調查場次",
       bodyHTML,
       submitText: "建立場次",
+      onReady: (overlay) => {
+        const siteSel = overlay.querySelector("#rd-create-site")
+        const dateInput = overlay.querySelector("#rd-create-date")
+        const timeInput = overlay.querySelector("#rd-create-time")
+        const stationSel = overlay.querySelector("#rd-create-station")
+        const tempInput = overlay.querySelector("#rd-create-water-temp")
+        const fetchBtn = overlay.querySelector("#rd-fetch-temp-btn")
+        const hintP = overlay.querySelector("#rd-cwa-temp-hint")
+
+        let fetchSeq = 0
+        async function fetchSeaTemp(isAuto = false) {
+          const stationId = stationSel?.value?.trim()
+          const dateVal = dateInput?.value?.trim()
+          const timeVal = timeInput?.value?.trim() || "09:00"
+
+          if (!stationId || !dateVal) {
+            if (!isAuto && hintP) {
+              hintP.textContent = "請先選擇氣象署測站與調查日期"
+              hintP.style.color = "#c05621"
+            }
+            return
+          }
+
+          const currentSeq = ++fetchSeq
+          if (hintP) {
+            hintP.textContent = "正在向氣象署檢索海溫..."
+            hintP.style.color = "var(--primary,#00705a)"
+          }
+          if (fetchBtn) fetchBtn.disabled = true
+
+          try {
+            const query = new URLSearchParams({
+              station_id: stationId,
+              date: dateVal,
+              time: timeVal,
+            })
+            const data = await apiFetch(`/admin/cwa-marine/sea-temp?${query.toString()}`)
+            if (currentSeq !== fetchSeq) return
+
+            if (data && typeof data.temperature_c === "number") {
+              if (tempInput) {
+                tempInput.value = data.temperature_c.toFixed(1)
+              }
+              if (hintP) {
+                const obsTime = data.observed_at ? data.observed_at.slice(0, 16).replace("T", " ") : ""
+                hintP.textContent = `✓ 已自動帶入氣象署海溫 ${data.temperature_c}°C${obsTime ? `（觀測時間：${obsTime}）` : ""}`
+                hintP.style.color = "#2f855a"
+              }
+            } else {
+              if (hintP) {
+                hintP.textContent = "氣象署目前無該日海溫記錄（可手動輸入）"
+                hintP.style.color = "#718096"
+              }
+            }
+          } catch (err) {
+            if (currentSeq !== fetchSeq) return
+            if (hintP) {
+              hintP.textContent = `查詢海溫提示: ${err.message || "未取得海溫紀錄，可手動填寫"}`
+              hintP.style.color = "#718096"
+            }
+          } finally {
+            if (fetchBtn) fetchBtn.disabled = false
+          }
+        }
+
+        // When site changes, autofill recommended CWA station
+        siteSel?.addEventListener("change", () => {
+          const siteId = Number(siteSel.value)
+          const site = sortedSites.find(s => s.id === siteId)
+          if (site && site.cwa_station_id) {
+            if (stationSel) stationSel.value = site.cwa_station_id
+            fetchSeaTemp(true)
+          }
+        })
+
+        // When station, date, or time changes, trigger fetch
+        stationSel?.addEventListener("change", () => fetchSeaTemp(true))
+        dateInput?.addEventListener("change", () => fetchSeaTemp(true))
+        timeInput?.addEventListener("change", () => fetchSeaTemp(true))
+        fetchBtn?.addEventListener("click", () => fetchSeaTemp(false))
+      },
       onSubmit: async (f, close) => {
         const siteID = Number(f.get("site_id"))
         if (!siteID) throw new Error("請選擇樣點")
@@ -614,16 +749,29 @@ export function createReefData({ apiFetch, onCount }) {
         const selectedMethods = f.getAll("methods").map(String)
         if (!selectedMethods.length) throw new Error("請至少勾選一種調查方法")
 
+        const cwaStationID = String(f.get("cwa_station_id") || "").trim() || null
+        const waterTempRaw = String(f.get("water_temp_c") || "").trim()
+        const waterTempC = waterTempRaw !== "" ? Number(waterTempRaw) : null
+        if (waterTempC !== null && (isNaN(waterTempC) || waterTempC < -5 || waterTempC > 50)) {
+          throw new Error("水溫數值無效")
+        }
+
+        const body = {
+          site_id: siteID,
+          survey_date: surveyDate,
+          event_time: eventTime,
+          depth_m: depthM,
+          label,
+          methods: selectedMethods,
+          cwa_station_id: cwaStationID,
+        }
+        if (waterTempC !== null) {
+          body.water_temp_c = waterTempC
+        }
+
         const created = await apiFetch("/admin/reef-check-data/events", {
           method: "POST",
-          body: {
-            site_id: siteID,
-            survey_date: surveyDate,
-            event_time: eventTime,
-            depth_m: depthM,
-            label,
-            methods: selectedMethods,
-          },
+          body,
         })
         close()
         s.events.unshift(created.event)

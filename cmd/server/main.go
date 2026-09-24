@@ -49,7 +49,16 @@ func main() {
 		log.Print("google auth disabled: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, or GOOGLE_REDIRECT_URL is missing")
 	}
 
-	server := newHTTPServer(cfg.HTTPAddr, newServerHandler(cfg, pool, googleProvider))
+	cwaRepo := repository.NewCWAMarineRepository(pool)
+	cwaService := service.NewCWAMarineService(cwaRepo, nil)
+
+	if cfg.EnableCWACron {
+		cronCtx, cronCancel := context.WithCancel(ctx)
+		defer cronCancel()
+		go runCWACron(cronCtx, cwaService, cfg.CWASyncInterval)
+	}
+
+	server := newHTTPServer(cfg.HTTPAddr, newServerHandler(cfg, pool, googleProvider, cwaService))
 
 	log.Printf("listening on %s", cfg.HTTPAddr)
 	log.Fatal(server.ListenAndServe())
@@ -66,7 +75,7 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
-func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider httpx.GoogleOAuthProvider) http.Handler {
+func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider httpx.GoogleOAuthProvider, cwaService *service.CWAMarineService) http.Handler {
 	userRepo := repository.NewUserRepository(pool)
 	sessionRepo := repository.NewSessionRepository(pool)
 	catalogRepo := repository.NewCatalogRepository(pool)
@@ -98,15 +107,59 @@ func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider http
 			ReefData:     repository.NewReefDataRepository(pool),
 			AuditLogs:    auditLogRepo,
 			Mutations:    postgresAdminMutationRunner{pool: pool},
+			CWAMarine:    cwaService,
 		},
 		AppHandlers: &httpx.AppHandlers{
 			Catalog:      service.CatalogService{Catalog: catalogRepo},
 			Observations: service.ObservationService{Observations: observationRepo},
 			Mutations:    postgresAdminMutationRunner{pool: pool},
 		},
+		CronHandlers: &httpx.CronHandlers{
+			CWAMarine:  cwaService,
+			CronSecret: cfg.CronSecret,
+		},
 		AdminAllowedOrigins: cfg.AdminAllowedOrigins,
 		AppAllowedOrigins:   cfg.AppAllowedOrigins,
 	})
+}
+
+func runCWACron(ctx context.Context, cwa *service.CWAMarineService, interval time.Duration) {
+	if interval <= 0 {
+		interval = 1 * time.Hour
+	}
+	log.Printf("cwa marine cron enabled, interval: %v", interval)
+
+	// Run initial sync after a short delay on startup (5 seconds)
+	select {
+	case <-time.After(5 * time.Second):
+		report, err := cwa.SyncAll(ctx)
+		if err != nil {
+			log.Printf("cwa marine initial sync error: %v", err)
+		} else {
+			log.Printf("cwa marine initial sync finished in %dms: %d stations, %d obs, %d sites linked",
+				report.DurationMs, report.StationsCount, report.ObservationsSaved, report.SitesLinked)
+		}
+	case <-ctx.Done():
+		return
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			report, err := cwa.SyncAll(ctx)
+			if err != nil {
+				log.Printf("cwa marine cron sync error: %v", err)
+			} else {
+				log.Printf("cwa marine cron sync finished in %dms: %d stations, %d obs, %d sites linked",
+					report.DurationMs, report.StationsCount, report.ObservationsSaved, report.SitesLinked)
+			}
+		case <-ctx.Done():
+			return
+		}
+	}
 }
 
 type postgresAdminMutationRunner struct {

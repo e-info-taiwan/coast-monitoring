@@ -25,6 +25,7 @@ type AdminHandlers struct {
 	ReefData     AdminReefDataService
 	AuditLogs    AdminAuditLogService
 	Mutations    AdminMutationRunner
+	CWAMarine    AdminCWAMarineService
 }
 
 type AdminUserService interface {

@@ -68,6 +68,16 @@ The common local and deployment settings are:
 - `BOOTSTRAP_ADMIN_EMAIL`: temporary first-admin bootstrap email.
 - `ADMIN_ALLOWED_ORIGINS`: comma-separated browser origins allowed for admin API requests.
 - `APP_ALLOWED_ORIGINS`: comma-separated browser origins allowed for app API requests.
+- `CRON_SECRET`: shared secret for `/api/cron/*` webhook authentication (e.g. Cloud Scheduler).
+- `ENABLE_CWA_CRON`: set `true` to enable the built-in background ticker for CWA marine observations.
+- `CWA_SYNC_INTERVAL`: sync interval for CWA marine background ticker (e.g. `1h`).
+
+## CWA Marine Temperature & Cronjob
+
+Central Weather Administration (CWA) sea surface temperature data integration:
+- When creating a Reef Check event in the admin UI, selecting a site automatically suggests the nearest CWA station and auto-fills the water temperature (`water_temp_c`) for the event date.
+- Cronjobs for syncing CWA sea temperatures can be deployed via Cloud Scheduler (calling `/api/cron/sync-cwa-marine`), a standalone Cloud Run Job (`sync-cwa-marine`), or in-server background ticker (`ENABLE_CWA_CRON=true`).
+- See [docs/cwa-marine-cronjob.md](docs/cwa-marine-cronjob.md) for full setup instructions and CLI documentation.
 
 ## Authentication And Roles
 

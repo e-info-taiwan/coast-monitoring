@@ -249,6 +249,7 @@ const resourceConfigs = {
       { key: "region", label: "分區" },
       { key: "county", label: "縣市" },
       { key: "location", label: "地區／樣區" },
+      { key: "cwaStationLabel", label: "氣象署測站" },
       { key: "statusLabel", label: "狀態" },
     ],
     editableFields: [
@@ -259,6 +260,7 @@ const resourceConfigs = {
       { key: "location", label: "地區／樣區", type: "text", placeholder: "例如：綠島" },
       { key: "latitude", label: "緯度 Latitude", type: "number", valueType: "float", placeholder: "例如：22.665" },
       { key: "longitude", label: "經度 Longitude", type: "number", valueType: "float", placeholder: "例如：121.482" },
+      { key: "cwa_station_id", label: "氣象署測站代號 (CWA Station ID)", type: "text", placeholder: "例如：C0W150 或留空" },
       {
         key: "is_active",
         label: "啟用狀態",
@@ -748,6 +750,11 @@ function normalizeRecord(resourceKey, record) {
     isAggregate: record.is_aggregate ?? record.isAggregate,
     isActive: record.is_active != null ? String(record.is_active) : (record.isActive != null ? String(record.isActive) : "true"),
     statusLabel: (record.is_active === false || record.status === "disabled") ? "停用" : "啟用",
+    cwaStationId: record.cwa_station_id ?? record.cwaStationId ?? "",
+    cwaStationName: record.cwa_station_name ?? record.cwaStationName ?? "",
+    cwaStationLabel: record.cwa_station_name
+      ? `${record.cwa_station_name} (${record.cwa_station_id})`
+      : (record.cwa_station_id || "-"),
   }
   if (normalized.taxonGroup) {
     normalized.taxonGroupLabel = { fish: "魚類", invert: "無脊椎", rare: "珍稀物種" }[normalized.taxonGroup] || normalized.taxonGroup

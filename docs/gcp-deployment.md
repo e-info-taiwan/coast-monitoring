@@ -57,8 +57,11 @@ The service reads these environment variables:
 | `SECURE_COOKIES` | no | no | Defaults to `true`. Keep `true` in production. |
 | `SESSION_COOKIE_NAME` | no | no | Defaults to `coast_session`. |
 | `CSRF_HEADER_NAME` | no | no | Defaults to `X-CSRF-Token`. |
+| `CRON_SECRET` | for cron webhooks | yes | Shared secret for `/api/cron/*` endpoints (e.g. Cloud Scheduler). |
+| `ENABLE_CWA_CRON` | no | no | Set `true` to enable in-server background ticker for CWA marine observations. |
+| `CWA_SYNC_INTERVAL` | no | no | Ticker interval for CWA marine sync (e.g. `1h`, `30m`). Defaults to `1h`. |
 
-Cloud Run injects `PORT`; the app now uses it when `HTTP_ADDR` is unset. Local development can keep `HTTP_ADDR=:8090`.
+Cloud Run injects `PORT`; the app now uses it when `HTTP_ADDR` is unset. Local development can keep `HTTP_ADDR=:8090`. For details on setting up Cloud Scheduler or Cloud Run Jobs for CWA marine data sync, see [`docs/cwa-marine-cronjob.md`](cwa-marine-cronjob.md).
 
 ## Cloud SQL Setup
 
