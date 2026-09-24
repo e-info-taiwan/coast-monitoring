@@ -187,3 +187,73 @@ func TestReefDataConfirmedPackage(t *testing.T) {
 	}
 	t.Logf("verified 726 events: transects,points,bleaching,belt,impacts,participants=%v", got)
 }
+
+func TestReefDataSubmitSurvey(t *testing.T) {
+	dsn := os.Getenv("REEF_DATA_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("set REEF_DATA_TEST_DATABASE_URL to a migrated local PostgreSQL database")
+	}
+	ctx := context.Background()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+
+	repo := NewReefDataRepository(tx)
+
+	bleachHC := 5
+	cnt := 3
+	rawVal := 1.0
+	sub := service.ReefCheckSurveySubmission{
+		Format: "reefcheck-web-prototype-v2",
+		Event: service.ReefCheckEventInput{
+			SiteNameZH: "野柳",
+			SurveyDate: "2025-06-01",
+			EventTime:  "09:30",
+			DepthM:     6.0,
+		},
+		Transects: []service.ReefCheckTransectInput{
+			{Method: "line", StartTime: "09:30", Recorders: []string{"志工甲", "志工乙"}, TeamLeader: "隊長王"},
+			{Method: "belt_fish", StartTime: "09:30", Recorders: []string{"志工丙"}},
+			{Method: "belt_invert", StartTime: "09:30", Recorders: []string{"志工丁"}},
+		},
+		SubstratePoints: []service.ReefCheckSubstratePointInput{
+			{Segment: 1, PositionM: 0.0, SubstrateCode: "HC", SubstrateLayer: "surface"},
+			{Segment: 1, PositionM: 0.5, SubstrateCode: "SI", SubstrateLayer: "surface"},
+		},
+		MudAudit: []service.ReefCheckMudAuditInput{
+			{Segment: 1, PositionM: 0.5, Surface: "SI", Down: "HC", Canonical: "SI(HC)"},
+		},
+		SubstrateBleaching: []service.ReefCheckBleachingInput{
+			{Segment: 1, SubstrateCode: "HC", BleachedPoints: &bleachHC},
+		},
+		BeltObservations: []service.ReefCheckBeltObservationInput{
+			{TaxonGroup: "fish", TaxonNameENLookup: "Butterflyfish", Segment: 1, Count: &cnt},
+		},
+		ImpactObservations: []service.ReefCheckImpactObservationInput{
+			{ImpactGroup: "trash", ImpactNameENLookup: "Trash: general", Segment: 1, RawValue: &rawVal},
+		},
+	}
+
+	res, err := repo.SubmitSurvey(ctx, sub, nil)
+	if err != nil {
+		t.Fatalf("SubmitSurvey error: %v", err)
+	}
+	if res.Status != "saved" || res.ReceiptID == "" || res.EventID == "" {
+		t.Fatalf("unexpected res: %+v", res)
+	}
+
+	cfg, err := repo.Config(ctx)
+	if err != nil {
+		t.Fatalf("Config error: %v", err)
+	}
+	if len(cfg.Sites) == 0 || len(cfg.Codes) == 0 {
+		t.Fatalf("empty config sites or codes: %+v", cfg)
+	}
+}

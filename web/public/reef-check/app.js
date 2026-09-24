@@ -9,24 +9,36 @@ const points = starts.flatMap((start,s) => Array.from({length:40},(_,i)=>({key:S
 function defaultSegment(){return window.innerWidth<=1366?1:0;}
 let records = readRecords(), state = fresh(), step = 0, sheet = 'line', segment = defaultSegment(), reviewSegment = defaultSegment(), layer = 'surface';
 let timer, storageFailed = false, lastCell = null, saving = false;
+let currentUser = null, csrfToken = '', submitError = null;
 function fresh(meta = {}) {
   return {id:globalThis.crypto?.randomUUID?.() || `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`,methods:[],meta:{site:'',date:'',time:'',depth:'',temperature:'',visibility:'',leader:'',scientist:'',...meta},recorders:{line:'',fish:'',invert:''},line:{},down:{},mud:false,bleaching:false,bleach:{},fish:{},invert:{},rare:{},impact:{},custom:{fish:[],invert:[],rare:[]},trashMode:'level',notes:'',missingReason:'',status:'draft',step:0,updated:''};
 }
 function readRecords(){try{const data=JSON.parse(localStorage.getItem(KEY)||'[]');return Array.isArray(data)?data.filter(x=>x?.id&&Array.isArray(x.methods)&&x.meta&&x.line&&x.custom):[];}catch{return [];}}
 function persist(change=true){
-  if(change){state.status='draft';state.ack=false;delete state.simulatedSave;}
+  if(change){state.status='draft';state.ack=false;delete state.simulatedSave;delete state.dbSave;}
   state.step=step;state.updated=new Date().toISOString();
   const i=records.findIndex(x=>x.id===state.id);
   if(i<0)records.push(structuredClone(state));else records[i]=structuredClone(state);
-  try{localStorage.setItem(KEY,JSON.stringify(records));storageFailed=false;$('#save-status').textContent=state.simulatedSave?'模擬儲存成功 · 本機留存':'草稿已儲存在此裝置';$('#save-status').classList.remove('storage-warning');}
-  catch{storageFailed=true;$('#save-status').textContent='儲存失敗，請下載草稿';$('#save-status').classList.add('storage-warning');toast('此瀏覽器無法儲存，請下載草稿備份。');}
+  try{
+    localStorage.setItem(KEY,JSON.stringify(records));
+    storageFailed=false;
+    const saveInfo = (state.dbSave || state.simulatedSave) ? '已存入資料庫 · 本機留存' : (currentUser ? `草稿（${currentUser.name || currentUser.email}）` : '草稿已儲存在此裝置');
+    $('#save-status').textContent=saveInfo;
+    $('#save-status').classList.remove('storage-warning');
+  }catch{
+    storageFailed=true;
+    $('#save-status').textContent='儲存失敗，請下載草稿';
+    $('#save-status').classList.add('storage-warning');
+    toast('此瀏覽器無法儲存，請下載草稿備份。');
+  }
   $('#draft-count').textContent=records.length;
 }
 function toast(text){$('#toast').textContent=text;$('#toast').hidden=false;clearTimeout(timer);timer=setTimeout(()=>$('#toast').hidden=true,4200);}
 function methodList(){return ['line','fish','invert'].filter(k=>state.methods.includes(k));}
 function sheetList(){return methodList().flatMap(k=>k==='invert'?['invert','rare','impact']:[k]);}
 function sheetName(k){return {line:'底質',fish:'魚類',invert:'無脊椎',rare:'罕見生物',impact:'環境衝擊'}[k];}
-function siteName(){return C.sites.find(s=>s[2]===state.meta.site)?.[1] || '尚未選擇樣點';}
+function siteName(){const s=C.sites.find(s=>s[2]===state.meta.site||s[1]===state.meta.site);return s?.[1] || '尚未選擇樣點';}
+function siteId(){const s=C.sites.find(s=>s[2]===state.meta.site||s[1]===state.meta.site);return s&&s[3]?s[3]:0;}
 function eventId(){const m=state.meta;return m.site&&m.date&&m.time&&m.depth!==''?`${m.site}_${m.date.replaceAll('-','_')}_${m.time.replace(':','-')}_${Number(m.depth)}m`:'';}
 function eventKey(){const m=state.meta;return `${m.site}|${m.date}|${m.time.replace(':','-')}|${Number(m.depth)}m`;}
 function duplicateRecord(){
@@ -82,7 +94,7 @@ function metaView(){return intro(2,'先確認，這是哪一支氣瓶。','請�
   `<form id="metadata-form"><section class="panel"><div class="panel-heading"><div><h2>潛水與樣點</h2><p>本次包含：${methodList().map(k=>C.methods[k].name).join('、')}</p></div><span class="badge">01 / 基本資料</span></div><div class="fields"><label class="field wide">調查樣點 <span class="required">必填</span><select required name="site" data-meta="site"><option value="">選擇手板上的樣點</option>${[...new Set(C.sites.map(s=>s[0]))].map(region=>`<optgroup label="${region}">${C.sites.filter(s=>s[0]===region).map(s=>`<option value="${esc(s[2])}" ${state.meta.site===s[2]?'selected':''}>${esc(s[1])} · ${esc(s[2])}</option>`).join('')}</optgroup>`).join('')}</select><small>依現有樣點清單；找不到時請先存草稿，與活動窗口確認名稱。</small></label>
   ${field('調查日期','date','date',true,'以手板上的實際日期為準。')}${field('這支氣瓶的開始時間','time','time',true,'Line 與 Belt 請用同一支氣瓶的開始時間。')}<div id="depth-control">${depthControl()}</div>${field('水溫（°C）','temperature','number',false,'未記錄可留白。','min="0" max="45" step="0.1" placeholder="例如 27.5"')}${field('能見度（m）','visibility','number',false,'未記錄可留白。','min="0" max="100" step="0.1" placeholder="例如 8"')}</div><div class="event-preview" id="event-preview">${eventId()?`氣瓶識別：${esc(eventId())}`:'填好樣點、日期、時間與深度後，自動產生氣瓶識別。'}</div></section>
   <section class="panel"><div class="panel-heading"><div><h2>這份手板，是誰記錄的？</h2><p>每種探查可填不同記錄者；多人請以「、」分隔。</p></div><span class="badge">02 / 記錄人員</span></div><div class="fields">${methodList().map(k=>`<label class="field">${C.methods[k].short}記錄者 <span class="required">必填</span><input name="recorder-${k}" data-recorder="${k}" value="${esc(state.recorders[k])}" required placeholder="姓名，可填多人"></label>`).join('')}${field('隊長','leader')}${field('科學指導員','scientist')}</div></section><p class="form-error" id="meta-error" role="alert"></p><div class="actions">${button('← 選擇探查','step','data-step="0"')}<button class="button primary" type="submit">開始填寫手板 <span class="arrow">→</span></button></div></form>`;}
-function metaErrors(){const m=state.meta,e=[];if(!C.sites.some(s=>s[2]===m.site))e.push('請選擇樣點');if(!/^\d{4}-\d{2}-\d{2}$/.test(m.date))e.push('請填調查日期');if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(m.time))e.push('請填氣瓶開始時間');if(m.depth===''||!Number.isFinite(Number(m.depth))||Number(m.depth)<=0||Number(m.depth)>100)e.push('深度請填 0.1–100 m');for(const [k,n,max] of [['temperature','水溫',45],['visibility','能見度',100]])if(m[k]!==''&&(!Number.isFinite(Number(m[k]))||Number(m[k])<0||Number(m[k])>max))e.push(`${n}請填 0–${max}`);methodList().forEach(k=>{if(!state.recorders[k].trim())e.push(`請填${C.methods[k].short}記錄者`);});return e;}
+function metaErrors(){const m=state.meta,e=[];if(!C.sites.some(s=>s[2]===m.site||s[1]===m.site))e.push('請選擇樣點');if(!/^\d{4}-\d{2}-\d{2}$/.test(m.date))e.push('請填調查日期');if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(m.time))e.push('請填氣瓶開始時間');if(m.depth===''||!Number.isFinite(Number(m.depth))||Number(m.depth)<=0||Number(m.depth)>100)e.push('深度請填 0.1–100 m');for(const [k,n,max] of [['temperature','水溫',45],['visibility','能見度',100]])if(m[k]!==''&&(!Number.isFinite(Number(m[k]))||Number(m[k])<0||Number(m[k])>max))e.push(`${n}請填 0–${max}`);methodList().forEach(k=>{if(!state.recorders[k].trim())e.push(`請填${C.methods[k].short}記錄者`);});return e;}
 function strip(){return `<section class="survey-strip" aria-label="本支氣瓶"><div><small>樣點</small><b>${esc(siteName())}</b></div><div><small>日期</small><b>${esc(state.meta.date)}</b></div><div><small>氣瓶開始</small><b>${esc(state.meta.time)}</b></div><div><small>深度</small><b>${esc(state.meta.depth)} m</b></div>${button('修改資訊','step','data-step="1"','quiet small')}</section>`;}
 function normalizeCode(value){const t=String(value).trim().toUpperCase().replaceAll('（','(').replaceAll('）',')');if(t==='-')return 'NA';if(t==='SI(SI)')return 'SI';if(/^(?:[1-9]|10)$/.test(t))return C.substrates[Number(t)-1][0];if(/^9[1-8]$/.test(t))return `SI(${C.substrates[Number(t)-91][0]})`;return t;}
 function validCode(v,down=false){const t=normalizeCode(v);return down?C.substrates.slice(0,9).some(s=>s[0]===t)||t==='NA':C.substrates.some(s=>s[0]===t)||t==='NA'||/^SI\((HC|SC|RKC|NIA|SP|RC|RB|SD)\)$/.test(t);}
@@ -153,39 +165,157 @@ function reviewLinePanel(){
   return `<div class="board-tools"><div class="seg-filters" aria-label="逐格對照段次">${[1,2,3,4,0].map(n=>`<button type="button" class="${reviewSegment===n?'active':''}" data-action="review-segment" data-segment="${n}" aria-pressed="${reviewSegment===n}">${n?'第 '+n+' 段':'整張手板'}</button>`).join('')}</div><span>逐段放大核對；切換不會更動資料。</span></div>${table}`;
 }
 function reviewTables(){return sheetList().map(k=>k==='line'?`<div id="review-line-panel">${reviewLinePanel()}</div>`:reviewBeltTable(k)).join('');}
-async function submitRecord(delay=1200){
+async function submitRecord(){
   if(saving)return;
   if(issues().length){step=3;render();$('#complete-error').textContent='請先處理待補充項目；可先下載草稿。';return;}
   if(!state.ack){step=3;render();$('#complete-error').textContent='請勾選已對照原始手板的確認。';$('#acknowledge').focus();return;}
-  // Persist the draft first; reloading during the simulated request is recoverable.
-  state.status='draft';delete state.simulatedSave;persist(false);
-  saving=true;step=4;render();$('#main').focus();window.scrollTo({top:0});
-  await new Promise(resolve=>setTimeout(resolve,delay));
-  state.status=unknownCount()?'needs_review':'complete_local';
-  state.simulatedSave={mode:'simulation',receipt_id:`DEMO-${state.id}`,saved_at:new Date().toISOString(),review_status:unknownCount()?'needs_review':'pending_review'};
-  persist(false);
-  if(storageFailed){state.status='draft';delete state.simulatedSave;const i=records.findIndex(r=>r.id===state.id);if(i>=0)records[i]=structuredClone(state);}
-  saving=false;render();$('#main').focus();
+
+  // Persist the draft first; reloading during request is recoverable.
+  state.status='draft';delete state.simulatedSave;delete state.dbSave;persist(false);
+  saving=true;submitError=null;step=4;render();$('#main').focus();window.scrollTo({top:0});
+
+  try {
+    const p = payload(false);
+    const headers = { 'Content-Type': 'application/json' };
+    if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
+
+    const res = await fetch('/api/public/reef-check/surveys', {
+      method: 'POST',
+      headers,
+      credentials: 'include',
+      body: JSON.stringify(p)
+    });
+
+    if (res.ok) {
+      const result = await res.json();
+      state.status = result.review_status || (unknownCount() ? 'needs_review' : 'submitted');
+      state.dbSave = result;
+      state.simulatedSave = result;
+      state.uploaded = true;
+      persist(false);
+    } else {
+      let errMsg = `伺服器回應錯誤 (${res.status})`;
+      try {
+        const errJson = await res.json();
+        if (errJson.error) errMsg = errJson.error;
+      } catch (_) {}
+      submitError = errMsg;
+      state.status = 'draft';
+      toast(`儲存未成功：${errMsg}`);
+    }
+  } catch (err) {
+    submitError = '網路連線失敗，請檢查網路連線後重試。草稿已安全保留在此裝置。';
+    state.status = 'draft';
+    toast('網路連線失敗，請先下載草稿或稍候重試。');
+  } finally {
+    if(storageFailed){state.status='draft';const i=records.findIndex(r=>r.id===state.id);if(i>=0)records[i]=structuredClone(state);}
+    saving=false;
+    render();
+    $('#main').focus();
+  }
 }
 function completeView(){
-  if(saving)return intro(4,'正在儲存這支氣瓶的記錄…','正在模擬送出與接收儲存回覆，請稍候。')+`<section class="panel success-panel" aria-busy="true"><div class="save-spinner" aria-hidden="true"></div><h2 role="status">儲存中</h2><p>整理氣瓶資訊、各段觀測與最終泥下代碼。<br>請勿關閉頁面或重複送出。</p><span class="badge">模擬模式 · 未連接資料庫</span></section>`;
-  if(storageFailed)return intro(4,'這次還沒有儲存成功。','本機儲存空間或瀏覽器設定可能阻止了儲存。')+`<section class="panel success-panel"><h2 role="alert">請重試，或先下載備份</h2><p>記錄仍在目前頁面中，請先不要關閉。此原型沒有資料庫副本。</p><div class="actions">${button('重新儲存','complete','','primary')}${button('下載草稿備份','export-draft')}${button('返回檢查','step','data-step="3"')}</div></section>`;
-  const receipt=state.simulatedSave;
-  return intro(4,'紀錄已儲存','請確認儲存狀態，並視需要下載備份。')+`<section class="panel success-panel"><div class="success-icon" aria-hidden="true">✓</div><h2 role="status">${receipt?'儲存成功':'已完成本機記錄'}</h2><p>${receipt?'這支氣瓶的所有探查已一併儲存。':'這是先前保留的本機紀錄。'}</p><span class="badge">${receipt?'模擬儲存成功 · 尚未寫入資料庫':'本機紀錄 · 尚未上傳'}</span><dl class="save-receipt"><div><dt>調查樣點</dt><dd>${esc(siteName())}</dd></div><div><dt>日期／氣瓶開始時間</dt><dd>${esc(state.meta.date)} · ${esc(state.meta.time)}</dd></div><div><dt>深度／探查</dt><dd>${esc(state.meta.depth)} m · ${methodList().map(k=>C.methods[k].short).join('、')}</dd></div>${receipt?`<div><dt>模擬儲存時間</dt><dd>${esc(new Date(receipt.saved_at).toLocaleString('zh-TW',{hour12:false}))}</dd></div><div><dt>模擬回執編號</dt><dd>${esc(receipt.receipt_id)}</dd></div>`:''}</dl><div class="event-preview">氣瓶識別：${esc(eventId())}</div><div class="callout ${unknownCount()?'warning':''}"><div><b>${unknownCount()?'已保留未記錄值，待窗口確認':'已完成填寫，待窗口審核'}</b><p>${unknownCount()?'NA 與原因已隨紀錄保留，不會改成 0。':'儲存成功不代表資料已審核通過。'}目前僅展示流程，未通知窗口；資料仍只存於此瀏覽器。</p></div></div><div class="actions">${button('檢視這份紀錄','view-saved','','primary')}${button('下载備份 JSON','export','','quiet')}</div></section><div class="actions">${button('我的紀錄','drafts')}${button('記錄下一支氣瓶 →','new-same','','primary')}</div>`;
+  if(saving)return intro(4,'正在儲存這支氣瓶的記錄…','正在連線伺服器並寫入資料庫，請稍候。')+`<section class="panel success-panel" aria-busy="true"><div class="save-spinner" aria-hidden="true"></div><h2 role="status">資料庫儲存中</h2><p>整理氣瓶資訊、各段觀測與泥下底質代碼，寫入資料庫。<br>請勿關閉頁面或重複送出。</p><span class="badge">正在同步至資料庫</span></section>`;
+  
+  if(submitError)return intro(4,'儲存至資料庫未成功','手板資料已完整保存在此瀏覽器，不會遺失。')+`<section class="panel success-panel"><h2 role="alert">未能存入資料庫</h2><p class="form-error" style="margin:1rem 0;font-size:1.05rem;">${esc(submitError)}</p><p>請確認網路連線正常後重試，或先下載草稿 JSON 備份。</p><div class="actions">${button('重新儲存至資料庫','complete','','primary')}${button('下載草稿備份','export-draft')}${button('返回檢查','step','data-step="3"')}</div></section>`;
+
+  if(storageFailed)return intro(4,'這次還沒有儲存成功。','本機儲存空間或瀏覽器設定可能阻止了儲存。')+`<section class="panel success-panel"><h2 role="alert">請重試，或先下載備份</h2><p>記錄仍在目前頁面中，請先不要關閉。</p><div class="actions">${button('重新儲存','complete','','primary')}${button('下載草稿備份','export-draft')}${button('返回檢查','step','data-step="3"')}</div></section>`;
+
+  const receipt = state.dbSave || state.simulatedSave;
+  const isDB = Boolean(state.dbSave);
+  return intro(4,'紀錄已存入資料庫','感謝您的填報！調查數據已正式存檔，並視需要下載備份。')+
+    `<section class="panel success-panel"><div class="success-icon" aria-hidden="true">✓</div><h2 role="status">${receipt ? '成功存入資料庫' : '已完成記錄'}</h2><p>${receipt ? '這支氣瓶的所有探查與觀測數據已成功寫入資料庫。' : '這是先前保留的本機紀錄。'}</p><span class="badge success-badge">${receipt ? (isDB ? '✓ 資料庫已存檔' : '本機留存') : '本機紀錄'} · 回執編號 ${esc(receipt?.receipt_id || state.id)}</span><dl class="save-receipt"><div><dt>調查樣點</dt><dd>${esc(siteName())}</dd></div><div><dt>日期／氣瓶開始時間</dt><dd>${esc(state.meta.date)} · ${esc(state.meta.time)}</dd></div><div><dt>深度／探查</dt><dd>${esc(state.meta.depth)} m · ${methodList().map(k=>C.methods[k].short).join('、')}</dd></div>${receipt?`<div><dt>資料庫儲存時間</dt><dd>${esc(new Date(receipt.saved_at).toLocaleString('zh-TW',{hour12:false}))}</dd></div><div><dt>官方回執編號</dt><dd>${esc(receipt.receipt_id)}</dd></div>`:''}</dl><div class="event-preview">氣瓶識別：${esc(receipt?.event_id || eventId())}</div><div class="callout ${unknownCount()?'warning':''}"><div><b>${unknownCount()?'已保留未記錄值 (NA)，待窗口確認':'已完成填報，待窗口審核'}</b><p>${unknownCount()?'NA 與原因已隨紀錄完整存入資料庫，不會改成 0。':'資料庫已收錄此筆調查紀錄。'}活動窗口將於後台進行核對與統計。</p></div></div><div class="actions">${button('檢視這份紀錄','view-saved','','primary')}${button('下載備份 JSON','export','','quiet')}</div></section><div class="actions">${button('我的紀錄','drafts')}${button('記錄下一支氣瓶 →','new-same','','primary')}</div>`;
 }
-function payload(draft=false){const event=eventKey(),id=eventId(),m=state.meta;const key=k=>`${event}|${{line:'line',fish:'belt_fish',invert:'belt_invert'}[k]}`;
-  const data={format:'reefcheck-web-prototype-v2',status:draft?'draft':unknownCount()?'needs_review':'complete_local',uploaded:false,exported_at:new Date().toISOString(),event:{event_key:event,event_id:id,site_name_en__lookup:m.site,site_name_zh:siteName(),survey_date:m.date,event_time:m.time.replace(':','-'),depth_m:m.depth===''?null:Number(m.depth)},transects:methodList().map(k=>({transect_key:key(k),event_id:id,method:{line:'line',fish:'belt_fish',invert:'belt_invert'}[k],start_time:m.time,water_temp_c:m.temperature===''?null:Number(m.temperature),visibility_m:m.visibility===''?null:Number(m.visibility),recorders:state.recorders[k].split(/[、,，]/).map(x=>x.trim()).filter(Boolean),team_leader:m.leader,team_scientist:m.scientist,comments:state.notes})),substrate_points:[],substrate_bleaching:[],belt_observations:[],impact_observations:[],mud_audit:[],missing_reason:state.missingReason,validation_issues:issues().map(x=>x.text)};
-  if(state.methods.includes('line')){data.substrate_points=points.map(p=>({transect_key:key('line'),segment:p.s,position_m:p.p,substrate_code:canonical(p),substrate_layer:'surface'}));if(state.mud)data.mud_audit=activeMudPoints().map(p=>({position_m:p.p,segment:p.s,surface:state.line[p.key],down:state.down[p.key]||null,canonical:canonical(p)}));if(state.bleaching)data.substrate_bleaching=['HC','SC'].flatMap(code=>starts.map((_,s)=>({transect_key:key('line'),substrate_code:code,segment:s+1,bleached_points:asNumber(state.bleach[`${code}:${s+1}`])})));}
-  for(const k of ['fish','invert','rare'])if(state.methods.includes(k==='rare'?'invert':k))data.belt_observations.push(...rowsFor(k).flatMap(r=>starts.map((_,s)=>({transect_key:key(k==='rare'?'invert':k),taxon_group:k,taxon_name_en__lookup:r.name,taxon_size_class__lookup:r.size,taxon_local_row_id:r.id,segment:s+1,count:asNumber(state[k][`${r.id}:${s+1}`]),record_status:state[k][`${r.id}:${s+1}`]==='NA'?'not_recorded':state[k][`${r.id}:${s+1}`]===undefined||state[k][`${r.id}:${s+1}`]===''?'blank':'recorded'}))));
-  if(state.methods.includes('invert'))data.impact_observations=rowsFor('impact').flatMap(r=>starts.map((_,s)=>({transect_key:key('invert'),impact_group:r.group,impact_name_en__lookup:r.name,impact_value_type:r.type,segment:s+1,raw_value:asNumber(state.impact[`${r.id}:${s+1}`])})));
+function payload(draft=false){
+  const event=eventKey(),id=eventId(),m=state.meta;
+  const key=k=>`${event}|${{line:'line',fish:'belt_fish',invert:'belt_invert'}[k]}`;
+  const data={
+    format:'reefcheck-web-prototype-v2',
+    status:draft?'draft':unknownCount()?'needs_review':'complete_local',
+    uploaded:!draft && Boolean(state.dbSave || state.simulatedSave),
+    exported_at:new Date().toISOString(),
+    event:{
+      event_key:event,
+      event_id:id,
+      site_id:siteId(),
+      site_name_en__lookup:m.site,
+      site_name_zh:siteName(),
+      survey_date:m.date,
+      event_time:m.time,
+      depth_m:m.depth===''?null:Number(m.depth)
+    },
+    transects:methodList().map(k=>({
+      transect_key:key(k),
+      event_id:id,
+      method:{line:'line',fish:'belt_fish',invert:'belt_invert'}[k],
+      start_time:m.time,
+      water_temp_c:m.temperature===''?null:Number(m.temperature),
+      visibility_m:m.visibility===''?null:Number(m.visibility),
+      recorders:state.recorders[k].split(/[、,，]/).map(x=>x.trim()).filter(Boolean),
+      team_leader:m.leader,
+      team_scientist:m.scientist,
+      comments:state.notes
+    })),
+    substrate_points:[],
+    substrate_bleaching:[],
+    belt_observations:[],
+    impact_observations:[],
+    mud_audit:[],
+    missing_reason:state.missingReason,
+    validation_issues:issues().map(x=>x.text)
+  };
+  if(state.methods.includes('line')){
+    data.substrate_points=points.map(p=>({
+      transect_key:key('line'),
+      segment:p.s,
+      position_m:p.p,
+      substrate_code:canonical(p),
+      substrate_layer:'surface'
+    }));
+    if(state.mud)data.mud_audit=activeMudPoints().map(p=>({
+      position_m:p.p,
+      segment:p.s,
+      surface:state.line[p.key],
+      down:state.down[p.key]||null,
+      canonical:canonical(p)
+    }));
+    if(state.bleaching)data.substrate_bleaching=['HC','SC'].flatMap(code=>starts.map((_,s)=>({
+      transect_key:key('line'),
+      substrate_code:code,
+      segment:s+1,
+      bleached_points:asNumber(state.bleach[`${code}:${s+1}`])
+    })));
+  }
+  for(const k of ['fish','invert','rare'])if(state.methods.includes(k==='rare'?'invert':k))
+    data.belt_observations.push(...rowsFor(k).flatMap(r=>starts.map((_,s)=>({
+      transect_key:key(k==='rare'?'invert':k),
+      taxon_group:k,
+      taxon_name_en__lookup:r.name,
+      taxon_size_class__lookup:r.size,
+      taxon_local_row_id:r.id,
+      segment:s+1,
+      count:asNumber(state[k][`${r.id}:${s+1}`]),
+      record_status:state[k][`${r.id}:${s+1}`]==='NA'?'not_recorded':state[k][`${r.id}:${s+1}`]===undefined||state[k][`${r.id}:${s+1}`]===''?'blank':'recorded'
+    }))));
+  if(state.methods.includes('invert'))
+    data.impact_observations=rowsFor('impact').flatMap(r=>starts.map((_,s)=>({
+      transect_key:key('invert'),
+      impact_group:r.group,
+      impact_name_en__lookup:r.name,
+      impact_value_type:r.type,
+      segment:s+1,
+      raw_value:asNumber(state.impact[`${r.id}:${s+1}`])
+    })));
+  if(state.dbSave)data.db_save=structuredClone(state.dbSave);
   if(state.simulatedSave)data.simulated_save=structuredClone(state.simulatedSave);
-  if(draft)data.draft_state=structuredClone(state);return data;
+  if(draft)data.draft_state=structuredClone(state);
+  return data;
 }
 function asNumber(v){return v!==undefined&&v!==''&&v!=='NA'&&Number.isFinite(Number(v))?Number(v):null;}
 function download(draft){const blob=new Blob([JSON.stringify(payload(draft),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`${(eventId()||'reefcheck').replace(/[^\w.\-]/g,'_')}-${draft?'draft':'record'}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('已啟動下載，請查看瀏覽器下載項目。');}
 function modal(title,body){$('#modal-content').innerHTML=`<div class="modal-title"><h2>${title}</h2><button data-action="close" aria-label="關閉對話框">×</button></div>${body}`;if(!$('#modal').open)$('#modal').showModal();}
-function openDrafts(){modal('我的紀錄',`<p>只顯示此瀏覽器儲存的紀錄。不同瀏覽器或裝置不會自動同步。</p>${records.length?records.slice().reverse().map(r=>`<div class="draft-item"><div><b>${esc(C.sites.find(s=>s[2]===r.meta.site)?.[1]||'尚未選擇樣點')}</b><small>${esc(r.meta.date||'日期未填')} · ${esc(r.meta.time||'時間未填')} · ${esc(r.meta.depth||'—')} m</small><small>${r.methods.map(k=>C.methods[k].short).join('、')} · ${r.status==='draft'?'草稿':r.status==='needs_review'?'已完成・待確認':'已完成・本機'}</small></div>${button('開啟','resume',`data-id="${esc(r.id)}"`,'small')}</div>`).join(''):'<p>還沒有儲存的紀錄。</p>'}<div class="actions">${button('新增一支氣瓶','new','','primary')}</div>`);}
-function help(){modal('填寫說明',`<ol><li><b>先選探查，再填氣瓶資訊。</b>同一支氣瓶選多種探查，日期、時間與深度會共用。</li><li><b>底質照原表：</b>四段、每段左右兩欄。Tab 或 Enter 沿欄向下，方向鍵移到鄰格；可貼上一整欄 Excel 代碼。數字 1–10 與 91–98 都能辨識，0 不代表其他。</li><li><b>有上下手板：</b>勾選「泥下底質」，切換上／下，依同位置配對。SI(SI) 會記為 SI。</li><li><b>Belt 照列填四段。</b>0 表示看過但沒看到；NA 或 - 表示未記錄；空白留待補填。其他生物請逐種新增名称。</li><li><b>檢查後完成本機記錄。</b>不完整仍可下載草稿；NA 需附原因。此原型不會自動上傳資料庫。</li></ol>`);}
+function openDrafts(){modal('我的紀錄',`<p>只顯示此瀏覽器儲存的紀錄。不同瀏覽器或裝置不會自動同步。</p>${records.length?records.slice().reverse().map(r=>`<div class="draft-item"><div><b>${esc(C.sites.find(s=>s[2]===r.meta.site||s[1]===r.meta.site)?.[1]||'尚未選擇樣點')}</b><small>${esc(r.meta.date||'日期未填')} · ${esc(r.meta.time||'時間未填')} · ${esc(r.meta.depth||'—')} m</small><small>${r.methods.map(k=>C.methods[k].short).join('、')} · ${r.status==='draft'?'草稿':r.status==='needs_review'?'已存・待確認':r.uploaded||r.dbSave?'已存入資料庫':'已完成・本機'}</small></div>${button('開啟','resume',`data-id="${esc(r.id)}"`,'small')}</div>`).join(''):'<p>還沒有儲存的紀錄。</p>'}<div class="actions">${button('新增一支氣瓶','new','','primary')}</div>`);}
+function help(){modal('填寫說明',`<ol><li><b>先選探查，再填氣瓶資訊。</b>同一支氣瓶選多種探查，日期、時間與深度會共用。</li><li><b>底質照原表：</b>四段、每段左右兩欄。Tab 或 Enter 沿欄向下，方向鍵移到鄰格；可貼上一整欄 Excel 代碼。數字 1–10 與 91–98 都能辨識，0 不代表其他。</li><li><b>有上下手板：</b>勾選「泥下底質」，切換上／下，依同位置配對。SI(SI) 會記為 SI。</li><li><b>Belt 照列填四段。</b>0 表示看過但沒看到；NA 或 - 表示未記錄；空白留待補填。其他生物請逐種新增名稱。</li><li><b>檢查確認後存入系統資料庫。</b>若連線中斷仍可本機儲存與下載草稿；NA 需附原因。</li></ol>`);}
 function setFieldFocus(html){
   const panel=$('#field-focus');if(!panel)return;
   if(!$('#focus-description'))panel.innerHTML=`<span id="focus-description"></span>${button('此格未記錄 NA','mark-na','','small')}`;
@@ -245,7 +375,7 @@ document.addEventListener('click',e=>{
   else if(a==='export-draft')download(true);
   else if(a==='export'){if(issues().length){go(3);toast('還有需補充項目，請先檢查或下載草稿。');}else download(false);}
   else if(a==='complete'){void submitRecord();}
-  else if(a==='view-saved'){modal('已儲存的紀錄（本機／模擬）',`<p>${esc(siteName())} · ${esc(state.meta.date)} · ${esc(state.meta.time)} · ${esc(state.meta.depth)} m</p>${reviewTables()}<div class="actions">${button('關閉','close')}${button('修改這份紀錄','edit-saved','','primary')}</div>`);}
+  else if(a==='view-saved'){modal('已儲存的紀錄（資料庫／本機）',`<p>${esc(siteName())} · ${esc(state.meta.date)} · ${esc(state.meta.time)} · ${esc(state.meta.depth)} m</p>${reviewTables()}<div class="actions">${button('關閉','close')}${button('修改這份紀錄','edit-saved','','primary')}</div>`);}
   else if(a==='edit-saved'){$('#modal').close();$('#modal-content').innerHTML='';go(3);}
   else if(a==='zero'){if(sheet==='impact'){help();return;}const k=el.dataset.sheet;const n=rowsFor(k).reduce((n,r)=>n+starts.filter((_,s)=>!state[k][`${r.id}:${s+1}`]).length,0);modal('確認空白格都是「未發現」',`<p>將${sheetName(k)}手板的 ${n} 個空白格填成 0。只適用於確實調查過、但沒有看到的項目。未記錄請填 NA。</p><div class="actions">${button('返回核對','close')}${button('確認填 0','confirm-zero',`data-sheet="${k}"`,'primary')}</div>`);}
   else if(a==='confirm-zero'){const k=el.dataset.sheet;rowsFor(k).forEach(r=>starts.forEach((_,s)=>{const key=`${r.id}:${s+1}`;if(!state[k][key])state[k][key]='0';}));persist();$('#modal').close();render();}
@@ -262,3 +392,34 @@ document.addEventListener('click',e=>{
 // Keep v1 drafts intact. Never overwrite another tab's newly created record.
 window.addEventListener('storage',e=>{if(e.key===KEY){records=readRecords();toast('另一個分頁更新了紀錄；繼續填寫前請確認使用的是同一份草稿。');}});
 render();
+initApp();
+
+async function initApp(){
+  try{
+    const res=await fetch('/api/session',{credentials:'include'});
+    if(res.ok){
+      const data=await res.json();
+      if(data.authenticated&&data.user){
+        currentUser=data.user;
+        csrfToken=data.csrf_token||'';
+        persist(false);
+      }
+    }
+  }catch(_){}
+
+  try{
+    const res=await fetch('/api/public/reef-check/sites',{credentials:'include'});
+    if(res.ok){
+      const dbSites=await res.json();
+      if(Array.isArray(dbSites)&&dbSites.length){
+        C.sites=dbSites.map(s=>[
+          s.region||'其他樣點',
+          s.name_zh,
+          s.name_en||s.name_zh,
+          s.id
+        ]);
+        if(step===1)render();
+      }
+    }
+  }catch(_){}
+}

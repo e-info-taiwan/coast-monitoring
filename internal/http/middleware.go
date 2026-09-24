@@ -59,6 +59,39 @@ func (h *AuthHandlers) RequireSession(next http.Handler) http.Handler {
 	})
 }
 
+func (h *AuthHandlers) OptionalSession(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if h == nil || h.Auth == nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		cfg := h.config()
+		sessionToken, ok := cookieValue(r, cfg.SessionCookieName)
+		if !ok || sessionToken == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		csrfToken := strings.TrimSpace(r.Header.Get(cfg.CSRFHeaderName))
+		if csrfToken == "" {
+			if cookie, err := r.Cookie(cfg.CSRFCookieName); err == nil {
+				csrfToken = cookie.Value
+			}
+		}
+		if csrfToken == "" {
+			next.ServeHTTP(w, r)
+			return
+		}
+		user, err := h.Auth.AuthenticateSession(r.Context(), sessionToken, csrfToken)
+		if err != nil {
+			next.ServeHTTP(w, r)
+			return
+		}
+		ctx := withCurrentUser(r.Context(), user)
+		ctx = withCSRFToken(ctx, csrfToken)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
 func (deps Dependencies) RequireSession(next http.Handler) http.Handler {
 	if deps.AuthHandlers == nil {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,6 +99,13 @@ func (deps Dependencies) RequireSession(next http.Handler) http.Handler {
 		})
 	}
 	return deps.AuthHandlers.RequireSession(next)
+}
+
+func (deps Dependencies) OptionalSession(next http.Handler) http.Handler {
+	if deps.AuthHandlers == nil {
+		return next
+	}
+	return deps.AuthHandlers.OptionalSession(next)
 }
 
 func (deps Dependencies) RequireAdmin(next http.Handler) http.Handler {

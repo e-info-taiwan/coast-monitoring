@@ -85,6 +85,10 @@ func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider http
 		Sessions: sessionRepo,
 		Users:    userRepo,
 	}
+	var reefDataRepo httpx.AppReefDataService
+	if pool != nil {
+		reefDataRepo = repository.NewReefDataRepository(pool)
+	}
 	secureCookies := cfg.SecureCookies
 	return httpx.NewRouter(httpx.Dependencies{
 		AuthHandlers: &httpx.AuthHandlers{
@@ -113,6 +117,7 @@ func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider http
 			Catalog:      service.CatalogService{Catalog: catalogRepo},
 			Observations: service.ObservationService{Observations: observationRepo},
 			Mutations:    postgresAdminMutationRunner{pool: pool},
+			ReefData:     reefDataRepo,
 		},
 		CronHandlers: &httpx.CronHandlers{
 			CWAMarine:  cwaService,

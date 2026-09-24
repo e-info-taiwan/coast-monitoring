@@ -262,6 +262,135 @@ func (c *ReefDataCreateInput) Validate(validSiteIDs map[int]bool) error {
 	return nil
 }
 
+type ReefCheckEventInput struct {
+	EventKey         string   `json:"event_key"`
+	EventID          string   `json:"event_id"`
+	SiteID           int      `json:"site_id,omitempty"`
+	SiteNameENLookup string   `json:"site_name_en__lookup"`
+	SiteNameZH       string   `json:"site_name_zh"`
+	SurveyDate       string   `json:"survey_date"`
+	EventTime        string   `json:"event_time"`
+	DepthM           float64  `json:"depth_m"`
+	CWAStationID     *string  `json:"cwa_station_id,omitempty"`
+}
+
+type ReefCheckTransectInput struct {
+	TransectKey   string   `json:"transect_key"`
+	EventID       string   `json:"event_id"`
+	Method        string   `json:"method"`
+	StartTime     string   `json:"start_time"`
+	WaterTempC    *float64 `json:"water_temp_c"`
+	VisibilityM   *float64 `json:"visibility_m"`
+	Recorders     []string `json:"recorders"`
+	TeamLeader    string   `json:"team_leader"`
+	TeamScientist string   `json:"team_scientist"`
+	Comments      string   `json:"comments"`
+}
+
+type ReefCheckSubstratePointInput struct {
+	TransectKey    string  `json:"transect_key"`
+	Segment        int     `json:"segment"`
+	PositionM      float64 `json:"position_m"`
+	SubstrateCode  string  `json:"substrate_code"`
+	SubstrateLayer string  `json:"substrate_layer"`
+}
+
+type ReefCheckBleachingInput struct {
+	TransectKey    string `json:"transect_key"`
+	SubstrateCode  string `json:"substrate_code"`
+	Segment        int    `json:"segment"`
+	BleachedPoints *int   `json:"bleached_points"`
+}
+
+type ReefCheckBeltObservationInput struct {
+	TransectKey          string `json:"transect_key"`
+	TaxonGroup           string `json:"taxon_group"`
+	TaxonNameENLookup    string `json:"taxon_name_en__lookup"`
+	TaxonSizeClassLookup string `json:"taxon_size_class__lookup"`
+	TaxonLocalRowID      string `json:"taxon_local_row_id"`
+	Segment              int    `json:"segment"`
+	Count                *int   `json:"count"`
+	RecordStatus         string `json:"record_status"`
+}
+
+type ReefCheckImpactObservationInput struct {
+	TransectKey        string   `json:"transect_key"`
+	ImpactGroup        string   `json:"impact_group"`
+	ImpactNameENLookup string   `json:"impact_name_en__lookup"`
+	ImpactValueType    string   `json:"impact_value_type"`
+	Segment            int      `json:"segment"`
+	RawValue           *float64 `json:"raw_value"`
+}
+
+type ReefCheckMudAuditInput struct {
+	PositionM float64 `json:"position_m"`
+	Segment   int     `json:"segment"`
+	Surface   string  `json:"surface"`
+	Down      string  `json:"down"`
+	Canonical string  `json:"canonical"`
+}
+
+type ReefCheckSurveySubmission struct {
+	Format             string                            `json:"format"`
+	Status             string                            `json:"status"`
+	MissingReason      string                            `json:"missing_reason"`
+	ValidationIssues   []string                          `json:"validation_issues"`
+	Event              ReefCheckEventInput               `json:"event"`
+	Transects          []ReefCheckTransectInput          `json:"transects"`
+	SubstratePoints    []ReefCheckSubstratePointInput    `json:"substrate_points"`
+	SubstrateBleaching []ReefCheckBleachingInput         `json:"substrate_bleaching"`
+	BeltObservations   []ReefCheckBeltObservationInput   `json:"belt_observations"`
+	ImpactObservations []ReefCheckImpactObservationInput `json:"impact_observations"`
+	MudAudit           []ReefCheckMudAuditInput          `json:"mud_audit"`
+}
+
+func (s *ReefCheckSurveySubmission) Validate() error {
+	bad := func(msg string) error { return fmt.Errorf("%w: %s", ErrValidation, msg) }
+	if s.Event.SurveyDate == "" {
+		return bad("缺少調查日期")
+	}
+	if _, err := time.Parse("2006-01-02", s.Event.SurveyDate); err != nil {
+		return bad("調查日期格式錯誤 (YYYY-MM-DD)")
+	}
+	if !finite(s.Event.DepthM) || s.Event.DepthM <= 0 || s.Event.DepthM > 100 {
+		return bad("深度必須介於 0–100 公尺")
+	}
+	if len(s.Transects) == 0 {
+		return bad("請至少包含一種調查方法")
+	}
+	allowedMethods := map[string]bool{"line": true, "belt_fish": true, "belt_invert": true}
+	for _, t := range s.Transects {
+		if !allowedMethods[t.Method] {
+			return bad(fmt.Sprintf("未知的調查方法 %s", t.Method))
+		}
+	}
+	return nil
+}
+
+type ReefCheckSubmissionResult struct {
+	Status       string   `json:"status"`
+	ReceiptID    string   `json:"receipt_id"`
+	EventID      string   `json:"event_id"`
+	EventDBID    int      `json:"id"`
+	SurveyDBID   int      `json:"survey_id"`
+	SiteNameZH   string   `json:"site_name_zh"`
+	SiteNameEN   string   `json:"site_name_en"`
+	SurveyDate   string   `json:"survey_date"`
+	EventTime    string   `json:"event_time"`
+	DepthM       float64  `json:"depth_m"`
+	Methods      []string `json:"methods"`
+	ReviewStatus string   `json:"review_status"`
+	SavedAt      string   `json:"saved_at"`
+}
+
+type ReefCheckConfig struct {
+	Sites   []ReefDataSite       `json:"sites"`
+	Codes   []ReefDataCode       `json:"codes"`
+	Taxa    []ReefDataTaxon      `json:"taxa"`
+	Impacts []ReefDataImpactType `json:"impacts"`
+}
+
+
 type ReefDataTransect struct {
 	ID      int    `json:"id"`
 	EventID string `json:"event_id"`

@@ -17,6 +17,13 @@ type AppHandlers struct {
 	Catalog      AppCatalogService
 	Observations AppObservationService
 	Mutations    AdminMutationRunner
+	ReefData     AppReefDataService
+}
+
+type AppReefDataService interface {
+	SubmitSurvey(ctx context.Context, sub service.ReefCheckSurveySubmission, actor *policy.User) (service.ReefCheckSubmissionResult, error)
+	ListSites(ctx context.Context) ([]service.ReefDataSite, error)
+	Config(ctx context.Context) (service.ReefCheckConfig, error)
 }
 
 type AppCatalogService interface {
@@ -238,6 +245,70 @@ func appObservationResponse(observation service.Observation) AppObservationRespo
 		CreatedAt:  formatTime(observation.CreatedAt),
 		UpdatedAt:  formatTime(observation.UpdatedAt),
 	}
+}
+
+func (h *AppHandlers) SubmitAppReefCheckSurvey(w http.ResponseWriter, r *http.Request) {
+	actor, ok := requireAppHandlerService(w, r, h != nil && h.ReefData != nil)
+	if !ok {
+		return
+	}
+	var sub service.ReefCheckSurveySubmission
+	if !decodeAdminJSON(w, r, &sub) {
+		return
+	}
+	res, err := h.ReefData.SubmitSurvey(r.Context(), sub, &actor)
+	if err != nil {
+		writeServiceError(w, err, "submit reef check survey failed")
+		return
+	}
+	writeJSON(w, http.StatusCreated, res)
+}
+
+func (h *AppHandlers) SubmitPublicReefCheckSurvey(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.ReefData == nil {
+		writeError(w, http.StatusServiceUnavailable, "reef check service is not configured")
+		return
+	}
+	var actorPtr *policy.User
+	if actor, ok := currentUser(r); ok {
+		actorPtr = &actor
+	}
+	var sub service.ReefCheckSurveySubmission
+	if !decodeAdminJSON(w, r, &sub) {
+		return
+	}
+	res, err := h.ReefData.SubmitSurvey(r.Context(), sub, actorPtr)
+	if err != nil {
+		writeServiceError(w, err, "submit public reef check survey failed")
+		return
+	}
+	writeJSON(w, http.StatusCreated, res)
+}
+
+func (h *AppHandlers) ListPublicReefCheckSites(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.ReefData == nil {
+		writeError(w, http.StatusServiceUnavailable, "reef check service is not configured")
+		return
+	}
+	sites, err := h.ReefData.ListSites(r.Context())
+	if err != nil {
+		writeServiceError(w, err, "list reef check sites failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, sites)
+}
+
+func (h *AppHandlers) GetPublicReefCheckConfig(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.ReefData == nil {
+		writeError(w, http.StatusServiceUnavailable, "reef check service is not configured")
+		return
+	}
+	cfg, err := h.ReefData.Config(r.Context())
+	if err != nil {
+		writeServiceError(w, err, "get reef check config failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, cfg)
 }
 
 

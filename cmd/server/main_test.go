@@ -18,7 +18,7 @@ func TestNewServerHandlerWiresAuthRoutes(t *testing.T) {
 		SessionCookieName:   "coast_session",
 		BootstrapAdminEmail: "admin@example.com",
 		SecureCookies:       secureCookies,
-	}, nil, &stubGoogleProvider{})
+	}, nil, &stubGoogleProvider{}, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/session", nil)
 	rec := httptest.NewRecorder()
@@ -34,7 +34,7 @@ func TestNewServerHandlerAllowsMissingGoogleProvider(t *testing.T) {
 	handler := newServerHandler(config.Config{
 		SessionCookieName: "coast_session",
 		SecureCookies:     false,
-	}, nil, nil)
+	}, nil, nil, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/auth/google/start", nil)
 	rec := httptest.NewRecorder()

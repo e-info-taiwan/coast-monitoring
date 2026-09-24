@@ -260,3 +260,125 @@ func (s *fakeAppObservationService) Delete(ctx context.Context, actor policy.Use
 	return nil
 }
 
+type fakeAppReefDataService struct {
+	submittedSub service.ReefCheckSurveySubmission
+	actor        *policy.User
+	result       service.ReefCheckSubmissionResult
+	sites        []service.ReefDataSite
+	config       service.ReefCheckConfig
+	err          error
+}
+
+func (f *fakeAppReefDataService) SubmitSurvey(ctx context.Context, sub service.ReefCheckSurveySubmission, actor *policy.User) (service.ReefCheckSubmissionResult, error) {
+	f.submittedSub = sub
+	f.actor = actor
+	if f.err != nil {
+		return service.ReefCheckSubmissionResult{}, f.err
+	}
+	return f.result, nil
+}
+
+func (f *fakeAppReefDataService) ListSites(ctx context.Context) ([]service.ReefDataSite, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.sites, nil
+}
+
+func (f *fakeAppReefDataService) Config(ctx context.Context) (service.ReefCheckConfig, error) {
+	if f.err != nil {
+		return service.ReefCheckConfig{}, f.err
+	}
+	return f.config, nil
+}
+
+func TestSubmitPublicReefCheckSurvey(t *testing.T) {
+	fakeReef := &fakeAppReefDataService{
+		result: service.ReefCheckSubmissionResult{
+			Status:     "saved",
+			ReceiptID:  "RC-TEST-1",
+			EventID:    "yeliu_2025_01_01_09_00_5.0m",
+			EventDBID:  1,
+			SurveyDBID: 1,
+			SiteNameZH: "野柳",
+		},
+	}
+	router := NewRouter(Dependencies{
+		AuthHandlers: testAuthHandlers(),
+		AppHandlers: &AppHandlers{
+			ReefData: fakeReef,
+		},
+	})
+
+	body := `{"event":{"site_name_zh":"野柳","survey_date":"2025-01-01","event_time":"09:00","depth_m":5.0},"transects":[{"method":"line"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/public/reef-check/surveys", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body %s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+	var res service.ReefCheckSubmissionResult
+	if err := json.Unmarshal(rec.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.ReceiptID != "RC-TEST-1" || res.SiteNameZH != "野柳" {
+		t.Fatalf("unexpected res: %+v", res)
+	}
+}
+
+func TestListPublicReefCheckSitesAndConfig(t *testing.T) {
+	fakeReef := &fakeAppReefDataService{
+		sites: []service.ReefDataSite{
+			{ID: 1, NameZH: "野柳", NameEN: "Yeliu", Region: "北海岸與東北角"},
+		},
+		config: service.ReefCheckConfig{
+			Sites: []service.ReefDataSite{
+				{ID: 1, NameZH: "野柳", NameEN: "Yeliu", Region: "北海岸與東北角"},
+			},
+		},
+	}
+	router := NewRouter(Dependencies{
+		AuthHandlers: testAuthHandlers(),
+		AppHandlers: &AppHandlers{
+			ReefData: fakeReef,
+		},
+	})
+
+	// Test sites
+	reqSites := httptest.NewRequest(http.MethodGet, "/api/public/reef-check/sites", nil)
+	recSites := httptest.NewRecorder()
+	router.ServeHTTP(recSites, reqSites)
+	if recSites.Code != http.StatusOK {
+		t.Fatalf("sites status = %d, want 200", recSites.Code)
+	}
+
+	// Test config
+	reqCfg := httptest.NewRequest(http.MethodGet, "/api/public/reef-check/config", nil)
+	recCfg := httptest.NewRecorder()
+	router.ServeHTTP(recCfg, reqCfg)
+	if recCfg.Code != http.StatusOK {
+		t.Fatalf("config status = %d, want 200", recCfg.Code)
+	}
+}
+
+func TestSubmitAppReefCheckSurveyRequiresSession(t *testing.T) {
+	router := NewRouter(Dependencies{
+		AuthHandlers: testAuthHandlers(),
+		AppHandlers:  &AppHandlers{},
+	})
+
+	body := `{"event":{"site_name_zh":"野柳","survey_date":"2025-01-01","event_time":"09:00","depth_m":5.0},"transects":[{"method":"line"}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/app/reef-check/surveys", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
