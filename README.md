@@ -94,6 +94,10 @@ For the first deployment or a new local database, set `BOOTSTRAP_ADMIN_EMAIL` to
 - `/api/app` is for the app-facing frontend and volunteer workflows. It does not expose user management data.
 - Unknown `/api/*` routes return `404` instead of falling back to the static admin UI.
 
+The tablet-first Reef Check volunteer field form is served at `/public/reef-check/`.
+It currently keeps drafts in the browser and demonstrates the final save receipt without
+writing the completed survey to the database.
+
 See [docs/api.md](docs/api.md) for request/response examples and the FE server integration pattern.
 
 The Reef Check workflow supports complete survey creation, owner-aware listing and detail

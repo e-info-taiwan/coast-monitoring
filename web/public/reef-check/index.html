@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#098381">
+  <title>珊瑚礁體檢｜志工記錄站</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="theme.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">跳至主要內容</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#" data-action="home" aria-label="回到探查選擇">
+        <span class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 42 34" role="img"><path d="M5 25.5 13.7 7l5.5 12.4"/><path d="m19 25.5 7.8-17.2 9.8 17.2"/><circle cx="7.1" cy="9.4" r="2.4"/></svg>
+        </span>
+        <span class="brand-copy"><strong>TNF 自然保育與環境資訊基金會</strong><small>Trust in Nature Foundation</small></span>
+      </a>
+      <nav class="header-right" aria-label="填報功能">
+        <span id="save-status" role="status">資料儲存在此裝置</span>
+        <button class="header-pill current" data-action="home">調查填報</button>
+        <button class="header-pill" data-action="drafts">我的紀錄 <span id="draft-count">0</span></button>
+        <button class="header-pill" data-action="help">填報說明</button>
+      </nav>
+    </div>
+  </header>
+  <div class="app-shell"><aside class="workflow" id="workflow" aria-label="填寫流程"></aside><main id="main" tabindex="-1"></main></div>
+  <div id="toast" role="status" class="toast" hidden></div>
+  <dialog id="modal"><div id="modal-content"></div></dialog>
+  <script src="catalog.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

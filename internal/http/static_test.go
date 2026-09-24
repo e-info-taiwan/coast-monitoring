@@ -43,6 +43,26 @@ func TestPublicStaticRouteServesPublicHTML(t *testing.T) {
 	}
 }
 
+func TestPublicStaticRouteServesReefCheckVolunteerForm(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/public/reef-check/", nil)
+	rec := httptest.NewRecorder()
+
+	NewRouter(Dependencies{}).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "text/html") {
+		t.Fatalf("Content-Type = %q, want text/html", got)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`<title>珊瑚礁體檢｜志工記錄站</title>`, `src="app.js"`, `href="theme.css"`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("reef check volunteer form missing marker %q", want)
+		}
+	}
+}
+
 func TestUnknownAPIRouteDoesNotServeAdminHTML(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/unknown", nil)
 	rec := httptest.NewRecorder()
@@ -115,4 +135,3 @@ func TestReefDataUIHasExpectedFeatures(t *testing.T) {
 		}
 	}
 }
-
