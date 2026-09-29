@@ -13,24 +13,24 @@ import (
 
 // ReefData types describe the imported v1.7 domain, independent of the legacy UUID surveys.
 type ReefDataEvent struct {
-	ID          int      `json:"id"`
-	EventID     string   `json:"event_id"`
-	SurveyID    int      `json:"survey_id"`
-	SurveyDate  string   `json:"survey_date"`
-	EventTime   string   `json:"event_time"`
-	DepthM      float64  `json:"depth_m"`
-	SiteID      int      `json:"site_id"`
-	SiteName    string   `json:"site_name"`
-	SiteEnglish string   `json:"site_english"`
-	Region      string   `json:"region"`
-	County      string   `json:"county"`
-	Location    string   `json:"location"`
-	Latitude    *float64 `json:"latitude"`
-	Longitude   *float64 `json:"longitude"`
-	StartDate   string   `json:"start_date"`
-	EndDate     string   `json:"end_date"`
-	Label       string   `json:"label"`
-	Methods     []string `json:"methods"`
+	ID             int      `json:"id"`
+	EventID        string   `json:"event_id"`
+	SurveyID       int      `json:"survey_id"`
+	SurveyDate     string   `json:"survey_date"`
+	EventTime      string   `json:"event_time"`
+	DepthM         float64  `json:"depth_m"`
+	SiteID         int      `json:"site_id"`
+	SiteName       string   `json:"site_name"`
+	SiteEnglish    string   `json:"site_english"`
+	Region         string   `json:"region"`
+	County         string   `json:"county"`
+	Location       string   `json:"location"`
+	Latitude       *float64 `json:"latitude"`
+	Longitude      *float64 `json:"longitude"`
+	StartDate      string   `json:"start_date"`
+	EndDate        string   `json:"end_date"`
+	Label          string   `json:"label"`
+	Methods        []string `json:"methods"`
 	CWAStationID   *string  `json:"cwa_station_id,omitempty"`
 	CWAStationName *string  `json:"cwa_station_name,omitempty"`
 	WaterTemp      *float64 `json:"water_temp_c,omitempty"`
@@ -263,28 +263,30 @@ func (c *ReefDataCreateInput) Validate(validSiteIDs map[int]bool) error {
 }
 
 type ReefCheckEventInput struct {
-	EventKey         string   `json:"event_key"`
-	EventID          string   `json:"event_id"`
-	SiteID           int      `json:"site_id,omitempty"`
-	SiteNameENLookup string   `json:"site_name_en__lookup"`
-	SiteNameZH       string   `json:"site_name_zh"`
-	SurveyDate       string   `json:"survey_date"`
-	EventTime        string   `json:"event_time"`
-	DepthM           float64  `json:"depth_m"`
-	CWAStationID     *string  `json:"cwa_station_id,omitempty"`
+	EventKey         string  `json:"event_key"`
+	EventID          string  `json:"event_id"`
+	SiteID           int     `json:"site_id,omitempty"`
+	SiteNameENLookup string  `json:"site_name_en__lookup"`
+	SiteNameZH       string  `json:"site_name_zh"`
+	SurveyDate       string  `json:"survey_date"`
+	EventTime        string  `json:"event_time"`
+	DepthM           float64 `json:"depth_m"`
+	CWAStationID     *string `json:"cwa_station_id,omitempty"`
 }
 
 type ReefCheckTransectInput struct {
-	TransectKey   string   `json:"transect_key"`
-	EventID       string   `json:"event_id"`
-	Method        string   `json:"method"`
-	StartTime     string   `json:"start_time"`
-	WaterTempC    *float64 `json:"water_temp_c"`
-	VisibilityM   *float64 `json:"visibility_m"`
-	Recorders     []string `json:"recorders"`
-	TeamLeader    string   `json:"team_leader"`
-	TeamScientist string   `json:"team_scientist"`
-	Comments      string   `json:"comments"`
+	TransectKey    string   `json:"transect_key"`
+	EventID        string   `json:"event_id"`
+	Method         string   `json:"method"`
+	StartTime      string   `json:"start_time"`
+	WaterTempC     *float64 `json:"water_temp_c"`
+	VisibilityM    *float64 `json:"visibility_m,omitempty"`
+	VisibilityMinM *float64 `json:"visibility_min_m,omitempty"`
+	VisibilityMaxM *float64 `json:"visibility_max_m,omitempty"`
+	Recorders      []string `json:"recorders"`
+	TeamLeader     string   `json:"team_leader"`
+	TeamScientist  string   `json:"team_scientist"`
+	Comments       string   `json:"comments"`
 }
 
 type ReefCheckSubstratePointInput struct {
@@ -363,6 +365,24 @@ func (s *ReefCheckSurveySubmission) Validate() error {
 		if !allowedMethods[t.Method] {
 			return bad(fmt.Sprintf("未知的調查方法 %s", t.Method))
 		}
+		visibilityMin, visibilityMax := t.VisibilityMinM, t.VisibilityMaxM
+		if visibilityMin == nil {
+			visibilityMin = t.VisibilityM
+		}
+		if visibilityMax == nil {
+			visibilityMax = t.VisibilityM
+		}
+		if t.WaterTempC != nil && (!finite(*t.WaterTempC) || *t.WaterTempC < 0 || *t.WaterTempC > 45) {
+			return bad("水溫必須介於 0–45 °C")
+		}
+		for _, v := range []*float64{visibilityMin, visibilityMax} {
+			if v != nil && (!finite(*v) || *v < 0 || *v > 100) {
+				return bad("能見度必須介於 0–100 公尺")
+			}
+		}
+		if visibilityMin != nil && visibilityMax != nil && *visibilityMin > *visibilityMax {
+			return bad("最低能見度不能大於最高能見度")
+		}
 	}
 	return nil
 }
@@ -389,7 +409,6 @@ type ReefCheckConfig struct {
 	Taxa    []ReefDataTaxon      `json:"taxa"`
 	Impacts []ReefDataImpactType `json:"impacts"`
 }
-
 
 type ReefDataTransect struct {
 	ID      int    `json:"id"`

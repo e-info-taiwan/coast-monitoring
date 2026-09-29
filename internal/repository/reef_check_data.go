@@ -1358,6 +1358,13 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 		if startTime == "" {
 			startTime = normTime
 		}
+		visibilityMin, visibilityMax := t.VisibilityMinM, t.VisibilityMaxM
+		if visibilityMin == nil {
+			visibilityMin = t.VisibilityM
+		}
+		if visibilityMax == nil {
+			visibilityMax = t.VisibilityM
+		}
 
 		var transectID int
 		err = exec.QueryRow(ctx, `
@@ -1371,7 +1378,7 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 				visibility_max_m = COALESCE(EXCLUDED.visibility_max_m, transect.visibility_max_m),
 				comments = COALESCE(NULLIF(EXCLUDED.comments, ''), transect.comments)
 			RETURNING id
-		`, surveyID, finalEventID, t.Method, sub.Event.DepthM, sub.Event.SurveyDate, startTime, waterTemp, t.VisibilityM, t.VisibilityM, strings.TrimSpace(t.Comments)).Scan(&transectID)
+		`, surveyID, finalEventID, t.Method, sub.Event.DepthM, sub.Event.SurveyDate, startTime, waterTemp, visibilityMin, visibilityMax, strings.TrimSpace(t.Comments)).Scan(&transectID)
 		if err != nil {
 			return service.ReefCheckSubmissionResult{}, translateError(err)
 		}
@@ -1734,4 +1741,3 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 		SavedAt:      time.Now().UTC().Format(time.RFC3339),
 	}, nil
 }
-
