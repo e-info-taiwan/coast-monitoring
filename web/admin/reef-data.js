@@ -1,4 +1,4 @@
-import { statistics, impactValue, substrateSummary, bleachingPercent } from "./reef-data-math.mjs"
+
 
 const methods = { line: "底質 Line", belt_fish: "魚類 Belt", belt_invert: "無脊椎・罕見生物・環境影響" }
 const roles = { member: "成員", team_leader: "隊長", team_scientist: "科學指導員" }
@@ -355,14 +355,16 @@ export function createReefData({ apiFetch, onCount }) {
   }
 
   function numericInput(kind, row, value, label, max, integer = true) {
-    if (!s.editing || row.is_aggregate) return number(value)
-    return `<input class="rd-number" type="number" data-kind="${kind}" data-id="${row.id}" aria-label="${esc(label)}" value="${esc(value)}" min="0" ${max != null ? `max="${max}"` : ""} step="${integer ? "1" : "any"}" required>`
+    const na=kind==="hc"?row.hc_record_status==="not_recorded":kind==="sc"?row.sc_record_status==="not_recorded":row.record_status==="not_recorded"
+    if (!s.editing || row.is_aggregate) return na?"NA（未記錄）":number(value)
+ return `<input class="rd-number" type="text" inputmode="decimal" data-kind="${kind}" data-id="${row.id}" aria-label="${esc(label)}" value="${na?"NA":esc(value)}" min="0" ${max != null ? `max="${max}"` : ""} step="${integer ? "1" : "any"}" required>`
   }
 
   function line(t) {
     const layers = [...new Set(t.points.map(p => p.substrate_layer))]
     const html = layers.map(layer => {
-      const summary = substrateSummary(t.points, layer)
+      const selected=t.points.filter(p=>p.substrate_layer===layer)
+      const summary={recorded:selected.length,valid:selected.filter(p=>p.substrate_code!=="NA").length,unknown:selected.filter(p=>p.substrate_code==="NA").length,rows:layer==="surface"?(t.summaries?.substrate||[]):[]}
       const points = t.points.filter(p => p.substrate_layer === layer)
       return `
         <section class="rd-section">
@@ -384,7 +386,7 @@ export function createReefData({ apiFetch, onCount }) {
           </div>
           <details class="rd-summary">
             <summary>底質統計（已儲存資料）</summary>
-            ${summary.valid ? table(["底質", "S1", "S2", "S3", "S4", "合計", "覆蓋率", "平均點數", "SD"], summary.rows.map(r => `<tr><th scope="row">${esc(r.code)}</th>${r.counts.map(v => `<td>${number(v)}</td>`).join("")}<td>${number(r.total)}</td><td>${number(r.cover)}%</td><td>${number(r.mean)}</td><td>${number(r.sd)}</td></tr>`).join("")) : '<p>沒有有效底質觀測，無法計算覆蓋率。</p>'}
+            ${summary.rows.length ? table(["底質", "合計點數", "覆蓋率", "平均段覆蓋率", "SD", "SE", "有效段數"], summary.rows.map(r => `<tr><th scope="row">${esc(r.code)}</th><td>${number(r.total)}</td><td>${percent(r.coverage_percent)}</td><td>${percent(r.mean)}</td><td>${number(r.sd)}</td><td>${number(r.se)}</td><td>${r.n}/4</td></tr>`).join("")) : '<p>此層不提供覆蓋率統計；正式統計僅使用表層 canonical 位置。</p>'}
             <p class="meta-line">以實際有效點數計算覆蓋率；SI(...) 維持獨立類別。SD 為有觀測子樣區的樣本標準差，未記錄段落不補零。</p>
           </details>
         </section>
@@ -395,7 +397,7 @@ export function createReefData({ apiFetch, onCount }) {
       ${html || '<p>未記錄逐點底質。</p>'}
       <section class="rd-section">
         <h3>底質白化</h3>
-        ${t.bleaching.length ? table(["段落", "HC 白化點數", "HC 白化率", "SC 白化點數", "SC 白化率"], t.bleaching.map(r => `<tr><th scope="row">S${r.segment}</th><td>${numericInput("hc", r, r.hc_bleached_count, `S${r.segment} HC 白化點數`, 40)}</td><td>${percent(bleachingPercent(t.points, r.segment, "HC", r.hc_bleached_count))}</td><td>${numericInput("sc", r, r.sc_bleached_count, `S${r.segment} SC 白化點數`, 40)}</td><td>${percent(bleachingPercent(t.points, r.segment, "SC", r.sc_bleached_count))}</td></tr>`).join("")) : '<p>未記錄白化點數。</p>'}
+        ${t.bleaching.length ? table(["段落", "HC 白化點數", "HC 白化率", "SC 白化點數", "SC 白化率"], t.bleaching.map(r => `<tr><th scope="row">S${r.segment}</th><td>${numericInput("hc", r, r.hc_bleached_count, `S${r.segment} HC 白化點數`, 40)}</td><td>${percent(r.hc_percent)}</td><td>${numericInput("sc", r, r.sc_bleached_count, `S${r.segment} SC 白化點數`, 40)}</td><td>${percent(r.sc_percent)}</td></tr>`).join("")) : '<p>未記錄白化點數。</p>'}
         <p class="meta-line">白化率依已儲存的表層 HC／SC 點數計算；分母為零時顯示無法計算。</p>
       </section>
     `
@@ -411,10 +413,10 @@ export function createReefData({ apiFetch, onCount }) {
       return `
         <section class="rd-section">
           <h3>${label}</h3>
-          ${table(["物種／體長", ...segments, "合計", "平均", "SD", "有效段數"], taxa.map(taxon => {
+          ${table(["物種／體長", ...segments, "合計", "平均", "SD", "SE", "有效段數"], taxa.map(taxon => {
             const rows = [1, 2, 3, 4].map(segment => t.belt.find(r => r.taxon_id === taxon.taxon_id && r.segment === segment))
-            const stats = statistics(rows.map(r => r?.count))
-            return `<tr><th scope="row">${esc(taxon.name_zh)}<small>${esc(taxon.name_en)} ${esc(taxon.size_class)}</small>${taxon.is_aggregate ? '<small>總數列（唯讀）</small>' : ""}</th>${rows.map((r, i) => `<td>${r ? numericInput("belt", r, r.count, `${taxon.name_en} ${taxon.size_class} S${i + 1}`, 2147483647) : '<span class="rd-missing">未記錄</span>'}</td>`).join("")}<td>${number(stats.total)}</td><td>${number(stats.mean)}</td><td>${number(stats.sd)}</td><td>${stats.n}/4</td></tr>`
+            const stats = (t.summaries?.belt||[]).find(r=>r.taxon_id===taxon.taxon_id)||{n:0}
+            return `<tr><th scope="row">${esc(taxon.name_zh)}<small>${esc(taxon.name_en)} ${esc(taxon.size_class)}</small>${taxon.is_aggregate ? '<small>總數列（唯讀）</small>' : ""}</th>${rows.map((r, i) => `<td>${r ? numericInput("belt", r, r.count, `${taxon.name_en} ${taxon.size_class} S${i + 1}`, 2147483647) : '<span class="rd-missing">未記錄</span>'}</td>`).join("")}<td>${number(stats.total)}</td><td>${number(stats.mean)}</td><td>${number(stats.sd)}</td><td>${number(stats.se)}</td><td>${stats.n}/4</td></tr>`
           }).join(""))}
           <p class="meta-line">合計、平均與 SD 依已儲存的原始值計算。未記錄與 0 分開呈現。</p>
         </section>
@@ -427,13 +429,13 @@ export function createReefData({ apiFetch, onCount }) {
     return `
       <section class="rd-section">
         <h3>環境影響</h3>
-        <p class="meta-line">件數保留原始值；有原始件數的指標以 min(原始值, 3) 衍生等級。百分比使用 0–100。</p>
-        ${types.length ? table(["項目／單位", ...segments, "平均", "SD", "有效段數"], types.map(type => {
+        <p class="meta-line">件數保留原始值；0 件＝0 級、1 件＝1 級、2–4 件＝2 級、5 件以上＝3 級；平均與誤差使用原始單位。百分比使用 0–100。</p>
+        ${types.length ? table(["項目／單位", ...segments, "平均", "SD", "SE", "有效段數"], types.map(type => {
           const rows = [1, 2, 3, 4].map(segment => t.impacts.find(r => r.impact_type_id === type.impact_type_id && r.segment === segment))
-          const stats = statistics(rows.map(r => r ? impactValue(r) : null))
+          const stats = (t.summaries?.impact||[]).find(r=>r.impact_type_id===type.impact_type_id)||{n:0}
           const isPercent = type.value_type === "percent"
           const unit = isPercent ? "%" : type.has_raw_count ? "原始件數 → 衍生等級" : type.value_type === "level" ? "等級 0–3" : "件數"
-          return `<tr><th scope="row">${esc(type.name_zh)}<small>${esc(type.name_en)}</small><small>${unit}</small></th>${rows.map((r, i) => `<td>${r ? `${numericInput("impact", r, r.raw_value, `${type.name_en} S${i + 1}`, isPercent ? 100 : !type.has_raw_count && type.value_type === "level" ? 3 : null, !isPercent)}${type.has_raw_count ? `<small>等級 ${number(impactValue(r))}</small>` : isPercent ? " %" : ""}` : "未記錄"}</td>`).join("")}<td>${number(stats.mean)}${isPercent ? "%" : ""}</td><td>${number(stats.sd)}</td><td>${stats.n}/4</td></tr>`
+          return `<tr><th scope="row">${esc(type.name_zh)}<small>${esc(type.name_en)}</small><small>${unit}</small></th>${rows.map((r, i) => `<td>${r ? `${numericInput("impact", r, r.raw_value, `${type.name_en} S${i + 1}`, isPercent ? 100 : !type.has_raw_count && type.value_type === "level" ? 3 : null, !isPercent)}${type.has_raw_count ? `<small>等級 ${number(r.derived_level)}</small>` : isPercent ? " %" : ""}` : "未記錄"}</td>`).join("")}<td>${number(stats.mean)}${isPercent ? "%" : ""}</td><td>${number(stats.sd)}</td><td>${number(stats.se)}</td><td>${stats.n}/4</td></tr>`
         }).join("")) : '<p>未記錄環境影響。</p>'}
         <p class="meta-line">平均與 SD 為已儲存資料的衍生結果，儲存後更新。</p>
       </section>
@@ -460,18 +462,20 @@ export function createReefData({ apiFetch, onCount }) {
         if (input.value !== t.points.find(r => r.id === id).substrate_code) changes.push({ kind, id, code: input.value })
       } else if (kind === "hc" || kind === "sc") {
         const row = t.bleaching.find(r => r.id === id)
-        const change = bleaching.get(id) || { kind: "bleaching", id, hc: row.hc_bleached_count, sc: row.sc_bleached_count }
-        change[kind] = Number(input.value)
+        const change = bleaching.get(id) || { kind: "bleaching", id, hc:row.hc_record_status==="not_recorded"?null:row.hc_bleached_count,sc:row.sc_record_status==="not_recorded"?null:row.sc_bleached_count,hc_record_status:row.hc_record_status||"recorded",sc_record_status:row.sc_record_status||"recorded" }
+        change[kind] = input.value.trim().toUpperCase()==="NA"?null:Number(input.value)
+ change[kind+"_record_status"]=change[kind]===null?"not_recorded":"recorded"
         bleaching.set(id, change)
       } else {
         const row = (kind === "belt" ? t.belt : t.impacts).find(r => r.id === id)
-        if (Number(input.value) !== (kind === "belt" ? row.count : row.raw_value)) changes.push({ kind, id, value: Number(input.value) })
+        const value=input.value.trim().toUpperCase()==="NA"?null:Number(input.value),status=value===null?"not_recorded":"recorded"
+        if(status!==(row.record_status||"recorded") || value!== (row.record_status==="not_recorded"?null:kind==="belt"?row.count:row.raw_value)) changes.push({kind,id,value,record_status:status})
       }
     })
 
     for (const c of bleaching.values()) {
       const r = t.bleaching.find(row => row.id === c.id)
-      if (c.hc !== r.hc_bleached_count || c.sc !== r.sc_bleached_count) changes.push(c)
+      if (c.hc !== (r.hc_record_status==="not_recorded"?null:r.hc_bleached_count) || c.sc !== (r.sc_record_status==="not_recorded"?null:r.sc_bleached_count)) changes.push(c)
     }
 
     const original = Object.fromEntries(Object.keys(metadata).map(k => [k, t[k]]))
@@ -613,9 +617,11 @@ export function createReefData({ apiFetch, onCount }) {
         <input type="date" name="survey_date" id="rd-create-date" value="${today}" required>
       </label>
       <label>
+        魚類體長模式<select name="fish_size_mode"><option value="split">分體長</option><option value="combined">不分體長</option></select>
+      </label><label>
         場次時間 (Event Time)
-        <input type="text" name="event_time" id="rd-create-time" value="09:00" placeholder="例如 09:00 或 na">
-        <small class="meta-line">未記錄請輸入 na</small>
+        <input type="text" name="event_time" id="rd-create-time" value="09:00" placeholder="例如 09:00">
+        <small class="meta-line">請填此支氣瓶的開始時間</small>
       </label>
       <label>
         氣象署海象測站 (CWA Station)
@@ -763,6 +769,7 @@ export function createReefData({ apiFetch, onCount }) {
           depth_m: depthM,
           label,
           methods: selectedMethods,
+ fish_size_mode:String(f.get("fish_size_mode")),
           cwa_station_id: cwaStationID,
         }
         if (waterTempC !== null) {

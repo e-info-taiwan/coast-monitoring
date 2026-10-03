@@ -24,7 +24,7 @@ steps:
     entrypoint: sh
     args:
       - -c
-      - node --check web/admin/app.js && node --check web/admin/reef-data.js && node --test web/admin/tests/*.test.mjs && node --check web/public/reef-check/app.js && node --check web/public/reef-check/catalog.js && node --check web/public/species.js && node --check web/public/location.js
+      - node --check web/admin/app.js && node --check web/admin/reef-data.js && node --test web/admin/tests/*.test.mjs web/site/map-clusters.test.mjs && node --check web/site/app.js && node --check web/admin/public-content.js && node --check web/public/reef-check/app.js && node --check web/public/reef-check/catalog.js && node --check web/public/species.js && node --check web/public/location.js
 
   - id: test
     name: golang:1.23-alpine

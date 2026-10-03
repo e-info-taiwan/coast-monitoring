@@ -9,8 +9,8 @@ test('missing segments are not zero, sample SD uses observed segments', () => {
  assert.equal(statistics([1, 3, null, null]).sd,Math.sqrt(2))
  assert.equal(statistics([10,14,17,16]).total,57)
 })
-test('v1.7 grades cap raw counts without rewriting percent values', () => {
- assert.equal(impactValue({raw_value:4,has_raw_count:true}),3)
+test('v1.8 grades use confirmed thresholds without rewriting percent values', () => {
+ assert.equal(impactValue({raw_value:4,has_raw_count:true}),2)
  assert.equal(impactValue({raw_value:2,has_raw_count:true}),2)
  assert.equal(impactValue({raw_value:12.5,has_raw_count:false}),12.5)
 })

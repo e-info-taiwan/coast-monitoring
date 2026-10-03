@@ -1,3 +1,4 @@
+// Legacy preview helpers; production statistics come from database summary views.
 // Summaries use only recorded values. A missing segment is never an observed zero.
 export function statistics(values) {
   const present = values.filter(v => v !== null && v !== undefined)
@@ -10,7 +11,9 @@ export function statistics(values) {
 }
 
 export function impactValue(row) {
-  return row.has_raw_count ? Math.min(row.raw_value, 3) : row.raw_value
+  if (row.record_status === "not_recorded") return null
+  const n=row.raw_value
+  return row.has_raw_count ? n === 0 ? 0 : n === 1 ? 1 : n <= 4 ? 2 : 3 : n
 }
 
 export function substrateSummary(points, layer = "surface") {

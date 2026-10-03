@@ -4,6 +4,7 @@ import (
 	"coast-monitoring/internal/service"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
@@ -207,38 +208,23 @@ func TestReefDataSubmitSurvey(t *testing.T) {
 
 	repo := NewReefDataRepository(tx)
 
-	bleachHC := 5
-	cnt := 3
+	var siteID int
+	if err = tx.QueryRow(ctx, `INSERT INTO site(name_zh,name_en) VALUES('Submit fixture','SubmitFixture') RETURNING id`).Scan(&siteID); err != nil {
+		t.Fatal(err)
+	}
+	zero := 0
 	rawVal := 1.0
 	sub := service.ReefCheckSurveySubmission{
-		Format: "reefcheck-web-prototype-v2",
-		Event: service.ReefCheckEventInput{
-			SiteNameZH: "野柳",
-			SurveyDate: "2025-06-01",
-			EventTime:  "09:30",
-			DepthM:     6.0,
-		},
-		Transects: []service.ReefCheckTransectInput{
-			{Method: "line", StartTime: "09:30", Recorders: []string{"志工甲", "志工乙"}, TeamLeader: "隊長王"},
-			{Method: "belt_fish", StartTime: "09:30", Recorders: []string{"志工丙"}},
-			{Method: "belt_invert", StartTime: "09:30", Recorders: []string{"志工丁"}},
-		},
-		SubstratePoints: []service.ReefCheckSubstratePointInput{
-			{Segment: 1, PositionM: 0.0, SubstrateCode: "HC", SubstrateLayer: "surface"},
-			{Segment: 1, PositionM: 0.5, SubstrateCode: "SI", SubstrateLayer: "surface"},
-		},
-		MudAudit: []service.ReefCheckMudAuditInput{
-			{Segment: 1, PositionM: 0.5, Surface: "SI", Down: "HC", Canonical: "SI(HC)"},
-		},
-		SubstrateBleaching: []service.ReefCheckBleachingInput{
-			{Segment: 1, SubstrateCode: "HC", BleachedPoints: &bleachHC},
-		},
-		BeltObservations: []service.ReefCheckBeltObservationInput{
-			{TaxonGroup: "fish", TaxonNameENLookup: "Butterflyfish", Segment: 1, Count: &cnt},
-		},
-		ImpactObservations: []service.ReefCheckImpactObservationInput{
-			{ImpactGroup: "trash", ImpactNameENLookup: "Trash: general", Segment: 1, RawValue: &rawVal},
-		},
+		Event:              service.ReefCheckEventInput{SiteID: siteID, SurveyDate: "2025-06-01", EventTime: "09:30", DepthM: 6},
+		Transects:          []service.ReefCheckTransectInput{{TransectKey: "line", Method: "line", Recorders: []string{"Fixture recorder"}}, {TransectKey: "fish", Method: "belt_fish", FishSizeMode: "split", Recorders: []string{"Fixture recorder"}}, {TransectKey: "invert", Method: "belt_invert", Recorders: []string{"Fixture recorder"}}},
+		BeltObservations:   []service.ReefCheckBeltObservationInput{{TransectKey: "fish", TaxonGroup: "fish", TaxonNameENLookup: "Butterflyfish", Segment: 1, Count: &zero, RecordStatus: "recorded"}, {TransectKey: "fish", TaxonGroup: "fish", TaxonNameENLookup: "Butterflyfish", Segment: 2, RecordStatus: "not_recorded"}},
+		ImpactObservations: []service.ReefCheckImpactObservationInput{{TransectKey: "invert", ImpactGroup: "trash", ImpactNameENLookup: "Trash: general", ImpactValueType: "count", Segment: 1, RawValue: &rawVal}},
+		MissingReason:      "Fixture: segment 2 not recorded",
+	}
+	for segment := 1; segment <= 4; segment++ {
+		for i := 0; i < 40; i++ {
+			sub.SubstratePoints = append(sub.SubstratePoints, service.ReefCheckSubstratePointInput{TransectKey: "line", Segment: segment, PositionM: float64((segment-1)*25) + float64(i)/2, SubstrateCode: "0", SubstrateLayer: "surface"})
+		}
 	}
 
 	res, err := repo.SubmitSurvey(ctx, sub, nil)
@@ -247,6 +233,17 @@ func TestReefDataSubmitSurvey(t *testing.T) {
 	}
 	if res.Status != "saved" || res.ReceiptID == "" || res.EventID == "" {
 		t.Fatalf("unexpected res: %+v", res)
+	}
+
+	if res.ReviewStatus != "draft" {
+		t.Fatal("submission did not remain draft")
+	}
+	if _, err = repo.SubmitSurvey(ctx, sub, nil); !errors.Is(err, service.ErrConflict) {
+		t.Fatalf("duplicate=%v", err)
+	}
+	var count, status string
+	if err = tx.QueryRow(ctx, `SELECT count::text,record_status FROM belt_observation b JOIN transect t ON t.id=b.transect_id WHERE t.event_id=$1 AND b.segment=2`, res.EventID).Scan(&count, &status); err != nil || status != "not_recorded" {
+		t.Fatalf("NA lost: %s %s %v", count, status, err)
 	}
 
 	cfg, err := repo.Config(ctx)

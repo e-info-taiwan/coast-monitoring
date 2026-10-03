@@ -16,6 +16,7 @@ func init() {
 }
 
 type Dependencies struct {
+	PublicHandlers      *PublicHandlers
 	AuthHandlers        *AuthHandlers
 	AdminHandlers       *AdminHandlers
 	AppHandlers         *AppHandlers
@@ -49,6 +50,10 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Use(deps.CORS(deps.AdminAllowedOrigins))
 		r.Use(deps.RequireSession)
 		r.Use(deps.RequireAdmin)
+		r.Get("/public-audit", deps.PublicHandlers.Audit)
+		r.Get("/public-content/{kind}", deps.PublicHandlers.Contents)
+		r.Post("/public-content/{kind}", deps.PublicHandlers.SaveContent)
+		r.Patch("/public-content/{kind}/{id}", deps.PublicHandlers.SaveContent)
 		r.Get("/users", deps.AdminHandlers.ListUsers)
 		r.Post("/users", deps.AdminHandlers.CreateUser)
 		r.Patch("/users/{id}", deps.AdminHandlers.UpdateUser)
@@ -65,6 +70,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Patch("/observations/{id}", deps.AdminHandlers.UpdateObservation)
 		r.Delete("/observations/{id}", deps.AdminHandlers.DeleteObservation)
 		r.Get("/audit-logs", deps.AdminHandlers.ListAuditLogs)
+		r.Patch("/reef-check-data/events/{id}/publication", deps.PublicHandlers.Publish)
 		r.Get("/reef-check-data/events", deps.AdminHandlers.ListReefDataEvents)
 		r.Post("/reef-check-data/events", deps.AdminHandlers.CreateReefDataEvent)
 		r.Get("/reef-check-data/codes", deps.AdminHandlers.ReefDataCodes)
@@ -126,9 +132,32 @@ func NewRouter(deps Dependencies) http.Handler {
 	r.Route("/api/public", func(r chi.Router) {
 		r.Use(deps.CORS(appendOrigins(deps.AdminAllowedOrigins, deps.AppAllowedOrigins)))
 		r.Use(deps.OptionalSession)
-		r.Get("/reef-check/sites", deps.AppHandlers.ListPublicReefCheckSites)
+		r.Get("/content/{kind}", deps.PublicHandlers.Contents)
+		r.Get("/reef-check/entry-sites", deps.AppHandlers.ListPublicReefCheckSites)
+		r.Get("/reef-check/sites", deps.PublicHandlers.Sites)
+		r.Get("/reef-check/sites/{id}/series", deps.PublicHandlers.Series)
+		r.Get("/reef-check/sites/{id}/export.csv", deps.PublicHandlers.Series)
+		r.Get("/reef-check/compare", deps.PublicHandlers.Compare)
+		r.Get("/reef-check/compare.csv", deps.PublicHandlers.Compare)
 		r.Get("/reef-check/config", deps.AppHandlers.GetPublicReefCheckConfig)
-		r.Post("/reef-check/surveys", deps.AppHandlers.SubmitPublicReefCheckSurvey)
+		r.With(newSubmissionLimiter()).Post("/reef-check/surveys", deps.AppHandlers.SubmitPublicReefCheckSurvey)
+	})
+	r.Handle("/site/*", http.StripPrefix("/site/", http.FileServer(http.Dir(staticDir("web/site")))))
+	for _, path := range []string{"/", "/compare", "/activities"} {
+		r.Get(path, func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Cache-Control", "no-cache")
+			http.ServeFile(w, r, filepath.Join(staticDir("web/site"), "index.html"))
+		})
+	}
+	r.Get("/data-entry", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/public/reef-check/", http.StatusTemporaryRedirect)
+	})
+	r.Get("/login", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/admin/", http.StatusTemporaryRedirect)
+	})
+	r.Handle("/admin/*", http.StripPrefix("/admin/", http.FileServer(http.Dir(staticDir("web/admin")))))
+	r.Get("/admin", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/admin/", http.StatusTemporaryRedirect)
 	})
 	r.Handle("/public/*", http.StripPrefix("/public/", http.FileServer(http.Dir(staticDir("web/public")))))
 	adminFiles := http.FileServer(http.Dir(staticDir("web/admin")))
@@ -137,8 +166,15 @@ func NewRouter(deps Dependencies) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		w.Header().Set("Cache-Control", "no-cache, must-revalidate")
-		adminFiles.ServeHTTP(w, r)
+		// Legacy absolute admin asset URLs are kept for its existing entry point.
+		path := strings.TrimPrefix(r.URL.Path, "/")
+		if !strings.Contains(path, "/") && (strings.HasSuffix(path, ".js") || strings.HasSuffix(path, ".mjs") || strings.HasSuffix(path, ".css")) {
+			w.Header().Set("Cache-Control", "no-cache, must-revalidate")
+			adminFiles.ServeHTTP(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`<html lang="zh-Hant"><meta charset="utf-8"><title>找不到頁面</title><h1>找不到頁面</h1><a href="/">回到觀測地圖</a></html>`))
 	})
 	return r
 }

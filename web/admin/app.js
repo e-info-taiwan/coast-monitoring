@@ -816,7 +816,7 @@ function renderProviderList() {
   button.innerHTML = '<span class="session-pill">G</span><span>Sign in with Google</span>'
   button.addEventListener("click", () => {
     setStatus("正在開啟 Google 登入…", "hint")
-    window.location.href = "/api/auth/google/start?redirect=/"
+    window.location.href = "/api/auth/google/start?redirect=/admin/"
   })
   providerList.appendChild(button)
 }

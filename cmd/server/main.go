@@ -91,6 +91,7 @@ func newServerHandler(cfg config.Config, pool *pgxpool.Pool, googleProvider http
 	}
 	secureCookies := cfg.SecureCookies
 	return httpx.NewRouter(httpx.Dependencies{
+		PublicHandlers: &httpx.PublicHandlers{Reef: repository.NewReefDataRepository(pool), Content: repository.NewReefDataRepository(pool)},
 		AuthHandlers: &httpx.AuthHandlers{
 			Auth:          authService,
 			Sessions:      sessionRepo,

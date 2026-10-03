@@ -149,7 +149,6 @@ func TestAdminCanUseAppObservationRoute(t *testing.T) {
 	}
 }
 
-
 func appRouterForUser(user policy.User, observations *fakeAppObservationService, auditLogs *fakeAdminAuditLogService, runner AdminMutationRunner) http.Handler {
 	handlers := testAuthHandlers()
 	handlers.Auth = &fakeHTTPAuthService{sessionUser: user}
@@ -168,8 +167,6 @@ func appRouterForUser(user policy.User, observations *fakeAppObservationService,
 		},
 	})
 }
-
-
 
 func appRequest(method, target string, body *bytes.Buffer) *http.Request {
 	req := adminRequest(method, target, body)
@@ -193,8 +190,6 @@ func testObservation(observerID uuid.UUID, count int) service.Observation {
 		UpdatedAt:  time.Date(2026, 5, 27, 4, 5, 6, 0, time.UTC),
 	}
 }
-
-
 
 type fakeAppObservationService struct {
 	observations []service.Observation
@@ -348,7 +343,7 @@ func TestListPublicReefCheckSitesAndConfig(t *testing.T) {
 	})
 
 	// Test sites
-	reqSites := httptest.NewRequest(http.MethodGet, "/api/public/reef-check/sites", nil)
+	reqSites := httptest.NewRequest(http.MethodGet, "/api/public/reef-check/entry-sites", nil)
 	recSites := httptest.NewRecorder()
 	router.ServeHTTP(recSites, reqSites)
 	if recSites.Code != http.StatusOK {
@@ -381,4 +376,3 @@ func TestSubmitAppReefCheckSurveyRequiresSession(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 }
-
