@@ -18,7 +18,7 @@
 ## 使用與資料遷移
 
 - `/` 公開地圖；`/compare` 比較；`/activities` 活動；`/public/reef-check/` 志工填報。
-- `/admin/` 既有管理介面，新增「公開內容管理」入口 `/admin/public-content.html`。
+- `/admin/` 既有管理介面，側欄新增「公開內容管理」群組（`/admin/#public_content:<kind>`），舊網址 `/admin/public-content.html?kind=` 會自動轉址。
 - 依序套用新增 migrations `000008`–`000011`。既有 event 預設 **draft**，需管理員檢查後發布；不會自動公開歷史觀測。
 - 圖表顯示單位、SE、n 與更新時間。NA 回傳空值／狀態，CSV 保留獨立 event。
 - 匯入使用 `go run ./cmd/import-reefcheck --help` 查看參數；先 dry-run，再審查報告。本次未執行正式資料匯入。

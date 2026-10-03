@@ -1,1 +1,21 @@
-<!doctype html><html lang="zh-Hant"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>公開資料與內容管理</title><link rel="stylesheet" href="/site/styles.css?v=20261003"><script type="module" src="/admin/public-content.js"></script><header><a href="/admin/">← 調查與主檔管理</a><a href="/">查看公開網站</a></header><main class="content"><h1>公開資料與內容管理</h1><p>調查及新內容預設為草稿。核對完成後再發布，公開端只會顯示已發布資料。</p><p id="message" role="status"></p><div id="workspace" hidden><label>管理項目<select id="kind"><option value="settings">首頁顯示設定</option><option value="audit">公開內容稽核／匯入作業狀態</option><option value="event">調查發布</option><option value="article">文章連結</option><option value="activity">活動行程</option><option value="development">海岸開發案</option><option value="profile">樣點公開資訊／最新報告</option><option value="annotation">樣點事件註記</option><option value="chart">樣點圖表／共用圖表</option></select></label><button id="new">新增草稿</button><div id="list"></div><section id="editor" class="card" hidden></section></div></main></html>
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>公開內容管理 · Coast Monitoring Admin</title>
+<meta name="robots" content="noindex">
+<script>
+  // 公開內容管理已整合進 /admin/ 單頁後台；保留舊網址（含 ?kind=）並轉址。
+  (function () {
+    var kinds = ["settings", "event", "article", "activity", "development", "profile", "annotation", "chart", "audit"]
+    var kind = new URLSearchParams(window.location.search).get("kind")
+    if (kinds.indexOf(kind) === -1) kind = "settings"
+    window.location.replace("/admin/#public_content:" + kind)
+  })()
+</script>
+</head>
+<body>
+<p>公開內容管理已移至 <a href="/admin/#public_content:settings">管理後台</a>。</p>
+</body>
+</html>

@@ -1,4 +1,5 @@
 import { createReefData } from "./reef-data.js"
+import { createPublicContent, kindMeta, PUBLIC_CONTENT_KINDS, PUBLIC_CONTENT_PREFIX } from "./public-content.js"
 
 const API_BASE = `${window.location.origin}/api`
 const ADMIN_API_BASE = `${API_BASE}/admin`
@@ -444,12 +445,49 @@ const state = {
   history: {},
   draft: null,
   drawerMode: null,
+  drawerGuard: null,
   loading: false,
   demoLoading: false,
   demoError: false,
 }
 
 const reefData = createReefData({ apiFetch, onCount: () => renderSidebar() })
+const publicContent = createPublicContent({
+  apiFetch,
+  notify: (options) => {
+    const id = showAlert(options)
+    if (id && options.tone === "ok") setTimeout(() => dismissAlert(id), 4000)
+    return id
+  },
+  drawer: {
+    open: (options) => openCustomDrawer(options),
+    close: () => closeDrawer({ force: true }),
+  },
+})
+
+function isPublicContentKey(key) {
+  return typeof key === "string" && key.startsWith(PUBLIC_CONTENT_PREFIX) && Boolean(kindMeta(key.slice(PUBLIC_CONTENT_PREFIX.length)))
+}
+
+function isKnownKey(key) {
+  return Boolean(resourceConfigs[key]) || key === OVERVIEW_KEY || key === REEF_DATA_KEY || isPublicContentKey(key)
+}
+
+function keyFromHash() {
+  try {
+    const key = decodeURIComponent(window.location.hash.slice(1))
+    return isKnownKey(key) && canSeeNav(key) ? key : ""
+  } catch (_) {
+    return ""
+  }
+}
+
+function syncHash(key) {
+  const next = `#${key}`
+  if (window.location.hash !== next) {
+    window.history.replaceState(null, "", next)
+  }
+}
 
 const NAV_TRANSITION_MS = 300
 const DEMO_LOADING_MS = 2500
@@ -852,6 +890,10 @@ function renderSidebar() {
       ],
     },
     {
+      title: "公開內容管理",
+      items: PUBLIC_CONTENT_KINDS.map(({ kind, title }) => ({ key: `${PUBLIC_CONTENT_PREFIX}${kind}`, title, count: null })),
+    },
+    {
       title: "Reef Check 字典設定",
       items: [
         { key: "taxa", title: "指標物種 (Taxa)", count: state.records.taxa?.length ?? 0 },
@@ -878,7 +920,7 @@ function renderSidebar() {
 
   const visibleSections = sections.map((sec) => ({
     ...sec,
-    items: sec.items.filter(({ key }) => key === OVERVIEW_KEY ? isAdmin() : canSeeNav(key)),
+    items: sec.items.filter(({ key }) => key === OVERVIEW_KEY || isPublicContentKey(key) ? isAdmin() : canSeeNav(key)),
   })).filter((sec) => sec.items.length > 0)
 
   resourceNav.innerHTML = visibleSections.map((sec) => {
@@ -897,10 +939,12 @@ function renderSidebar() {
         closeSidebar()
         return
       }
+      if (state.drawerMode && !closeDrawer({ rerender: false })) return
       if (state.activeKey === REEF_DATA_KEY && !reefData.leave()) return
+      if (isPublicContentKey(state.activeKey)) publicContent.leave()
       state.activeKey = key
       state.draft = null
-      closeDrawer({ rerender: false })
+      syncHash(key)
       closeSidebar()
       triggerNavTransition()
     })
@@ -1209,7 +1253,7 @@ function renderDashboard() {
           <div class="stat-icon tone-reef">R</div>
           <span class="stat-label">Reef Check 觀測資料</span>
         </div>
-        <div class="stat-value">${reefData.count ?? "726"}</div>
+        <div class="stat-value">${reefData.count ?? "—"}</div>
         <div class="stat-sub">場次 Event 總數</div>
       </button>
     `
@@ -1256,6 +1300,7 @@ function renderDashboard() {
   resourcePanel.querySelectorAll("[data-jump]").forEach((node) => {
     node.addEventListener("click", () => {
       state.activeKey = node.dataset.jump
+      syncHash(state.activeKey)
       triggerNavTransition()
     })
   })
@@ -1487,6 +1532,15 @@ async function handleObservationSubmit(event) {
 }
 
 function renderResource(resourceKey) {
+  if (isPublicContentKey(resourceKey)) {
+    const meta = kindMeta(resourceKey.slice(PUBLIC_CONTENT_PREFIX.length))
+    sectionEyebrow.textContent = "公開內容管理"
+    sectionTitle.textContent = meta.title
+    sectionDescription.textContent = meta.description
+    if (mobileSectionTitle) mobileSectionTitle.textContent = meta.title
+    publicContent.render(resourcePanel, meta.kind)
+    return
+  }
   if (resourceKey === REEF_DATA_KEY) {
     sectionEyebrow.textContent = "REEF CHECK"
     sectionTitle.textContent = "Reef Check 觀測資料"
@@ -1669,16 +1723,37 @@ function openDrawer() {
   document.body.classList.add("no-scroll")
 }
 
-function closeDrawer({ rerender = true } = {}) {
+function openCustomDrawer({ eyebrow = "", title = "", subtitle = "", html = "", bind, guard = null } = {}) {
+  state.drawerMode = "custom"
+  state.drawerGuard = guard
+  drawerEyebrow.textContent = eyebrow
+  drawerTitle.textContent = title
+  drawerSubtitle.textContent = subtitle
+  drawerBody.innerHTML = html
+  bind?.(drawerBody)
+  drawerBody.scrollTop = 0
+  drawer.classList.add("is-open")
+  drawer.setAttribute("aria-hidden", "false")
+  drawerScrim.classList.add("is-open")
+  document.body.classList.add("no-scroll")
+}
+
+function closeDrawer({ rerender = true, force = false } = {}) {
+  if (!force && state.drawerGuard && !state.drawerGuard()) {
+    return false
+  }
+  const wasCustom = state.drawerMode === "custom"
+  state.drawerGuard = null
   state.drawerMode = null
   drawer.classList.remove("is-open")
   drawer.setAttribute("aria-hidden", "true")
   drawerScrim.classList.remove("is-open")
   document.body.classList.remove("no-scroll")
   state.draft = null
-  if (rerender) {
+  if (rerender && !wasCustom) {
     renderResource(state.activeKey)
   }
+  return true
 }
 
 function openSidebar() {
@@ -1693,7 +1768,9 @@ function closeSidebar() {
 
 async function signOut() {
   if (!reefData.leave()) return
+  if (state.drawerMode && !closeDrawer({ rerender: false })) return
   reefData.reset()
+  publicContent.reset()
   try {
     await apiFetch("/auth/logout", { method: "POST" })
   } catch (_) {
@@ -1796,9 +1873,11 @@ async function boot() {
       showView("access")
       return
     }
+    state.activeKey = keyFromHash() || state.activeKey
     if (!canSeeNav(state.activeKey)) {
       state.activeKey = isAdmin() ? REEF_DATA_KEY : "species"
     }
+    syncHash(state.activeKey)
     showView("app")
     await loadWorkspace()
     renderWorkspace()
@@ -1821,11 +1900,12 @@ passwordLoginForm?.addEventListener("submit", async (event) => {
       body: { email, password },
     })
     saveSession(session)
-    state.activeKey = isAdmin() ? REEF_DATA_KEY : "species"
+    state.activeKey = keyFromHash() || (isAdmin() ? REEF_DATA_KEY : "species")
     if (!hasAccess()) {
       showView("access")
       return
     }
+    syncHash(state.activeKey)
     showView("app")
     await loadWorkspace()
     renderWorkspace()
