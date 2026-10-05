@@ -96,27 +96,29 @@ func ParsePublicReefFilter(q url.Values) (PublicReefFilter, error) {
 }
 
 type PublicReefSeries struct {
-	SiteID        int      `json:"site_id"`
-	SiteName      string   `json:"site_name"`
-	EventID       string   `json:"event_id"`
-	Date          string   `json:"survey_date"`
-	Time          string   `json:"event_time"`
-	Depth         float64  `json:"depth_m"`
-	Chart         string   `json:"chart"`
-	Key           string   `json:"key"`
-	Name          string   `json:"name"`
-	Size          string   `json:"size_class"`
-	Mode          *string  `json:"fish_size_mode"`
-	Unit          string   `json:"unit"`
-	Total         *float64 `json:"total"`
-	Mean          *float64 `json:"mean"`
-	Value         *float64 `json:"value"`
-	SD            *float64 `json:"sd"`
-	SE            *float64 `json:"se"`
-	N             int      `json:"n"`
-	Status        string   `json:"calculation_status"`
-	MissingReason string   `json:"missing_reason"`
-	UpdatedAt     string   `json:"data_updated_at"`
+	SiteID          int      `json:"site_id"`
+	SiteName        string   `json:"site_name"`
+	EventID         string   `json:"event_id"`
+	Date            string   `json:"survey_date"`
+	Time            string   `json:"event_time"`
+	Depth           float64  `json:"depth_m"`
+	Chart           string   `json:"chart"`
+	Key             string   `json:"key"`
+	Name            string   `json:"name"`
+	Size            string   `json:"size_class"`
+	Mode            *string  `json:"fish_size_mode"`
+	Unit            string   `json:"unit"`
+	UnitLabel       string   `json:"unit_label"`
+	DensityPer100M2 *float64 `json:"density_per_100m2"`
+	Total           *float64 `json:"total"`
+	Mean            *float64 `json:"mean"`
+	Value           *float64 `json:"value"`
+	SD              *float64 `json:"sd"`
+	SE              *float64 `json:"se"`
+	N               int      `json:"n"`
+	Status          string   `json:"calculation_status"`
+	MissingReason   string   `json:"missing_reason"`
+	UpdatedAt       string   `json:"data_updated_at"`
 }
 
 type PublicContent struct {
@@ -126,4 +128,26 @@ type PublicContent struct {
 	Status    string          `json:"publication_status"`
 	Data      json.RawMessage `json:"data"`
 	UpdatedAt string          `json:"updated_at"`
+}
+
+// Keep display text separate from stable machine-readable units.
+func (s *PublicReefSeries) NormalizeUnit() {
+	s.UnitLabel = s.Unit
+	switch s.Unit {
+	case "%":
+		s.Unit = "percent"
+	case "隻／100 m²":
+		s.Unit = "individuals_per_100m2"
+		s.DensityPer100M2 = s.Mean
+	case "隻／子樣區":
+		s.Unit = "individuals_per_subsample"
+	case "原始件數":
+		s.Unit = "count"
+	case "歷史分級":
+		s.Unit = "historical_level"
+	case "系統衍生分級":
+		s.Unit = "derived_level"
+	case "白化點數":
+		s.Unit = "bleached_points"
+	}
 }

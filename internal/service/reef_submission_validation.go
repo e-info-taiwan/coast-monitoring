@@ -93,11 +93,14 @@ func (s *ReefCheckSurveySubmission) validateObservations() error {
 				return bad("白化空白值需明確標記 NA")
 			}
 			unknown = true
-		} else if *b.BleachedPoints < 0 || *b.BleachedPoints > counts[key] {
+		} else if (b.RecordStatus != "" && b.RecordStatus != "recorded") || *b.BleachedPoints < 0 || *b.BleachedPoints > counts[key] {
 			return bad("白化點數超過對應底質點數")
 		}
 	}
 	seen = map[string]bool{}
+	beltGroups := map[string]bool{}
+	beltRows := map[string]int{}
+	impactRows := map[string]int{}
 	for _, o := range s.BeltObservations {
 		method := keys[o.TransectKey]
 		expected := "belt_invert"
@@ -109,6 +112,8 @@ func (s *ReefCheckSurveySubmission) validateObservations() error {
 			return bad("生物觀測項目無效或重複")
 		}
 		seen[key] = true
+		beltGroups[o.TransectKey+":"+o.TaxonGroup] = true
+		beltRows[key[:strings.LastIndex(key, ":")]]++
 		if o.Count == nil {
 			if o.RecordStatus != "not_recorded" {
 				return bad("空白生物數量不可送出")
@@ -125,6 +130,7 @@ func (s *ReefCheckSurveySubmission) validateObservations() error {
 			return bad("環境衝擊項目無效或重複")
 		}
 		seen[key] = true
+		impactRows[key[:strings.LastIndex(key, ":")]]++
 		if o.RawValue == nil {
 			if o.RecordStatus != "not_recorded" {
 				return bad("環境衝擊空白值需明確標記 NA")
@@ -133,7 +139,7 @@ func (s *ReefCheckSurveySubmission) validateObservations() error {
 			continue
 		}
 		v := *o.RawValue
-		if !finite(v) || v < 0 {
+		if (o.RecordStatus != "" && o.RecordStatus != "recorded") || !finite(v) || v < 0 {
 			return bad("環境衝擊值無效")
 		}
 		if o.ImpactGroup == "coral_damage" || o.ImpactGroup == "trash" {
@@ -142,6 +148,25 @@ func (s *ReefCheckSurveySubmission) validateObservations() error {
 			}
 		} else if (o.ImpactGroup != "bleaching" && o.ImpactGroup != "disease") || o.ImpactValueType != "percent" || v > 100 {
 			return bad("白化及疾病百分比需介於 0–100")
+		}
+	}
+
+	for _, n := range beltRows {
+		if n != 4 {
+			return bad("每個生物項目需完整填寫四段，未記錄請填 NA")
+		}
+	}
+	for _, n := range impactRows {
+		if n != 4 {
+			return bad("每個環境衝擊項目需完整填寫四段，未記錄請填 NA")
+		}
+	}
+	for _, t := range s.Transects {
+		if t.Method == "belt_fish" && !beltGroups[t.TransectKey+":fish"] {
+			return bad("魚類手板不可整份省略")
+		}
+		if t.Method == "belt_invert" && (!beltGroups[t.TransectKey+":invert"] || !beltGroups[t.TransectKey+":rare"] || len(impactRows) == 0) {
+			return bad("無脊椎、罕見生物與環境衝擊手板不可省略")
 		}
 	}
 	seen = map[string]bool{}

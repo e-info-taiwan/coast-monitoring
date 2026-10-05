@@ -212,21 +212,40 @@ func TestReefDataSubmitSurvey(t *testing.T) {
 	if err = tx.QueryRow(ctx, `INSERT INTO site(name_zh,name_en) VALUES('Submit fixture','SubmitFixture') RETURNING id`).Scan(&siteID); err != nil {
 		t.Fatal(err)
 	}
-	zero := 0
-	rawVal := 1.0
 	sub := service.ReefCheckSurveySubmission{
-		Event:              service.ReefCheckEventInput{SiteID: siteID, SurveyDate: "2025-06-01", EventTime: "09:30", DepthM: 6},
-		Transects:          []service.ReefCheckTransectInput{{TransectKey: "line", Method: "line", Recorders: []string{"Fixture recorder"}}, {TransectKey: "fish", Method: "belt_fish", FishSizeMode: "split", Recorders: []string{"Fixture recorder"}}, {TransectKey: "invert", Method: "belt_invert", Recorders: []string{"Fixture recorder"}}},
-		BeltObservations:   []service.ReefCheckBeltObservationInput{{TransectKey: "fish", TaxonGroup: "fish", TaxonNameENLookup: "Butterflyfish", Segment: 1, Count: &zero, RecordStatus: "recorded"}, {TransectKey: "fish", TaxonGroup: "fish", TaxonNameENLookup: "Butterflyfish", Segment: 2, RecordStatus: "not_recorded"}},
-		ImpactObservations: []service.ReefCheckImpactObservationInput{{TransectKey: "invert", ImpactGroup: "trash", ImpactNameENLookup: "Trash: general", ImpactValueType: "count", Segment: 1, RawValue: &rawVal}},
-		MissingReason:      "Fixture: segment 2 not recorded",
+		Event:         service.ReefCheckEventInput{SiteID: siteID, SurveyDate: "2025-06-01", EventTime: "09:30", DepthM: 6},
+		Transects:     []service.ReefCheckTransectInput{{TransectKey: "line", Method: "line", Recorders: []string{"Fixture recorder"}}, {TransectKey: "fish", Method: "belt_fish", FishSizeMode: "split", Recorders: []string{"Fixture recorder"}}, {TransectKey: "invert", Method: "belt_invert", Recorders: []string{"Fixture recorder"}}},
+		MissingReason: "Fixture: segment 2 not recorded",
 	}
+	fillSubmissionCatalog(t, ctx, tx, &sub)
 	for segment := 1; segment <= 4; segment++ {
 		for i := 0; i < 40; i++ {
 			sub.SubstratePoints = append(sub.SubstratePoints, service.ReefCheckSubstratePointInput{TransectKey: "line", Segment: segment, PositionM: float64((segment-1)*25) + float64(i)/2, SubstrateCode: "0", SubstrateLayer: "surface"})
 		}
 	}
 
+	for segment := 1; segment <= 4; segment++ {
+		for _, code := range []string{"HC", "SC"} {
+			zero := 0
+			sub.SubstrateBleaching = append(sub.SubstrateBleaching, service.ReefCheckBleachingInput{TransectKey: "line", Segment: segment, SubstrateCode: code, BleachedPoints: &zero, RecordStatus: "recorded"})
+		}
+	}
+	// The service accepts complete submitted rows, but the DB also requires every
+	// active catalog row. Omitting one entire species must roll back the event.
+	incomplete := sub
+	incomplete.BeltObservations = nil
+	for _, o := range sub.BeltObservations {
+		if o.TaxonNameENLookup != "Snapper" {
+			incomplete.BeltObservations = append(incomplete.BeltObservations, o)
+		}
+	}
+	if _, err := repo.SubmitSurvey(ctx, incomplete, nil); !errors.Is(err, service.ErrValidation) {
+		t.Fatalf("omitted species accepted: %v", err)
+	}
+	var leaked int
+	if err = tx.QueryRow(ctx, `SELECT count(*) FROM event e JOIN survey s ON s.id=e.survey_id WHERE s.site_id=$1`, siteID).Scan(&leaked); err != nil || leaked != 0 {
+		t.Fatalf("rejected submission leaked event: %d %v", leaked, err)
+	}
 	res, err := repo.SubmitSurvey(ctx, sub, nil)
 	if err != nil {
 		t.Fatalf("SubmitSurvey error: %v", err)
@@ -246,6 +265,78 @@ func TestReefDataSubmitSurvey(t *testing.T) {
 		t.Fatalf("NA lost: %s %s %v", count, status, err)
 	}
 
+	var actor string
+	if err = tx.QueryRow(ctx, `INSERT INTO users(email,name,role) VALUES('publication-fixture@example.invalid','Fixture','admin') RETURNING id::text`).Scan(&actor); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, `UPDATE event SET missing_reason='' WHERE id=$1`, res.EventDBID); err != nil {
+		t.Fatal(err)
+	}
+	if err = repo.SetPublication(ctx, res.EventDBID, "published", actor); !errors.Is(err, service.ErrValidation) {
+		t.Fatalf("NA without reason published: %v", err)
+	}
+	if _, err = tx.Exec(ctx, `UPDATE event SET missing_reason=$2 WHERE id=$1`, res.EventDBID, sub.MissingReason); err != nil {
+		t.Fatal(err)
+	}
+	var beltID, taxonID int
+	if err = tx.QueryRow(ctx, `SELECT b.transect_id,b.taxon_id FROM belt_observation b JOIN transect t ON t.id=b.transect_id JOIN taxon x ON x.id=b.taxon_id WHERE t.event_id=$1 AND x.name_en='Butterflyfish' AND b.segment=1`, res.EventID).Scan(&beltID, &taxonID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM belt_observation WHERE transect_id=$1 AND taxon_id=$2 AND segment=4`, beltID, taxonID); err != nil {
+		t.Fatal(err)
+	}
+	if err = repo.SetPublication(ctx, res.EventDBID, "published", actor); !errors.Is(err, service.ErrValidation) {
+		t.Fatalf("incomplete board published: %v", err)
+	}
+	var auditCount int
+	if err = tx.QueryRow(ctx, `SELECT publication_status,(SELECT count(*) FROM reef_publication_audit WHERE event_id=$1) FROM event WHERE id=$1`, res.EventDBID).Scan(&status, &auditCount); err != nil || status != "draft" || auditCount != 0 {
+		t.Fatalf("rejected publication mutated data: %s %d %v", status, auditCount, err)
+	}
+	if err = upsertBeltObservation(ctx, tx, beltID, taxonID, 4, 0, "recorded"); err != nil {
+		t.Fatal(err)
+	}
+	if err = repo.SetPublication(ctx, res.EventDBID, "published", actor); err != nil {
+		t.Fatalf("complete explicit NA/0 rejected: %v", err)
+	}
+	filter, _ := service.ParsePublicReefFilter(nil)
+	series, err := repo.PublicSeries(ctx, siteID, filter)
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundDensity := false
+	for _, row := range series {
+		if row.Chart == "taxa" && row.Unit == "individuals_per_100m2" {
+			foundDensity = true
+			if row.DensityPer100M2 == nil || row.Mean == nil || *row.DensityPer100M2 != *row.Mean {
+				t.Fatalf("density contract lost: %+v", row)
+			}
+		}
+	}
+	if !foundDensity {
+		t.Fatal("no explicit density rows")
+	}
+	if err = upsertBeltObservation(ctx, tx, beltID, taxonID, 2, 7, "recorded"); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.QueryRow(ctx, `SELECT count::text,record_status FROM belt_observation WHERE transect_id=$1 AND taxon_id=$2 AND segment=2`, beltID, taxonID).Scan(&count, &status); err != nil || count != "7" || status != "recorded" {
+		t.Fatalf("NA to recorded upsert lost: %s %s %v", count, status, err)
+	}
+	if err = upsertBeltObservation(ctx, tx, beltID, taxonID, 2, 0, "not_recorded"); err != nil {
+		t.Fatal(err)
+	}
+	var invertID, impactID int
+	if err = tx.QueryRow(ctx, `SELECT o.transect_id,o.impact_type_id FROM impact_observation o JOIN transect t ON t.id=o.transect_id WHERE t.event_id=$1 LIMIT 1`, res.EventID).Scan(&invertID, &impactID); err != nil {
+		t.Fatal(err)
+	}
+	for _, flag := range []string{"not_recorded", "recorded", "not_recorded"} {
+		if err = upsertImpactObservation(ctx, tx, invertID, impactID, 1, 0, flag); err != nil {
+			t.Fatal(err)
+		}
+		if err = tx.QueryRow(ctx, `SELECT record_status FROM impact_observation WHERE transect_id=$1 AND impact_type_id=$2 AND segment=1`, invertID, impactID).Scan(&status); err != nil || status != flag {
+			t.Fatalf("impact upsert status=%s expected=%s %v", status, flag, err)
+		}
+	}
+
 	cfg, err := repo.Config(ctx)
 	if err != nil {
 		t.Fatalf("Config error: %v", err)
@@ -253,4 +344,58 @@ func TestReefDataSubmitSurvey(t *testing.T) {
 	if len(cfg.Sites) == 0 || len(cfg.Codes) == 0 {
 		t.Fatalf("empty config sites or codes: %+v", cfg)
 	}
+}
+
+// Real active catalog, never a fixture that omits a whole required board.
+func fillSubmissionCatalog(t *testing.T, ctx context.Context, db DBTX, sub *service.ReefCheckSurveySubmission) {
+	t.Helper()
+	rows, err := db.Query(ctx, `SELECT taxon_group::text,name_en,COALESCE(size_class,'') FROM taxon WHERE is_active AND NOT is_aggregate AND NOT (name_en='Grouper' AND COALESCE(size_class,'')='') AND NOT(taxon_group='rare' AND name_en='Other')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var group, name, size string
+		if err := rows.Scan(&group, &name, &size); err != nil {
+			t.Fatal(err)
+		}
+		key := "invert"
+		if group == "fish" {
+			key = "fish"
+		}
+		for seg := 1; seg <= 4; seg++ {
+			zero := 0
+			o := service.ReefCheckBeltObservationInput{TransectKey: key, TaxonGroup: group, TaxonNameENLookup: name, TaxonSizeClassLookup: size, Segment: seg, Count: &zero, RecordStatus: "recorded"}
+			if name == "Butterflyfish" && seg == 2 {
+				o.Count = nil
+				o.RecordStatus = "not_recorded"
+			}
+			sub.BeltObservations = append(sub.BeltObservations, o)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	rows.Close()
+	rows, err = db.Query(ctx, `SELECT impact_group::text,name_en,value_type::text,has_raw_count FROM impact_type WHERE is_active`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var group, name, kind string
+		var raw bool
+		if err := rows.Scan(&group, &name, &kind, &raw); err != nil {
+			t.Fatal(err)
+		}
+		if raw {
+			kind = "count"
+		}
+		for seg := 1; seg <= 4; seg++ {
+			zero := 0.0
+			sub.ImpactObservations = append(sub.ImpactObservations, service.ReefCheckImpactObservationInput{TransectKey: "invert", ImpactGroup: group, ImpactNameENLookup: name, ImpactValueType: kind, Segment: seg, RawValue: &zero, RecordStatus: "recorded"})
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	rows.Close()
 }

@@ -142,6 +142,25 @@ func TestPRDContentWorkflow(t *testing.T) {
 	if err = tx.QueryRow(ctx, `INSERT INTO users(email,name,role) VALUES('prd-fixture@example.invalid','Fixture','admin') RETURNING id::text`).Scan(&actor); err != nil {
 		t.Fatal(err)
 	}
+
+	// Settings is supported by migration 000011, not by editing applied 000009.
+	if _, err = tx.Exec(ctx, `DELETE FROM public_content_audit WHERE content_id IN(SELECT id FROM public_content WHERE kind='settings'); DELETE FROM public_content WHERE kind='settings'`); err != nil {
+		t.Fatal(err)
+	}
+	limit := 7
+	settings, err := repo.SaveContent(ctx, 0, service.PublicContentInput{Kind: "settings", Data: service.ContentData{Title: "首頁設定", ArticleLimit: &limit}}, actor)
+	if err != nil {
+		t.Fatalf("settings create: %v", err)
+	}
+	limit = 9
+	settings, err = repo.SaveContent(ctx, settings.ID, service.PublicContentInput{Kind: "settings", Version: settings.UpdatedAt, Status: "published", Data: service.ContentData{Title: "首頁設定", ArticleLimit: &limit}}, actor)
+	if err != nil || settings.Status != "published" {
+		t.Fatalf("settings save/publication: %v", err)
+	}
+	publicSettings, err := repo.ListContent(ctx, "settings", true)
+	if err != nil || len(publicSettings) != 1 {
+		t.Fatalf("settings read: %v %v", publicSettings, err)
+	}
 	c := service.PublicContentInput{Kind: "development", Status: "published", Data: service.ContentData{Title: "Draft fixture", Geometry: json.RawMessage(`{"type":"Point","coordinates":[121,25]}`), Timeline: []service.ContentTimeline{{Title: "Draft timeline", Precision: "unknown", SortOrder: 1}, {Title: "Published timeline", Date: "2026-10", Precision: "month", Published: true, SourceURL: "https://example.com/source"}}, Media: []service.ContentMedia{{URL: "https://example.com/hidden.png", Alt: "hidden"}, {URL: "https://example.com/public.png", Alt: "public", Published: true, Valid: true, Licensed: true}}}}
 	saved, err := repo.SaveContent(ctx, 0, c, actor)
 	if err != nil {

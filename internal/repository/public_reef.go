@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/jackc/pgx/v5"
+	"strings"
 )
 
 // Public queries deliberately do not select participants, comments or snapshots.
@@ -60,6 +62,7 @@ func (r ReefDataRepository) PublicSeries(ctx context.Context, siteID int, f serv
 		if err = rows.Scan(&a.SiteID, &a.SiteName, &a.EventID, &a.Date, &a.Time, &a.Depth, &a.Chart, &a.Key, &a.Name, &a.Size, &a.Mode, &a.Unit, &a.Total, &a.Mean, &a.Value, &a.SD, &a.SE, &a.N, &a.UpdatedAt); err != nil {
 			return nil, err
 		}
+		a.NormalizeUnit()
 		a.Status = "ok"
 		if a.N == 0 {
 			a.Status = "not_calculable"
@@ -75,7 +78,46 @@ func (r ReefDataRepository) SetPublication(ctx context.Context, id int, status s
 	if status != "draft" && status != "published" && status != "archived" {
 		return fmt.Errorf("%w: 無效發布狀態", service.ErrValidation)
 	}
-	// Status and audit evidence commit atomically, including previous status.
-	tag, err := r.db.Exec(ctx, `WITH previous AS (SELECT id,event_id,publication_status FROM event WHERE id=$1 FOR UPDATE), changed AS (UPDATE event e SET publication_status=$2,updated_at=now() FROM previous p WHERE e.id=p.id RETURNING e.id) INSERT INTO reef_publication_audit(event_id,old_status,new_status,actor_id) SELECT p.id,p.publication_status,$2,$3::uuid FROM previous p JOIN changed c ON c.id=p.id`, id, status, actor)
-	return requireRowsAffected(tag, err)
+	exec := r.db
+	var ownTx pgx.Tx
+	if starter, ok := r.db.(txStarter); ok {
+		tx, err := starter.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		ownTx = tx
+		exec = tx
+		defer tx.Rollback(ctx)
+	}
+	var eventID string
+	if err := exec.QueryRow(ctx, `SELECT event_id FROM event WHERE id=$1 FOR UPDATE`, id).Scan(&eventID); err != nil {
+		return translateError(err)
+	}
+	if status == "published" {
+		if _, err := exec.Exec(ctx, `SELECT id FROM transect WHERE event_id=$1 ORDER BY id FOR UPDATE`, eventID); err != nil {
+			return err
+		}
+		if err := validateStoredEvent(ctx, exec, eventID); err != nil {
+			return err
+		}
+	}
+	tag, err := exec.Exec(ctx, `WITH previous AS (SELECT id,event_id,publication_status FROM event WHERE id=$1 FOR UPDATE), changed AS (UPDATE event e SET publication_status=$2,updated_at=now() FROM previous p WHERE e.id=p.id RETURNING e.id) INSERT INTO reef_publication_audit(event_id,old_status,new_status,actor_id) SELECT p.id,p.publication_status,$2,$3::uuid FROM previous p JOIN changed c ON c.id=p.id`, id, status, actor)
+	if err = requireRowsAffected(tag, err); err != nil {
+		return err
+	}
+	if ownTx != nil {
+		return ownTx.Commit(ctx)
+	}
+	return nil
+}
+
+func validateStoredEvent(ctx context.Context, db DBTX, eventID string) error {
+	var issues []string
+	if err := db.QueryRow(ctx, `SELECT reef_event_completeness($1)`, eventID).Scan(&issues); err != nil {
+		return err
+	}
+	if len(issues) > 0 {
+		return fmt.Errorf("%w: %s", service.ErrValidation, strings.Join(issues, "；"))
+	}
+	return nil
 }

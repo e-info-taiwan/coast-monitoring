@@ -1580,12 +1580,7 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 				return service.ReefCheckSubmissionResult{}, fmt.Errorf("%w: 魚類體長模式與觀測列不符", service.ErrValidation)
 			}
 		}
-		_, err = exec.Exec(ctx, `
-			INSERT INTO belt_observation (transect_id, taxon_id, segment, count, record_status)
-			VALUES ($1, $2, $3, $4, $5)
-			ON CONFLICT (transect_id, taxon_id, segment) DO UPDATE SET
-				count = EXCLUDED.count
-		`, tID, taxonID, obs.Segment, count, obs.RecordStatus)
+		err = upsertBeltObservation(ctx, exec, tID, taxonID, obs.Segment, count, obs.RecordStatus)
 		if err != nil {
 			return service.ReefCheckSubmissionResult{}, translateError(err)
 		}
@@ -1640,16 +1635,15 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 			if imp.RawValue == nil {
 				status = "not_recorded"
 			}
-			_, err = exec.Exec(ctx, `
-				INSERT INTO impact_observation (transect_id, impact_type_id, segment, raw_value, record_status)
-				VALUES ($1, $2, $3, $4, $5)
-				ON CONFLICT (transect_id, impact_type_id, segment) DO UPDATE SET
-					raw_value = EXCLUDED.raw_value
-			`, invertID, impactID, imp.Segment, rawVal, status)
+			err = upsertImpactObservation(ctx, exec, invertID, impactID, imp.Segment, rawVal, status)
 			if err != nil {
 				return service.ReefCheckSubmissionResult{}, translateError(err)
 			}
 		}
+	}
+
+	if err := validateStoredEvent(ctx, exec, finalEventID); err != nil {
+		return service.ReefCheckSubmissionResult{}, err
 	}
 
 	receiptID := fmt.Sprintf("RC-%s-%d", strings.ReplaceAll(sub.Event.SurveyDate, "-", ""), eventDBID)
@@ -1679,4 +1673,15 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 		ReviewStatus: reviewStatus,
 		SavedAt:      time.Now().UTC().Format(time.RFC3339),
 	}, nil
+}
+
+func upsertBeltObservation(ctx context.Context, db DBTX, transect, taxon, segment, count int, status string) error {
+	_, err := db.Exec(ctx, `INSERT INTO belt_observation(transect_id,taxon_id,segment,count,record_status) VALUES($1,$2,$3,$4,$5)
+ ON CONFLICT(transect_id,taxon_id,segment) DO UPDATE SET count=EXCLUDED.count,record_status=EXCLUDED.record_status`, transect, taxon, segment, count, status)
+	return err
+}
+func upsertImpactObservation(ctx context.Context, db DBTX, transect, impact, segment int, value float64, status string) error {
+	_, err := db.Exec(ctx, `INSERT INTO impact_observation(transect_id,impact_type_id,segment,raw_value,record_status) VALUES($1,$2,$3,$4,$5)
+ ON CONFLICT(transect_id,impact_type_id,segment) DO UPDATE SET raw_value=EXCLUDED.raw_value,record_status=EXCLUDED.record_status`, transect, impact, segment, value, status)
+	return err
 }

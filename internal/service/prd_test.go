@@ -42,9 +42,9 @@ func TestPRDSubmissionContract(t *testing.T) {
 		{"fish mode required", func(s *ReefCheckSurveySubmission) {
 			s.Transects = append(s.Transects, ReefCheckTransectInput{TransectKey: "fish", Method: "belt_fish", Recorders: []string{"Recorder"}})
 		}, false},
-		{"explicit combined mode", func(s *ReefCheckSurveySubmission) {
+		{"combined mode still requires observations", func(s *ReefCheckSurveySubmission) {
 			s.Transects = append(s.Transects, ReefCheckTransectInput{TransectKey: "fish", Method: "belt_fish", FishSizeMode: "combined", Recorders: []string{"Recorder"}})
-		}, true},
+		}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s := validSubmission()
@@ -87,5 +87,44 @@ func TestContentGeometryAndMediaContract(t *testing.T) {
 	c.Data.Geometry = json.RawMessage(`{"type":"Point","coordinates":[181,23]}`)
 	if err := c.Validate(); err == nil {
 		t.Fatal("invalid coordinate")
+	}
+}
+
+func TestPRDRejectsIncompleteBeltBoards(t *testing.T) {
+	for _, method := range []string{"belt_fish", "belt_invert"} {
+		s := validSubmission()
+		s.Transects = append(s.Transects, ReefCheckTransectInput{TransectKey: "belt", Method: method, FishSizeMode: "split", Recorders: []string{"Recorder"}})
+		if s.Validate() == nil {
+			t.Fatalf("empty %s accepted", method)
+		}
+	}
+	s := validSubmission()
+	s.Transects = append(s.Transects, ReefCheckTransectInput{TransectKey: "fish", Method: "belt_fish", FishSizeMode: "combined", Recorders: []string{"Recorder"}})
+	zero := 0
+	for segment := 1; segment <= 4; segment++ {
+		s.BeltObservations = append(s.BeltObservations, ReefCheckBeltObservationInput{TransectKey: "fish", TaxonGroup: "fish", TaxonNameENLookup: "Butterflyfish", Segment: segment, Count: &zero, RecordStatus: "recorded"})
+	}
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	s.BeltObservations = s.BeltObservations[:3]
+	if s.Validate() == nil {
+		t.Fatal("incomplete four segments accepted")
+	}
+}
+func TestPublicDensityContract(t *testing.T) {
+	mean := 2.5
+	for _, unit := range []string{"隻／100 m²", "隻／子樣區", "%"} {
+		s := PublicReefSeries{Unit: unit, Mean: &mean}
+		s.NormalizeUnit()
+		if s.UnitLabel != unit {
+			t.Fatal("display label lost")
+		}
+		if unit == "隻／100 m²" && (s.Unit != "individuals_per_100m2" || s.DensityPer100M2 == nil || *s.DensityPer100M2 != mean) {
+			t.Fatal("density contract missing")
+		}
+		if unit != "隻／100 m²" && s.DensityPer100M2 != nil {
+			t.Fatal("non-density mislabeled")
+		}
 	}
 }
