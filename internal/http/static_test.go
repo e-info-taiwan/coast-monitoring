@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-func TestRootServesMapHTML(t *testing.T) {
+func TestRootServesReefCheckHTML(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 
@@ -21,8 +21,8 @@ func TestRootServesMapHTML(t *testing.T) {
 	if got := rec.Header().Get("Content-Type"); !strings.Contains(got, "text/html") {
 		t.Fatalf("Content-Type = %q, want text/html", got)
 	}
-	if body := rec.Body.String(); !strings.Contains(body, `src="/site/app.js?v=20261003"`) {
-		t.Fatalf("body does not look like map HTML")
+	if body := rec.Body.String(); !strings.Contains(body, `src="/public/reef-check/app.js"`) {
+		t.Fatalf("body does not look like Reef Check HTML")
 	}
 }
 
@@ -56,7 +56,7 @@ func TestPublicStaticRouteServesReefCheckVolunteerForm(t *testing.T) {
 		t.Fatalf("Content-Type = %q, want text/html", got)
 	}
 	body := rec.Body.String()
-	for _, want := range []string{`<title>珊瑚礁體檢｜志工記錄站</title>`, `src="app.js"`, `href="theme.css"`} {
+	for _, want := range []string{`<title>珊瑚礁體檢｜志工記錄站</title>`, `src="/public/reef-check/app.js"`, `href="/public/reef-check/theme.css"`} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("reef check volunteer form missing marker %q", want)
 		}

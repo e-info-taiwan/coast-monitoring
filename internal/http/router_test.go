@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -199,5 +200,34 @@ func TestAppOPTIONSWithoutOriginRequiresSession(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestReefCheckHomeRoutes(t *testing.T) {
+	router := NewRouter(Dependencies{})
+	for _, path := range []string{"/", "/public/reef-check/"} {
+		t.Run(path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "珊瑚礁體檢｜志工記錄站") {
+				t.Fatalf("expected Reef Check form at %s, got status %d", path, rec.Code)
+			}
+			for _, asset := range []string{"styles.css", "theme.css", "catalog.js", "app.js"} {
+				assetPath := "/public/reef-check/" + asset
+				if !strings.Contains(rec.Body.String(), `"`+assetPath+`"`) {
+					t.Fatalf("missing absolute asset URL %s", assetPath)
+				}
+				assetRec := httptest.NewRecorder()
+				router.ServeHTTP(assetRec, httptest.NewRequest(http.MethodGet, assetPath, nil))
+				if assetRec.Code != http.StatusOK || assetRec.Body.Len() == 0 {
+					t.Fatalf("asset %s: status %d, bytes %d", assetPath, assetRec.Code, assetRec.Body.Len())
+				}
+			}
+		})
+	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/data-entry", nil))
+	if rec.Code != http.StatusTemporaryRedirect || rec.Header().Get("Location") != "/" {
+		t.Fatalf("data-entry should redirect home: status %d, location %q", rec.Code, rec.Header().Get("Location"))
 	}
 }

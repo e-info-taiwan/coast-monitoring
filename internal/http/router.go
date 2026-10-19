@@ -147,14 +147,18 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.With(newSubmissionLimiter()).Post("/reef-check/surveys", deps.AppHandlers.SubmitPublicReefCheckSurvey)
 	})
 	r.Handle("/site/*", http.StripPrefix("/site/", http.FileServer(http.Dir(staticDir("web/site")))))
-	for _, path := range []string{"/", "/compare", "/activities"} {
+	r.Get("/", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		http.ServeFile(w, r, filepath.Join(staticDir("web/public/reef-check"), "index.html"))
+	})
+	for _, path := range []string{"/compare", "/activities"} {
 		r.Get(path, func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-cache")
 			http.ServeFile(w, r, filepath.Join(staticDir("web/site"), "index.html"))
 		})
 	}
 	r.Get("/data-entry", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/public/reef-check/", http.StatusTemporaryRedirect)
+		http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
 	})
 	r.Get("/login", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/", http.StatusTemporaryRedirect)
@@ -178,7 +182,7 @@ func NewRouter(deps Dependencies) http.Handler {
 			return
 		}
 		w.WriteHeader(http.StatusNotFound)
-		_, _ = w.Write([]byte(`<html lang="zh-Hant"><meta charset="utf-8"><title>找不到頁面</title><h1>找不到頁面</h1><a href="/">回到觀測地圖</a></html>`))
+		_, _ = w.Write([]byte(`<html lang="zh-Hant"><meta charset="utf-8"><title>找不到頁面</title><h1>找不到頁面</h1><a href="/">回到首頁</a></html>`))
 	})
 	return r
 }
