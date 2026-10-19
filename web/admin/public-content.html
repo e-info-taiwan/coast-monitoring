@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>公開內容管理 · Coast Monitoring Admin</title>
+<meta name="robots" content="noindex">
+<script>
+  // 公開內容管理已整合進 /admin/ 單頁後台；保留舊網址（含 ?kind=）並轉址。
+  (function () {
+    var kinds = ["settings", "event", "article", "activity", "development", "profile", "annotation", "chart", "audit"]
+    var kind = new URLSearchParams(window.location.search).get("kind")
+    if (kinds.indexOf(kind) === -1) kind = "settings"
+    window.location.replace("/admin/#public_content:" + kind)
+  })()
+</script>
+</head>
+<body>
+<p>公開內容管理已移至 <a href="/admin/#public_content:settings">管理後台</a>。</p>
+</body>
+</html>

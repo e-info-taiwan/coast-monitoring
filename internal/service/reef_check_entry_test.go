@@ -6,10 +6,10 @@ import (
 )
 
 func tabletFixture() ReefCheckSurveySubmission {
-	s := ReefCheckSurveySubmission{Format: "reefcheck-web-v4", ActivityCode: "RC-TEST", BleachingMode: "point_marks", Event: ReefCheckEventInput{SiteID: 1, SurveyDate: "2026-10-14", EventTime: "09:30", DepthM: 5}, Transects: []ReefCheckTransectInput{{Method: "line", Recorders: []string{"志工"}, CoralMorphology: "general"}}}
+	s := ReefCheckSurveySubmission{Format: "reefcheck-web-v4", ActivityCode: "RC-TEST", BleachingMode: "point_marks", Event: ReefCheckEventInput{SiteID: 1, SurveyDate: "2026-10-14", EventTime: "09:30", DepthM: 5}, Transects: []ReefCheckTransectInput{{TransectKey: "line", Method: "line", Recorders: []string{"志工"}, CoralMorphology: "general"}}}
 	for seg := 1; seg <= 4; seg++ {
 		for i := 0; i < 40; i++ {
-			s.SubstratePoints = append(s.SubstratePoints, ReefCheckSubstratePointInput{Segment: seg, PositionM: float64((seg-1)*25) + float64(i)/2, SubstrateCode: "HC", SubstrateLayer: "surface", IsBleached: dataPtr(false)})
+			s.SubstratePoints = append(s.SubstratePoints, ReefCheckSubstratePointInput{TransectKey: "line", Segment: seg, PositionM: float64((seg-1)*25) + float64(i)/2, SubstrateCode: "HC", SubstrateLayer: "surface", IsBleached: dataPtr(false)})
 		}
 	}
 	return s

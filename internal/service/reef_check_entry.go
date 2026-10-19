@@ -74,6 +74,9 @@ func (a ReefCheckActivity) Allows(siteID int, date string, now time.Time) bool {
 
 func (s *ReefCheckSurveySubmission) validateTabletEntry() error {
 	bad := func(m string) error { return fmt.Errorf("%w: %s", ErrValidation, m) }
+	if len(s.SubstrateBleaching) != 0 {
+		return bad("新填報白化總數由逐格標記計算，不接受另一份手填總數")
+	}
 	if strings.TrimSpace(s.ActivityCode) == "" {
 		return bad("缺少活動代碼")
 	}

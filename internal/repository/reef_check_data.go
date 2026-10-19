@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
@@ -25,8 +24,7 @@ func NewReefDataRepository(db DBTX) ReefDataRepository { return ReefDataReposito
 const reefEventSelect = `SELECT jsonb_build_object(
  'entry_metadata',(SELECT to_jsonb(m) FROM reef_check_entry_metadata m WHERE m.event_id=e.id),
  'activity_name',(SELECT a.name FROM reef_check_entry_metadata m JOIN reef_check_activity a ON a.id=m.activity_id WHERE m.event_id=e.id),
- 'publication_status',(SELECT m.publication_status FROM reef_check_entry_metadata m WHERE m.event_id=e.id),
- 'id',e.id,'event_id',e.event_id,'survey_id',s.id,'survey_date',e.survey_date::text,
+ 'missing_reason',e.missing_reason,'publication_status',e.publication_status,'id',e.id,'event_id',e.event_id,'survey_id',s.id,'survey_date',e.survey_date::text,
  'event_time',e.event_time,'depth_m',e.depth_m,'site_id',p.id,'site_name',p.name_zh,
  'site_english',COALESCE(p.name_en,''),'region',COALESCE(p.region,''),'county',COALESCE(p.county,''),
  'location',COALESCE(p.location,''),'latitude',p.latitude,'longitude',p.longitude,
@@ -125,13 +123,14 @@ func (r ReefDataRepository) Transect(ctx context.Context, id int, lock bool) (se
 	}
 	var raw []byte
 	err := r.db.QueryRow(ctx, `SELECT jsonb_build_object(
- 'id',t.id,'event_id',t.event_id,'method',t.method,'fish_length_mode',t.fish_length_mode,'start_time',t.start_time,
+ 'id',t.id,'event_id',t.event_id,'method',t.method,'fish_length_mode',t.fish_size_mode,'start_time',t.start_time,
  'water_temp_c',t.water_temp_c,'visibility_min_m',t.visibility_min_m,'visibility_max_m',t.visibility_max_m,
  'comments',t.comments,'rkc_bleaching_note',t.rkc_bleaching_note,
  'other_damage_note',t.other_damage_note,'coral_morphology',t.coral_morphology,
- 'points',COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.substrate_layer,p.position_m,p.id) FROM substrate_point p WHERE p.transect_id=t.id),'[]'::jsonb),
- 'bleaching',COALESCE((SELECT jsonb_agg(to_jsonb(b) ORDER BY b.segment,b.id) FROM substrate_bleaching b WHERE b.transect_id=t.id),'[]'::jsonb),
  'derived_bleaching',COALESCE((SELECT jsonb_agg(to_jsonb(b) ORDER BY b.segment) FROM substrate_bleaching_point_summary b WHERE b.transect_id=t.id),'[]'::jsonb),
+ 'fish_size_mode',t.fish_size_mode,'classify_hard_coral',t.classify_hard_coral,'points',COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.substrate_layer,p.position_m,p.id) FROM substrate_point p WHERE p.transect_id=t.id),'[]'::jsonb),
+ 'summaries',jsonb_build_object('substrate',COALESCE((SELECT jsonb_agg(to_jsonb(s)) FROM substrate_summary s WHERE s.transect_id=t.id),'[]'::jsonb),'belt',COALESCE((SELECT jsonb_agg(to_jsonb(s)) FROM belt_summary s WHERE s.transect_id=t.id),'[]'::jsonb),'impact',COALESCE((SELECT jsonb_agg(to_jsonb(s)) FROM impact_summary s WHERE s.transect_id=t.id),'[]'::jsonb)),
+ 'bleaching',COALESCE((SELECT jsonb_agg(to_jsonb(b)||jsonb_build_object('hc_percent',CASE WHEN b.hc_record_status='recorded' THEN 100.0*b.hc_bleached_count/NULLIF((SELECT s.category_points FROM substrate_segment_summary s WHERE s.transect_id=t.id AND s.segment=b.segment AND s.code='HC'),0) END,'sc_percent',CASE WHEN b.sc_record_status='recorded' THEN 100.0*b.sc_bleached_count/NULLIF((SELECT s.category_points FROM substrate_segment_summary s WHERE s.transect_id=t.id AND s.segment=b.segment AND s.code='SC'),0) END) ORDER BY b.segment,b.id) FROM substrate_bleaching b WHERE b.transect_id=t.id),'[]'::jsonb),
  'belt',COALESCE((SELECT jsonb_agg(to_jsonb(b)||jsonb_build_object('taxon_group',x.taxon_group,'name_zh',x.name_zh,'name_en',COALESCE(x.name_en,''),'size_class',COALESCE(x.size_class,''),'is_aggregate',x.is_aggregate) ORDER BY x.sort_order,x.id,b.segment,b.id) FROM belt_observation b JOIN taxon x ON x.id=b.taxon_id WHERE b.transect_id=t.id),'[]'::jsonb),
  'impacts',COALESCE((SELECT jsonb_agg(to_jsonb(i)||jsonb_build_object('impact_group',x.impact_group,'name_zh',x.name_zh,'name_en',COALESCE(x.name_en,''),'value_type',x.value_type,'has_raw_count',x.has_raw_count) ORDER BY x.sort_order,x.id,i.segment,i.id) FROM impact_observation_with_level i JOIN impact_type x ON x.id=i.impact_type_id WHERE i.transect_id=t.id),'[]'::jsonb),
   'participants',COALESCE((SELECT jsonb_agg(to_jsonb(p)||jsonb_build_object('name_zh',COALESCE(d.name_zh,''),'name_en',COALESCE(d.name_en,''),'reef_check_code',COALESCE(d.reef_check_code,''),'user_id',COALESCE(p.user_id,d.user_id),'user_email',COALESCE(u.email,''),'user_name',COALESCE(u.name,'')) ORDER BY p.role,p.id) FROM transect_participant p JOIN diver d ON d.id=p.diver_id LEFT JOIN users u ON u.id=COALESCE(p.user_id,d.user_id) WHERE p.transect_id=t.id),'[]'::jsonb))
@@ -163,14 +162,14 @@ func (r ReefDataRepository) Update(ctx context.Context, id int, u service.ReefDa
 			query = `UPDATE substrate_point SET substrate_code=$3,is_bleached=CASE WHEN $3 IN ('HC','HC-a','HC-b','HC-c','SC') THEN is_bleached ELSE NULL END WHERE transect_id=$1 AND id=$2`
 			args = []any{id, c.ID, c.Code}
 		case "bleaching":
-			query = `UPDATE substrate_bleaching SET hc_bleached_count=$3,sc_bleached_count=$4 WHERE transect_id=$1 AND id=$2`
-			args = []any{id, c.ID, c.HC, c.SC}
+			query = `UPDATE substrate_bleaching SET hc_bleached_count=COALESCE($3,0),sc_bleached_count=COALESCE($4,0),hc_record_status=COALESCE(NULLIF($5,''),'recorded'),sc_record_status=COALESCE(NULLIF($6,''),'recorded') WHERE transect_id=$1 AND id=$2`
+			args = []any{id, c.ID, c.HC, c.SC, c.HCStatus, c.SCStatus}
 		case "belt":
-			query = `UPDATE belt_observation SET count=$3,record_status='recorded' WHERE transect_id=$1 AND id=$2`
-			args = []any{id, c.ID, c.Value}
+			query = `UPDATE belt_observation SET count=$3,record_status=COALESCE(NULLIF($4,''),'recorded') WHERE transect_id=$1 AND id=$2`
+			args = []any{id, c.ID, c.Value, c.RecordStatus}
 		case "impact":
-			query = `UPDATE impact_observation SET raw_value=$3,record_status='recorded' WHERE transect_id=$1 AND id=$2`
-			args = []any{id, c.ID, c.Value}
+			query = `UPDATE impact_observation SET raw_value=$3,record_status=COALESCE(NULLIF($4,''),'recorded') WHERE transect_id=$1 AND id=$2`
+			args = []any{id, c.ID, c.Value, c.RecordStatus}
 		default:
 			return service.ReefDataTransect{}, service.ErrValidation
 		}
@@ -233,6 +232,13 @@ func (r ReefDataRepository) CreateEvent(ctx context.Context, input service.ReefD
 		}
 	}
 
+	var duplicate bool
+	if err = r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM event e JOIN survey s ON s.id=e.survey_id WHERE s.site_id=$1 AND e.survey_date=$2::date AND replace(e.event_time,'-',':')=replace($3,'-',':') AND e.depth_m=$4)`, input.SiteID, input.SurveyDate, input.EventTime, input.DepthM).Scan(&duplicate); err != nil {
+		return service.ReefDataDetail{}, err
+	}
+	if duplicate {
+		return service.ReefDataDetail{}, fmt.Errorf("%w: 同樣點、日期、時間及深度的氣瓶已存在", service.ErrConflict)
+	}
 	var surveyID int
 	err = r.db.QueryRow(ctx, `
 		INSERT INTO survey (site_id, start_date, end_date, label)
@@ -244,12 +250,8 @@ func (r ReefDataRepository) CreateEvent(ctx context.Context, input service.ReefD
 		return service.ReefDataDetail{}, translateError(err)
 	}
 
-	slug := cleanSlug(siteNameEN)
-	if slug == "site" && siteNameZH != "" {
-		slug = fmt.Sprintf("site-%d", input.SiteID)
-	}
 	timeSlug := strings.ReplaceAll(input.EventTime, ":", "-")
-	baseEventID := fmt.Sprintf("%s_%s_%s_%.1fm", slug, input.SurveyDate, timeSlug, input.DepthM)
+	baseEventID := fmt.Sprintf("%s_%s_%s_%gm", siteNameEN, strings.ReplaceAll(input.SurveyDate, "-", "_"), timeSlug, input.DepthM)
 	finalEventID := baseEventID
 
 	var exists bool
@@ -285,6 +287,11 @@ func (r ReefDataRepository) CreateEvent(ctx context.Context, input service.ReefD
 			return service.ReefDataDetail{}, translateError(err)
 		}
 
+		if method == "belt_fish" {
+			if _, err = r.db.Exec(ctx, `UPDATE transect SET fish_size_mode=$2 WHERE id=$1`, transectID, input.FishSizeMode); err != nil {
+				return service.ReefDataDetail{}, err
+			}
+		}
 		if method == "line" {
 			for seg := 1; seg <= 4; seg++ {
 				baseM := float64((seg - 1) * 25)
@@ -299,15 +306,15 @@ func (r ReefDataRepository) CreateEvent(ctx context.Context, input service.ReefD
 					}
 				}
 				_, err = r.db.Exec(ctx, `
-					INSERT INTO substrate_bleaching (transect_id, segment, hc_bleached_count, sc_bleached_count)
-					VALUES ($1, $2, 0, 0)
+					INSERT INTO substrate_bleaching (transect_id, segment, hc_bleached_count, sc_bleached_count,hc_record_status,sc_record_status)
+ VALUES ($1, $2, 0, 0,'not_recorded','not_recorded')
 				`, transectID, seg)
 				if err != nil {
 					return service.ReefDataDetail{}, translateError(err)
 				}
 			}
 		} else if method == "belt_fish" {
-			taxaRows, err := r.db.Query(ctx, `SELECT id FROM taxon WHERE taxon_group='fish' AND is_active ORDER BY sort_order, id`)
+			taxaRows, err := r.db.Query(ctx, `SELECT id FROM taxon WHERE taxon_group='fish' AND is_active AND NOT is_aggregate AND (name_en<>'Grouper' OR CASE WHEN $1='combined' THEN size_class IS NULL ELSE size_class IS NOT NULL END) ORDER BY sort_order, id`, input.FishSizeMode)
 			if err != nil {
 				return service.ReefDataDetail{}, translateError(err)
 			}
@@ -322,13 +329,13 @@ func (r ReefDataRepository) CreateEvent(ctx context.Context, input service.ReefD
 			for _, tid := range taxaIDs {
 				for seg := 1; seg <= 4; seg++ {
 					_, _ = r.db.Exec(ctx, `
-						INSERT INTO belt_observation (transect_id, taxon_id, segment, count)
-						VALUES ($1, $2, $3, 0)
+						INSERT INTO belt_observation (transect_id, taxon_id, segment, count,record_status)
+ VALUES ($1, $2, $3, 0,'not_recorded')
 					`, transectID, tid, seg)
 				}
 			}
 		} else if method == "belt_invert" {
-			taxaRows, err := r.db.Query(ctx, `SELECT id FROM taxon WHERE taxon_group IN ('invert', 'rare') AND is_active ORDER BY sort_order, id`)
+			taxaRows, err := r.db.Query(ctx, `SELECT id FROM taxon WHERE taxon_group IN ('invert', 'rare') AND is_active AND NOT is_aggregate ORDER BY sort_order, id`)
 			if err != nil {
 				return service.ReefDataDetail{}, translateError(err)
 			}
@@ -343,8 +350,8 @@ func (r ReefDataRepository) CreateEvent(ctx context.Context, input service.ReefD
 			for _, tid := range taxaIDs {
 				for seg := 1; seg <= 4; seg++ {
 					_, _ = r.db.Exec(ctx, `
-						INSERT INTO belt_observation (transect_id, taxon_id, segment, count)
-						VALUES ($1, $2, $3, 0)
+						INSERT INTO belt_observation (transect_id, taxon_id, segment, count,record_status)
+ VALUES ($1, $2, $3, 0,'not_recorded')
 					`, transectID, tid, seg)
 				}
 			}
@@ -363,8 +370,8 @@ func (r ReefDataRepository) CreateEvent(ctx context.Context, input service.ReefD
 			for _, iid := range impactIDs {
 				for seg := 1; seg <= 4; seg++ {
 					_, _ = r.db.Exec(ctx, `
-						INSERT INTO impact_observation (transect_id, impact_type_id, segment, raw_value)
-						VALUES ($1, $2, $3, 0)
+						INSERT INTO impact_observation (transect_id, impact_type_id, segment, raw_value,record_status)
+ VALUES ($1, $2, $3, 0,'not_recorded')
 					`, transectID, iid, seg)
 				}
 			}
@@ -1239,36 +1246,15 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 	err = exec.QueryRow(ctx, `
 		SELECT id, name_zh, COALESCE(name_en, ''), cwa_station_id
 		FROM site
-		WHERE ($1 > 0 AND id = $1)
-		   OR ($2 <> '' AND name_zh = $2)
-		   OR ($3 <> '' AND (name_en = $3 OR LOWER(name_en) = LOWER($3)))
+		WHERE id = $1 AND is_active AND ($2 = '' OR $2 = name_zh) AND ($3 = '' OR LOWER($3) = LOWER(name_en))
 		ORDER BY (id = $1) DESC, (name_zh = $2) DESC
 		LIMIT 1
 	`, sub.Event.SiteID, siteZHInput, siteENInput).Scan(&siteID, &siteNameZH, &siteNameEN, &siteStationID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) || errors.Is(err, sql.ErrNoRows) {
-			if sub.Format == "reefcheck-web-v4" {
-				return service.ReefCheckSubmissionResult{}, fmt.Errorf("%w: 請選既有正式樣點", service.ErrValidation)
-			}
-			if siteZHInput == "" && siteENInput == "" {
-				return service.ReefCheckSubmissionResult{}, fmt.Errorf("%w: 請指定調查樣點", service.ErrValidation)
-			}
-			newZH := siteZHInput
-			if newZH == "" {
-				newZH = siteENInput
-			}
-			err = exec.QueryRow(ctx, `
-				INSERT INTO site (name_zh, name_en, is_active)
-				VALUES ($1, NULLIF($2, ''), true)
-				ON CONFLICT (name_en) DO UPDATE SET name_zh = EXCLUDED.name_zh
-				RETURNING id, name_zh, COALESCE(name_en, ''), cwa_station_id
-			`, newZH, siteENInput).Scan(&siteID, &siteNameZH, &siteNameEN, &siteStationID)
-			if err != nil {
-				return service.ReefCheckSubmissionResult{}, fmt.Errorf("%w: 找不到或建立樣點失敗: %v", service.ErrValidation, err)
-			}
-		} else {
-			return service.ReefCheckSubmissionResult{}, translateError(err)
+			return service.ReefCheckSubmissionResult{}, fmt.Errorf("%w: 找不到正式樣點，請聯絡管理員", service.ErrValidation)
 		}
+		return service.ReefCheckSubmissionResult{}, translateError(err)
 	}
 
 	if sub.Format == "reefcheck-web-v4" && strings.TrimSpace(siteNameEN) == "" {
@@ -1315,6 +1301,9 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 		return service.ReefCheckSubmissionResult{}, translateError(err)
 	}
 
+	if _, err = exec.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1,0))`, fmt.Sprintf("%d:%s:%s:%g", siteID, sub.Event.SurveyDate, timeForTemp, sub.Event.DepthM)); err != nil {
+		return service.ReefCheckSubmissionResult{}, err
+	}
 	var eventDBID int
 	var finalEventID string
 
@@ -1328,22 +1317,12 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 		return service.ReefCheckSubmissionResult{}, translateError(err)
 	}
 
-	if eventDBID != 0 && sub.Format == "reefcheck-web-v4" {
-		return service.ReefCheckSubmissionResult{}, fmt.Errorf("%w: 這支氣瓶已有紀錄，請由管理窗口核對", service.ErrConflict)
+	if eventDBID != 0 {
+		return service.ReefCheckSubmissionResult{}, fmt.Errorf("%w: 此氣瓶已存在 (%s)，請開啟原紀錄或核對日期、時間與深度", service.ErrConflict, finalEventID)
 	}
+
 	if eventDBID == 0 {
-		baseEventID := strings.TrimSpace(sub.Event.EventID)
-		if sub.Format == "reefcheck-web-v4" {
-			baseEventID = siteNameEN + "_" + strings.ReplaceAll(sub.Event.SurveyDate, "-", "_") + "_" + strings.ReplaceAll(normTime, ":", "-") + "_" + strconv.FormatFloat(sub.Event.DepthM, 'f', -1, 64) + "m"
-		}
-		if baseEventID == "" {
-			slug := cleanSlug(siteNameEN)
-			if slug == "site" && siteNameZH != "" {
-				slug = fmt.Sprintf("site-%d", siteID)
-			}
-			timeSlug := strings.ReplaceAll(normTime, ":", "-")
-			baseEventID = fmt.Sprintf("%s_%s_%s_%.1fm", slug, sub.Event.SurveyDate, timeSlug, sub.Event.DepthM)
-		}
+		baseEventID := fmt.Sprintf("%s_%s_%s_%gm", siteNameEN, strings.ReplaceAll(sub.Event.SurveyDate, "-", "_"), strings.ReplaceAll(normTime, ":", "-"), sub.Event.DepthM)
 		finalEventID = baseEventID
 		var exists bool
 		for suffix := 1; ; suffix++ {
@@ -1367,9 +1346,16 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 		}
 	}
 
+	snapshot, err := json.Marshal(sub)
+	if err != nil {
+		return service.ReefCheckSubmissionResult{}, err
+	}
+	if _, err = exec.Exec(ctx, `UPDATE event SET missing_reason=$2,submission_snapshot=$3::jsonb WHERE id=$1`, eventDBID, sub.MissingReason, snapshot); err != nil {
+		return service.ReefCheckSubmissionResult{}, err
+	}
 	if activity != nil {
 		m := sub.EntryMetadata
-		_, err = exec.Exec(ctx, `INSERT INTO reef_check_entry_metadata(event_id,activity_id,weather,air_temperature_c,latitude,longitude,missing_reason,publication_status) VALUES($1,$2,NULLIF($3,''),$4,$5,$6,NULLIF($7,''),'draft')`, eventDBID, activity.ID, m.Weather, m.AirTemperature, m.Latitude, m.Longitude, sub.MissingReason)
+		_, err = exec.Exec(ctx, `INSERT INTO reef_check_entry_metadata(event_id,activity_id,weather,air_temperature_c,latitude,longitude) VALUES($1,$2,NULLIF($3,''),$4,$5,$6)`, eventDBID, activity.ID, m.Weather, m.AirTemperature, m.Latitude, m.Longitude)
 		if err != nil {
 			return service.ReefCheckSubmissionResult{}, translateError(err)
 		}
@@ -1395,13 +1381,13 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 			visibilityMax = t.VisibilityM
 		}
 		var fishLengthMode any
-		if t.Method == "belt_fish" && t.FishLengthMode != "" {
-			fishLengthMode = t.FishLengthMode
+		if t.Method == "belt_fish" && t.FishSizeMode != "" {
+			fishLengthMode = t.FishSizeMode
 		}
 
 		var transectID int
 		err = exec.QueryRow(ctx, `
-			INSERT INTO transect (survey_id, event_id, method, depth_m, survey_date, start_time, water_temp_c, visibility_min_m, visibility_max_m, comments, fish_length_mode)
+			INSERT INTO transect (survey_id, event_id, method, depth_m, survey_date, start_time, water_temp_c, visibility_min_m, visibility_max_m, comments, fish_size_mode)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			ON CONFLICT (event_id, method) DO UPDATE SET
 				survey_date = EXCLUDED.survey_date,
@@ -1410,13 +1396,16 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 				visibility_min_m = COALESCE(EXCLUDED.visibility_min_m, transect.visibility_min_m),
 				visibility_max_m = COALESCE(EXCLUDED.visibility_max_m, transect.visibility_max_m),
 				comments = COALESCE(NULLIF(EXCLUDED.comments, ''), transect.comments),
-				fish_length_mode = COALESCE(EXCLUDED.fish_length_mode, transect.fish_length_mode)
+				fish_size_mode = COALESCE(EXCLUDED.fish_size_mode, transect.fish_size_mode)
 			RETURNING id
 		`, surveyID, finalEventID, t.Method, sub.Event.DepthM, sub.Event.SurveyDate, startTime, waterTemp, visibilityMin, visibilityMax, strings.TrimSpace(t.Comments), fishLengthMode).Scan(&transectID)
 		if err != nil {
 			return service.ReefCheckSubmissionResult{}, translateError(err)
 		}
 
+		if _, err = exec.Exec(ctx, `UPDATE transect SET fish_size_mode=NULLIF($2,''),classify_hard_coral=$3 WHERE id=$1`, transectID, t.FishSizeMode, t.ClassifyHardCoral); err != nil {
+			return service.ReefCheckSubmissionResult{}, err
+		}
 		methods = append(methods, t.Method)
 		if sub.Format == "reefcheck-web-v4" {
 			_, err = exec.Exec(ctx, `UPDATE transect SET coral_morphology=NULLIF($2,''),rkc_bleaching_note=NULLIF($3,''),other_damage_note=NULLIF($4,'') WHERE id=$1`, transectID, t.CoralMorphology, sub.RKCNote, sub.OtherDamageNote)
@@ -1519,24 +1508,31 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 			}
 		}
 
-		// Point marks are derived through substrate_bleaching_point_summary.
-		// Only explicitly supplied historical/manual counts write the raw table.
 		for _, b := range sub.SubstrateBleaching {
-			if b.BleachedPoints == nil {
-				continue
+			cnt := 0
+			status := "not_recorded"
+			if b.BleachedPoints != nil {
+				cnt = *b.BleachedPoints
+				status = "recorded"
 			}
-			column := "hc_bleached_count"
-			if b.SubstrateCode == "SC" {
-				column = "sc_bleached_count"
+			if cnt < 0 {
+				cnt = 0
 			}
-			if b.SubstrateCode != "HC" && b.SubstrateCode != "SC" {
-				continue
+			if b.SubstrateCode == "HC" {
+				_, err = exec.Exec(ctx, `
+					INSERT INTO substrate_bleaching (transect_id, segment, hc_bleached_count, sc_bleached_count, hc_record_status, sc_record_status)
+					VALUES ($1, $2, $3, 0, $4, 'not_recorded')
+					ON CONFLICT (transect_id, segment) DO UPDATE SET
+						hc_bleached_count = EXCLUDED.hc_bleached_count, hc_record_status=EXCLUDED.hc_record_status
+				`, lineID, b.Segment, cnt, status)
+			} else if b.SubstrateCode == "SC" {
+				_, err = exec.Exec(ctx, `
+					INSERT INTO substrate_bleaching (transect_id, segment, hc_bleached_count, sc_bleached_count, hc_record_status, sc_record_status)
+					VALUES ($1, $2, 0, $3, 'not_recorded', $4)
+					ON CONFLICT (transect_id, segment) DO UPDATE SET
+						sc_bleached_count = EXCLUDED.sc_bleached_count, sc_record_status=EXCLUDED.sc_record_status
+				`, lineID, b.Segment, cnt, status)
 			}
-			_, err = exec.Exec(ctx, fmt.Sprintf(`
-				INSERT INTO substrate_bleaching (transect_id, segment, %s)
-				VALUES ($1,$2,$3)
-				ON CONFLICT (transect_id,segment) DO UPDATE SET %s=EXCLUDED.%s
-			`, column, column, column), lineID, b.Segment, *b.BleachedPoints)
 			if err != nil {
 				return service.ReefCheckSubmissionResult{}, translateError(err)
 			}
@@ -1563,9 +1559,11 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 	var taxa []taxonRecord
 	for taxaRows.Next() {
 		var tr taxonRecord
-		if err := taxaRows.Scan(&tr.id, &tr.group, &tr.nameZH, &tr.nameEN, &tr.sizeClass, &tr.isAggregate, &tr.aggregateOf); err == nil {
-			taxa = append(taxa, tr)
+		if err := taxaRows.Scan(&tr.id, &tr.group, &tr.nameZH, &tr.nameEN, &tr.sizeClass, &tr.isAggregate, &tr.aggregateOf); err != nil {
+			taxaRows.Close()
+			return service.ReefCheckSubmissionResult{}, err
 		}
+		taxa = append(taxa, tr)
 	}
 	taxaRows.Close()
 
@@ -1574,30 +1572,17 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 	}
 
 	findTaxon := func(group, nameEN, sizeClass, localRowID string) int {
-		group = strings.TrimSpace(group)
-		nameEN = strings.TrimSpace(nameEN)
-		sizeClass = strings.TrimSpace(sizeClass)
-		cleanSize := normSize(sizeClass)
-
 		for _, t := range taxa {
-			if !t.isAggregate && t.group == group && strings.EqualFold(t.nameEN, nameEN) && normSize(t.sizeClass) == cleanSize {
+			if t.group == group && !t.isAggregate && strings.EqualFold(t.nameEN, strings.TrimSpace(nameEN)) && normSize(t.sizeClass) == normSize(sizeClass) {
 				return t.id
 			}
 		}
-		if nameEN != "" {
-			txGroup := group
-			if txGroup != "fish" && txGroup != "invert" && txGroup != "rare" {
-				txGroup = "invert"
-			}
-			var newID int
-			err := exec.QueryRow(ctx, `
-				INSERT INTO taxon (taxon_group, name_zh, name_en, size_class, is_active)
-				VALUES ($1::taxon_group, $2, $3, NULLIF($4, ''), true)
-				RETURNING id
-			`, txGroup, nameEN, nameEN, sizeClass).Scan(&newID)
-			if err == nil {
-				taxa = append(taxa, taxonRecord{id: newID, group: txGroup, nameZH: nameEN, nameEN: nameEN, sizeClass: sizeClass})
-				return newID
+		// Named Other rows are local observations, not mandatory future catalog rows.
+		if sub.Format == "reefcheck-web-v4" && localRowID != "" && strings.HasPrefix(nameEN, "Other: ") && strings.TrimSpace(strings.TrimPrefix(nameEN, "Other: ")) != "" {
+			var id int
+			if err := exec.QueryRow(ctx, `INSERT INTO taxon(taxon_group,name_zh,name_en,size_class,is_active) VALUES($1::taxon_group,$2,$3,NULLIF($4,''),false) ON CONFLICT(taxon_group,name_en,(COALESCE(size_class,''))) DO UPDATE SET name_en=EXCLUDED.name_en RETURNING id`, group, strings.TrimSpace(strings.TrimPrefix(nameEN, "Other: ")), nameEN, sizeClass).Scan(&id); err == nil {
+				taxa = append(taxa, taxonRecord{id: id, group: group, nameEN: nameEN, sizeClass: sizeClass})
+				return id
 			}
 		}
 		return 0
@@ -1625,36 +1610,16 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 		}
 		taxonID := findTaxon(obs.TaxonGroup, obs.TaxonNameENLookup, obs.TaxonSizeClassLookup, obs.TaxonLocalRowID)
 		if taxonID == 0 {
-			continue
+			return service.ReefCheckSubmissionResult{}, fmt.Errorf("%w: 未知物种或體長級距 %s (%s)", service.ErrValidation, obs.TaxonNameENLookup, obs.TaxonSizeClassLookup)
 		}
-		_, err = exec.Exec(ctx, `
-			INSERT INTO belt_observation (transect_id, taxon_id, segment, count,record_status,observed_size,notes)
-			VALUES ($1, $2, $3, $4,$5,NULLIF($6,''),NULLIF($7,''))
-			ON CONFLICT (transect_id, taxon_id, segment) DO UPDATE SET
-				count = EXCLUDED.count,record_status=EXCLUDED.record_status,observed_size=EXCLUDED.observed_size,notes=EXCLUDED.notes
-		`, tID, taxonID, obs.Segment, count, status, obs.ObservedSize, obs.Notes)
+		for _, t := range sub.Transects {
+			if t.TransectKey == obs.TransectKey && t.Method == "belt_fish" && strings.EqualFold(obs.TaxonNameENLookup, "Grouper") && ((t.FishSizeMode == "combined" && obs.TaxonSizeClassLookup != "") || (t.FishSizeMode == "split" && obs.TaxonSizeClassLookup == "")) {
+				return service.ReefCheckSubmissionResult{}, fmt.Errorf("%w: 魚類體長模式與觀測列不符", service.ErrValidation)
+			}
+		}
+		_, err = exec.Exec(ctx, `INSERT INTO belt_observation(transect_id,taxon_id,segment,count,record_status,observed_size,notes) VALUES($1,$2,$3,$4,$5,NULLIF($6,''),NULLIF($7,'')) ON CONFLICT(transect_id,taxon_id,segment) DO UPDATE SET count=EXCLUDED.count,record_status=EXCLUDED.record_status,observed_size=EXCLUDED.observed_size,notes=EXCLUDED.notes`, tID, taxonID, obs.Segment, count, status, obs.ObservedSize, obs.Notes)
 		if err != nil {
 			return service.ReefCheckSubmissionResult{}, translateError(err)
-		}
-	}
-
-	for _, m := range []string{"belt_fish", "belt_invert"} {
-		if tID, ok := methodMap[m]; ok && tID > 0 {
-			tg := "fish"
-			if m == "belt_invert" {
-				tg = "invert"
-			}
-			_, _ = exec.Exec(ctx, `
-				INSERT INTO belt_observation (transect_id, taxon_id, segment, count,record_status)
-				SELECT $1, agg.id, b.segment, CASE WHEN COUNT(b.count)=COUNT(*) THEN SUM(b.count)::int ELSE NULL END,
-				 CASE WHEN COUNT(b.count)=COUNT(*) THEN 'recorded' ELSE 'not_recorded' END
-				FROM taxon agg
-				JOIN taxon member ON member.aggregate_of = agg.aggregate_of AND member.is_aggregate = false
-				JOIN belt_observation b ON b.transect_id = $1 AND b.taxon_id = member.id
-				WHERE agg.is_aggregate = true AND agg.taxon_group = $2::taxon_group
-				GROUP BY agg.id, b.segment
-				ON CONFLICT (transect_id, taxon_id, segment) DO UPDATE SET count = EXCLUDED.count,record_status=EXCLUDED.record_status
-			`, tID, tg)
 		}
 	}
 
@@ -1677,39 +1642,18 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 		var impacts []impactRecord
 		for impactRows.Next() {
 			var ir impactRecord
-			if err := impactRows.Scan(&ir.id, &ir.group, &ir.nameZH, &ir.nameEN, &ir.valueType); err == nil {
-				impacts = append(impacts, ir)
+			if err := impactRows.Scan(&ir.id, &ir.group, &ir.nameZH, &ir.nameEN, &ir.valueType); err != nil {
+				impactRows.Close()
+				return service.ReefCheckSubmissionResult{}, err
 			}
+			impacts = append(impacts, ir)
 		}
 		impactRows.Close()
 
 		findImpact := func(group, nameEN string) int {
-			group = strings.TrimSpace(group)
-			nameEN = strings.TrimSpace(nameEN)
 			for _, imp := range impacts {
-				if imp.group == group && strings.EqualFold(imp.nameEN, nameEN) {
+				if imp.group == group && (strings.EqualFold(imp.nameEN, nameEN) || strings.EqualFold(imp.nameZH, nameEN)) {
 					return imp.id
-				}
-			}
-			for _, imp := range impacts {
-				if imp.group == group && strings.EqualFold(imp.nameZH, nameEN) {
-					return imp.id
-				}
-			}
-			if nameEN != "" {
-				impGroup := group
-				if impGroup != "coral_damage" && impGroup != "trash" && impGroup != "bleaching" && impGroup != "disease" {
-					impGroup = "coral_damage"
-				}
-				var newID int
-				err := exec.QueryRow(ctx, `
-					INSERT INTO impact_type (impact_group, name_zh, name_en, value_type, has_raw_count, is_active)
-					VALUES ($1::impact_group, $2, $3, 'count'::impact_value_type, true, true)
-					RETURNING id
-				`, impGroup, nameEN, nameEN).Scan(&newID)
-				if err == nil {
-					impacts = append(impacts, impactRecord{id: newID, group: impGroup, nameZH: nameEN, nameEN: nameEN, valueType: "count"})
-					return newID
 				}
 			}
 			return 0
@@ -1724,24 +1668,23 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 			}
 			impactID := findImpact(imp.ImpactGroup, imp.ImpactNameENLookup)
 			if impactID == 0 {
-				continue
+				return service.ReefCheckSubmissionResult{}, fmt.Errorf("%w: 未知環境衝擊項目", service.ErrValidation)
 			}
-			_, err = exec.Exec(ctx, `
-				INSERT INTO impact_observation (transect_id, impact_type_id, segment, raw_value,record_status)
-				VALUES ($1, $2, $3, $4,$5)
-				ON CONFLICT (transect_id, impact_type_id, segment) DO UPDATE SET
-					raw_value = EXCLUDED.raw_value,record_status=EXCLUDED.record_status
-			`, invertID, impactID, imp.Segment, rawVal, status)
+			err = upsertImpactObservation(ctx, exec, invertID, impactID, imp.Segment, rawVal, status)
 			if err != nil {
 				return service.ReefCheckSubmissionResult{}, translateError(err)
 			}
 		}
 	}
 
+	if err := validateStoredEvent(ctx, exec, finalEventID); err != nil {
+		return service.ReefCheckSubmissionResult{}, err
+	}
+
 	receiptID := fmt.Sprintf("RC-%s-%d", strings.ReplaceAll(sub.Event.SurveyDate, "-", ""), eventDBID)
-	reviewStatus := "submitted"
+	reviewStatus := "draft"
 	if sub.MissingReason != "" || len(sub.ValidationIssues) > 0 {
-		reviewStatus = "needs_review"
+		reviewStatus = "draft"
 	}
 
 	if tx, ok := exec.(pgx.Tx); ok {
@@ -1766,4 +1709,21 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 		ReviewStatus:      reviewStatus,
 		SavedAt:           time.Now().UTC().Format(time.RFC3339),
 	}, nil
+}
+
+func upsertBeltObservation(ctx context.Context, db DBTX, transect, taxon, segment int, count any, status string) error {
+	if status == "not_recorded" {
+		count = nil
+	}
+	_, err := db.Exec(ctx, `INSERT INTO belt_observation(transect_id,taxon_id,segment,count,record_status) VALUES($1,$2,$3,$4,$5)
+ ON CONFLICT(transect_id,taxon_id,segment) DO UPDATE SET count=EXCLUDED.count,record_status=EXCLUDED.record_status`, transect, taxon, segment, count, status)
+	return err
+}
+func upsertImpactObservation(ctx context.Context, db DBTX, transect, impact, segment int, value any, status string) error {
+	if status == "not_recorded" {
+		value = nil
+	}
+	_, err := db.Exec(ctx, `INSERT INTO impact_observation(transect_id,impact_type_id,segment,raw_value,record_status) VALUES($1,$2,$3,$4,$5)
+ ON CONFLICT(transect_id,impact_type_id,segment) DO UPDATE SET raw_value=EXCLUDED.raw_value,record_status=EXCLUDED.record_status`, transect, impact, segment, value, status)
+	return err
 }

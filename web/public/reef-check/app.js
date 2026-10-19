@@ -2,6 +2,7 @@
 /* Offline, framework-free prototype. All persisted values are escaped on render. */
 const C = window.REEF;
 const DEBUG = new URLSearchParams(window.location.search).get('debug')==='1';
+if(!DEBUG&&window.location.protocol!=='file:')C.sites=[];
 const KEY = DEBUG?'teia-reefcheck-debug-records-v1':'teia-reefcheck-records-v2';
 const $ = s => document.querySelector(s);
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -143,7 +144,7 @@ function rowsFor(k){const base=k==='fish'?fishRows():C[k].map((r,i)=>({id:String
 function fishRows(){
   const rows=C.fish.map((r,i)=>({id:String(i),name:r[0],zh:r[1],size:r[2],type:'count',group:'fish'}));
   if(state.fishLengthMode==='combined')return [...rows.filter(r=>r.name!=='Grouper'),{id:'grouper-combined',name:'Grouper',zh:'石斑魚',size:'',type:'count',group:'fish'}];
-  return rows;
+  return rows.filter(r=>r.name!=='Grouper'||r.size);
 }
 function rowApplicable(k,id){return !(state.notApplicable[k]||[]).includes(id);}
 function applicableRows(k){return rowsFor(k).filter(r=>rowApplicable(k,r.id));}
@@ -382,6 +383,8 @@ function payload(draft=false){
     transects:methodList().map(k=>({
       transect_key:key(k),
       event_id:id,
+      fish_size_mode:k==='fish'?state.fishLengthMode:'',
+      classify_hard_coral:k==='line'&&state.coralMorphology==='classified',
       method:{line:'line',fish:'belt_fish',invert:'belt_invert'}[k],
       fish_length_mode:k==='fish'&&state.fishLengthMode?state.fishLengthMode:undefined,
       coral_morphology:k==='line'?state.coralMorphology:undefined,
@@ -423,7 +426,8 @@ function payload(draft=false){
       transect_key:key('line'),
       substrate_code:code,
       segment:s+1,
-      bleached_points:asNumber(state.bleach[`${code}:${s+1}`])
+      record_status:state.bleach[`${code}:${s+1}`]==='NA'?'not_recorded':'recorded',
+ bleached_points:asNumber(state.bleach[`${code}:${s+1}`])
     })));
   }
   for(const k of ['fish','invert','rare'])if(state.methods.includes(k==='rare'?'invert':k))
@@ -584,11 +588,11 @@ async function initApp(){
   }catch(_){}
 
   try{
-    const res=await fetch('/api/public/reef-check/sites',{credentials:'include'});
+    const res=await fetch('/api/public/reef-check/entry-sites',{credentials:'include'});
     if(res.ok){
       const dbSites=await res.json();
       if(Array.isArray(dbSites)&&dbSites.length){
-        C.sites=dbSites.map(s=>[
+        C.sites=dbSites.filter(s=>s.is_active).map(s=>[
           s.region||'其他樣點',
           s.name_zh,
           s.name_en||s.name_zh,

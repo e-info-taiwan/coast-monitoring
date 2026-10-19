@@ -29,7 +29,9 @@
 
 新送出格式 `reefcheck-web-v4`，新增 `activity_code`、`entry_metadata`、`rkc_bleaching_note`、`other_damage_note`、`bleaching_mode`、transect `coral_morphology`，及 rare observation `observed_size`／`notes`。後端保存原始欄位、NA 狀態、draft metadata；同一氣瓶的重複新送出不會覆寫既有來源。
 
-本機新增 migration `000009_volunteer_entry_details.sql`，依賴先前 `000008`。此 checkout 與 PRD 引述已驗證的其他後端版本不是同一個部署狀態；本次沒有對既有資料庫套 migration 或部署。正式活動／資料庫往返還需在實際 PostgreSQL 驗證。
+2026-10-19 已整合遠端的公開展示、發布審核及完整手板檢查。新增 migration 順延為 `000014_point_bleaching.sql`、`000015_volunteer_entry_details.sql`、`000016_point_bleaching_contract.sql`，不改動遠端已存在的 000008–000013。魚類體長模式沿用資料庫 `fish_size_mode`，API 的 `fish_length_mode` 會核對後對應同一欄位；發布狀態及缺值原因統一以 `event` 為準，不在 metadata 另存第二份。白化統計依送出版本選用逐格標記或歷史原始總數，發布檢查不要求新填報重填手動白化附表。
+
+本次未對既有資料庫套 migration，也未手動部署。沒有本機 PostgreSQL 測試連線時，資料庫回歸會略過，不能視為正式活動／資料庫往返已驗證。
 
 ## 驗證
 

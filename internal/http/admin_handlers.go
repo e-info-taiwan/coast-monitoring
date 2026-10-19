@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -491,13 +492,18 @@ func requireAdminUUID(w http.ResponseWriter, r *http.Request, configured bool) (
 
 func decodeAdminJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 	r.Body = http.MaxBytesReader(w, r.Body, maxAdminRequestBodyBytes)
-	if err := json.NewDecoder(r.Body).Decode(dst); err != nil {
+	decoder := json.NewDecoder(r.Body)
+	if err := decoder.Decode(dst); err != nil {
 		var maxBytesErr *http.MaxBytesError
 		if errors.As(err, &maxBytesErr) {
 			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
 			return false
 		}
 		writeError(w, http.StatusBadRequest, "invalid json request")
+		return false
+	}
+	if err := decoder.Decode(new(any)); err != io.EOF {
+		writeError(w, http.StatusBadRequest, "only one JSON request is allowed")
 		return false
 	}
 	return true

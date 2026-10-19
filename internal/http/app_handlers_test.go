@@ -343,7 +343,7 @@ func TestListPublicReefCheckSitesAndConfig(t *testing.T) {
 	})
 
 	// Test sites
-	reqSites := httptest.NewRequest(http.MethodGet, "/api/public/reef-check/sites", nil)
+	reqSites := httptest.NewRequest(http.MethodGet, "/api/public/reef-check/entry-sites", nil)
 	recSites := httptest.NewRecorder()
 	router.ServeHTTP(recSites, reqSites)
 	if recSites.Code != http.StatusOK {

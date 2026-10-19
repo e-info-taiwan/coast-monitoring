@@ -1,3 +1,4 @@
+// Legacy preview helpers; production statistics come from database summary views.
 // Summaries use only recorded values. A missing segment is never an observed zero.
 export function statistics(values) {
   const present = values.filter(v => v !== null && v !== undefined)

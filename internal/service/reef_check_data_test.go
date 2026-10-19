@@ -72,14 +72,9 @@ func TestReefDataLineCodesAndNullableMetadata(t *testing.T) {
 
 func TestReefCheckSubmissionValidatesNewEntryContract(t *testing.T) {
 	base := func() ReefCheckSurveySubmission {
-		return ReefCheckSurveySubmission{
-			Event:     ReefCheckEventInput{SurveyDate: "2026-10-02", DepthM: 5},
-			Transects: []ReefCheckTransectInput{{Method: "line"}},
-			SubstratePoints: []ReefCheckSubstratePointInput{
-				{Segment: 1, PositionM: 0, SubstrateCode: "OT", SubstrateLayer: "surface"},
-				{Segment: 1, PositionM: 0.5, SubstrateCode: "HC-a", SubstrateLayer: "surface"},
-			},
-		}
+		s := validSubmission()
+		s.SubstratePoints[0].SubstrateCode = "OT"
+		return s
 	}
 
 	validBase := base()
@@ -106,12 +101,15 @@ func TestReefCheckSubmissionValidatesNewEntryContract(t *testing.T) {
 	pendingFishMode := base()
 	pendingFishMode.Transects = []ReefCheckTransectInput{{Method: "belt_fish"}}
 	pendingFishMode.SubstratePoints = nil
-	if err := pendingFishMode.Validate(); err != nil {
-		t.Fatalf("legacy fish submission without confirmed mode rejected: %v", err)
+	if err := pendingFishMode.Validate(); err == nil {
+		t.Fatal("incomplete fish submission accepted")
 	}
 	validFish := base()
-	validFish.Transects = []ReefCheckTransectInput{{Method: "belt_fish", FishLengthMode: "split"}}
+	validFish.Transects = []ReefCheckTransectInput{{TransectKey: "fish", Method: "belt_fish", FishSizeMode: "split", FishLengthMode: "split", Recorders: []string{"Recorder"}}}
 	validFish.SubstratePoints = nil
+	for seg := 1; seg <= 4; seg++ {
+		validFish.BeltObservations = append(validFish.BeltObservations, ReefCheckBeltObservationInput{TransectKey: "fish", TaxonGroup: "fish", TaxonNameENLookup: "Butterflyfish", Segment: seg, Count: dataPtr(0), RecordStatus: "recorded"})
+	}
 	if err := validFish.Validate(); err != nil {
 		t.Fatalf("fish split mode rejected: %v", err)
 	}
@@ -122,9 +120,14 @@ func TestReefCheckSubmissionValidatesNewEntryContract(t *testing.T) {
 	}
 
 	validImpact := base()
-	validImpact.Transects = []ReefCheckTransectInput{{Method: "belt_invert"}}
+	validImpact.Transects = []ReefCheckTransectInput{{TransectKey: "invert", Method: "belt_invert", Recorders: []string{"Recorder"}}}
 	validImpact.SubstratePoints = nil
-	validImpact.ImpactObservations = []ReefCheckImpactObservationInput{{ImpactGroup: "coral_damage", ImpactValueType: "count", Segment: 1, RawValue: dataPtr(4.0)}}
+	for seg := 1; seg <= 4; seg++ {
+		for _, group := range []string{"invert", "rare"} {
+			validImpact.BeltObservations = append(validImpact.BeltObservations, ReefCheckBeltObservationInput{TransectKey: "invert", TaxonGroup: group, TaxonNameENLookup: "Fixture", Segment: seg, Count: dataPtr(0), RecordStatus: "recorded"})
+		}
+		validImpact.ImpactObservations = append(validImpact.ImpactObservations, ReefCheckImpactObservationInput{TransectKey: "invert", ImpactGroup: "coral_damage", ImpactNameENLookup: "Coral damage: other", ImpactValueType: "count", Segment: seg, RawValue: dataPtr(4.0)})
+	}
 	if err := validImpact.Validate(); err != nil {
 		t.Fatalf("raw coral-damage count rejected: %v", err)
 	}

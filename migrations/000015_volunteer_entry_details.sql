@@ -42,8 +42,6 @@ CREATE TABLE IF NOT EXISTS reef_check_entry_metadata (
   air_temperature_c numeric,
   latitude numeric,
   longitude numeric,
-  missing_reason text,
-  publication_status text NOT NULL DEFAULT 'draft' CHECK (publication_status IN ('draft','published','archived')),
   CHECK ((latitude IS NULL) = (longitude IS NULL)),
   CHECK (latitude BETWEEN -90 AND 90 AND longitude BETWEEN -180 AND 180)
 );

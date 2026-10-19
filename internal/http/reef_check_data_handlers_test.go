@@ -235,7 +235,7 @@ func TestCreateReefDataEvent(t *testing.T) {
 	runner := &dataMutationStub{services: AdminMutationServices{ReefData: stub, AuditLogs: audit}}
 	h := &AdminHandlers{ReefData: stub, Mutations: runner}
 
-	body := `{"site_id":1,"survey_date":"2026-06-01","depth_m":5,"methods":["line","belt_fish"]}`
+	body := `{"site_id":1,"survey_date":"2026-06-01","event_time":"09:30","depth_m":5,"methods":["line","belt_fish"],"fish_size_mode":"split"}`
 	req := dataHandlerRequest("POST", "/api/admin/reef-check-data/events", body, policy.RoleAdmin)
 	w := httptest.NewRecorder()
 	h.CreateReefDataEvent(w, req)

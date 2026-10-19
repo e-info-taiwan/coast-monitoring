@@ -1,6 +1,8 @@
 # Coast Monitoring
 
-Coast Monitoring is a single Go service backed by PostgreSQL. The server exposes admin APIs under `/api/admin`, app-facing APIs under `/api/app`, authentication endpoints, and the static admin UI from `web/admin`.
+Coast Monitoring is a single Go service backed by PostgreSQL. The server exposes admin APIs under `/api/admin`, app-facing APIs under `/api/app`, authentication endpoints, the public map and charts from `web/site`, and the admin UI from `web/admin`.
+
+See [the PRD implementation audit](docs/prd-implementation-audit.md) for new public features, publication controls, migrations, validation evidence, and outstanding customer inputs.
 
 ## Reef Check v1.7 imported observations
 
@@ -95,8 +97,8 @@ For the first deployment or a new local database, set `BOOTSTRAP_ADMIN_EMAIL` to
 - Unknown `/api/*` routes return `404` instead of falling back to the static admin UI.
 
 The tablet-first Reef Check volunteer field form is served at `/public/reef-check/`.
-It currently keeps drafts in the browser and demonstrates the final save receipt without
-writing the completed survey to the database.
+It keeps drafts in the browser and submits validated observations as reviewable database drafts.
+Only approved, published events appear on the public map and charts.
 
 See [docs/api.md](docs/api.md) for request/response examples and the FE server integration pattern.
 

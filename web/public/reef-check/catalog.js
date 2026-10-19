@@ -9,7 +9,7 @@ window.REEF = {
   },
   fish: [
     ['Butterflyfish','蝴蝶魚',''],['Haemulidae','石鱸',''],['Snapper','笛鯛',''],['Barramundi cod','老鼠斑',''],['Humphead wrasse','蘇眉',''],['Bumphead parrotfish','龍頭鸚哥',''],['Parrotfish','鸚哥魚','>20cm'],['Moray eel','裸胸鯙',''],
-    ['Grouper','石斑魚','<30cm'],['Grouper','石斑魚','30-40 cm'],['Grouper','石斑魚','40-50 cm'],['Grouper','石斑魚','50-60 cm'],['Grouper','石斑魚','>60 cm']
+    ['Grouper','石斑魚','<30cm'],['Grouper','石斑魚','30-40 cm'],['Grouper','石斑魚','40-50 cm'],['Grouper','石斑魚','50-60 cm'],['Grouper','石斑魚','>60 cm'],['Grouper','石斑魚（不分體長）','']
   ],
   invert: [
     ['Banded coral shrimp','櫻花蝦',''],['Diadema','魔鬼海膽',''],['Pencil urchin','鉛筆海膽',''],['Collector urchin','馬糞海膽',''],['Sea cucumber','海參',''],['Crown-of-thorns','棘冠海星',''],['Triton','大法螺',''],['Lobster','龍蝦',''],

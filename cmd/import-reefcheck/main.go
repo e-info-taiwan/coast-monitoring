@@ -1,12 +1,15 @@
 package main
 
 import (
+	"coast-monitoring/internal/service"
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -19,8 +22,10 @@ import (
 
 func main() {
 	var (
-		csvDir = flag.String("csv-dir", "", "Path to the csv directory containing the import files")
-		dbURL  = flag.String("db-url", "", "PostgreSQL database URL or connection string")
+		csvDir          = flag.String("csv-dir", "", "Path to the csv directory containing the import files")
+		dryRun          = flag.Bool("dry-run", false, "Validate all source rows in a transaction and roll back")
+		substrateFormat = flag.String("substrate-format", "canonical", "canonical, entry0, or legacy10; numeric 0/10 require an explicit convention")
+		dbURL           = flag.String("db-url", "", "PostgreSQL database URL or connection string")
 	)
 	flag.Parse()
 
@@ -50,14 +55,36 @@ func main() {
 	}
 	log.Printf("connected to database successfully")
 
+	hash, snapshot, err := importSourceSnapshot(*csvDir)
+	if err != nil {
+		log.Fatalf("read source snapshot: %v", err)
+	}
+	var attemptID int
+	if err = pool.QueryRow(ctx, `INSERT INTO reef_import_attempt(source_sha256,source_snapshot,source_format,status) VALUES($1,$2::jsonb,$3,'validating') RETURNING id`, hash, snapshot, *substrateFormat).Scan(&attemptID); err != nil {
+		log.Fatalf("record import attempt (apply migrations first): %v", err)
+	}
 	start := time.Now()
-	if err := runImport(ctx, pool, *csvDir); err != nil {
-		log.Fatalf("import failed: %v", err)
+	importErr := runImport(ctx, pool, *csvDir, *dryRun, *substrateFormat)
+	status := "completed"
+	if *dryRun {
+		status = "validated"
+	}
+	message := ""
+	if importErr != nil {
+		status = "failed"
+		message = importErr.Error()
+	}
+	report, _ := json.Marshal(map[string]any{"dry_run": *dryRun, "duration_ms": time.Since(start).Milliseconds(), "error": message})
+	if _, err = pool.Exec(ctx, `UPDATE reef_import_attempt SET status=$2,report=$3::jsonb,updated_at=now() WHERE id=$1`, attemptID, status, report); err != nil {
+		log.Fatalf("save import result: %v", err)
+	}
+	if importErr != nil {
+		log.Fatalf("import failed: %v", importErr)
 	}
 	log.Printf("=== Import finished successfully in %v ===", time.Since(start))
 }
 
-func runImport(ctx context.Context, pool *pgxpool.Pool, csvDir string) error {
+func runImport(ctx context.Context, pool *pgxpool.Pool, csvDir string, dryRun bool, substrateFormat string) error {
 	tx, err := pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin transaction: %w", err)
@@ -136,7 +163,7 @@ func runImport(ctx context.Context, pool *pgxpool.Pool, csvDir string) error {
 
 	// 8. Observations
 	log.Printf("--> 8/8: Importing observation tables ...")
-	spCount, err := importSubstratePoints(ctx, tx, filepath.Join(csvDir, "substrate_point.csv"), transectMap, substrateCodes)
+	spCount, err := importSubstratePoints(ctx, tx, filepath.Join(csvDir, "substrate_point.csv"), transectMap, substrateCodes, substrateFormat)
 	if err != nil {
 		return fmt.Errorf("import substrate points: %w", err)
 	}
@@ -160,6 +187,10 @@ func runImport(ctx context.Context, pool *pgxpool.Pool, csvDir string) error {
 	}
 	log.Printf("    Impact observations upserted: %d", ioCount)
 
+	if dryRun {
+		log.Print("validation successful; all changes rolled back")
+		return nil
+	}
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit transaction: %w", err)
 	}
@@ -250,21 +281,7 @@ func importSites(ctx context.Context, tx pgx.Tx, path string) (map[string]int, e
 			}
 		} else if err != nil {
 			return nil, fmt.Errorf("query site %s: %w", nameEn, err)
-		} else {
-			// Update without overwriting non-empty values with empty
-			_, err = tx.Exec(ctx, `
-				UPDATE site SET
-					name_zh = COALESCE(NULLIF($1, ''), name_zh),
-					region = COALESCE(NULLIF($2, ''), region),
-					county = COALESCE(NULLIF($3, ''), county),
-					location = COALESCE(NULLIF($4, ''), location),
-					latitude = COALESCE($5, latitude),
-					longitude = COALESCE($6, longitude)
-				WHERE name_en = $7
-			`, nameZh, region, county, location, lat, lon, nameEn)
-			if err != nil {
-				return nil, fmt.Errorf("update site %s: %w", nameEn, err)
-			}
+
 		}
 	}
 
@@ -359,11 +376,7 @@ func importDivers(ctx context.Context, tx pgx.Tx, path string) (map[string]int, 
 		_, err := tx.Exec(ctx, `
 			INSERT INTO diver (diver_key, name_zh, name_en, reef_check_code, is_active)
 			VALUES ($1, NULLIF($2, ''), NULLIF($3, ''), NULLIF($4, ''), $5)
-			ON CONFLICT (diver_key) DO UPDATE SET
-				name_zh = COALESCE(EXCLUDED.name_zh, diver.name_zh),
-				name_en = COALESCE(EXCLUDED.name_en, diver.name_en),
-				reef_check_code = COALESCE(EXCLUDED.reef_check_code, diver.reef_check_code),
-				is_active = EXCLUDED.is_active
+			ON CONFLICT (diver_key) DO NOTHING
 		`, diverKey, nameZh, nameEn, code, isActive)
 		if err != nil {
 			return nil, fmt.Errorf("upsert diver %s: %w", diverKey, err)
@@ -407,12 +420,12 @@ func importSurveys(ctx context.Context, tx pgx.Tx, path string, siteMap map[stri
 
 		var surveyID int
 		err := tx.QueryRow(ctx, `
-			INSERT INTO survey (site_id, start_date, end_date, label)
-			VALUES ($1, $2, $3, NULLIF($4, ''))
-			ON CONFLICT (site_id, start_date) DO UPDATE SET
-				end_date = EXCLUDED.end_date,
-				label = COALESCE(EXCLUDED.label, survey.label)
-			RETURNING id
+            WITH inserted AS (
+                INSERT INTO survey (site_id, start_date, end_date, label)
+                VALUES ($1, $2, $3, NULLIF($4, ''))
+                ON CONFLICT (site_id, start_date) DO NOTHING RETURNING id
+            ) SELECT id FROM inserted UNION ALL
+              SELECT id FROM survey WHERE site_id = $1 AND start_date = $2 LIMIT 1
 		`, siteID, startDate, endDate, label).Scan(&surveyID)
 		if err != nil {
 			return nil, fmt.Errorf("upsert survey %s: %w", surveyKey, err)
@@ -450,11 +463,7 @@ func importEvents(ctx context.Context, tx pgx.Tx, path string, surveyMap map[str
 		_, err = tx.Exec(ctx, `
 			INSERT INTO event (survey_id, event_id, survey_date, event_time, depth_m)
 			VALUES ($1, $2, $3, $4, $5)
-			ON CONFLICT (event_id) DO UPDATE SET
-				survey_id = EXCLUDED.survey_id,
-				survey_date = EXCLUDED.survey_date,
-				event_time = EXCLUDED.event_time,
-				depth_m = EXCLUDED.depth_m
+			ON CONFLICT (event_id) DO NOTHING
 		`, surveyID, eventID, surveyDate, eventTime, depthM)
 		if err != nil {
 			return nil, fmt.Errorf("upsert event %s: %w", eventID, err)
@@ -512,16 +521,12 @@ func importTransects(ctx context.Context, tx pgx.Tx, path string) (map[string]in
 
 		var transectID int
 		err := tx.QueryRow(ctx, `
-			INSERT INTO transect (event_id, method, start_time, water_temp_c, visibility_min_m, visibility_max_m, comments, rkc_bleaching_note)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-			ON CONFLICT (event_id, method) DO UPDATE SET
-				start_time = EXCLUDED.start_time,
-				water_temp_c = EXCLUDED.water_temp_c,
-				visibility_min_m = EXCLUDED.visibility_min_m,
-				visibility_max_m = EXCLUDED.visibility_max_m,
-				comments = EXCLUDED.comments,
-				rkc_bleaching_note = EXCLUDED.rkc_bleaching_note
-			RETURNING id
+            WITH inserted AS (
+                INSERT INTO transect (event_id, method, start_time, water_temp_c, visibility_min_m, visibility_max_m, comments, rkc_bleaching_note)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (event_id, method) DO NOTHING RETURNING id
+            ) SELECT id FROM inserted UNION ALL
+              SELECT id FROM transect WHERE event_id = $1 AND method = $2 LIMIT 1
 		`, eventID, method, startTime, waterTemp, visMin, visMax, comments, rkcNote).Scan(&transectID)
 		if err != nil {
 			return nil, fmt.Errorf("upsert transect %s: %w", transectKey, err)
@@ -564,7 +569,7 @@ func importParticipants(ctx context.Context, tx pgx.Tx, path string, transectMap
 	return count, nil
 }
 
-func importSubstratePoints(ctx context.Context, tx pgx.Tx, path string, transectMap map[string]int, substrateCodes map[string]bool) (int, error) {
+func importSubstratePoints(ctx context.Context, tx pgx.Tx, path string, transectMap map[string]int, substrateCodes map[string]bool, sourceFormat string) (int, error) {
 	rows, err := readCSV(path)
 	if err != nil {
 		return 0, err
@@ -584,9 +589,18 @@ func importSubstratePoints(ctx context.Context, tx pgx.Tx, path string, transect
 			if !ok {
 				return 0, fmt.Errorf("transect %q not found in substrate_point", transectKey)
 			}
-			segment, _ := strconv.Atoi(r["segment"])
-			pos, _ := strconv.ParseFloat(r["position_m"], 64)
-			code := r["substrate_code"]
+			segment, err := strconv.Atoi(r["segment"])
+			if err != nil || segment < 1 || segment > 4 {
+				return 0, fmt.Errorf("invalid segment %q", r["segment"])
+			}
+			pos, err := strconv.ParseFloat(r["position_m"], 64)
+			if err != nil || math.IsNaN(pos) || math.IsInf(pos, 0) || pos < float64((segment-1)*25) || pos > float64((segment-1)*25)+19.5 || pos*2 != math.Trunc(pos*2) {
+				return 0, fmt.Errorf("invalid position %q", r["position_m"])
+			}
+			code, err := normalizeImportSubstrate(r["substrate_code"], sourceFormat)
+			if err != nil {
+				return 0, err
+			}
 			if !substrateCodes[code] {
 				return 0, fmt.Errorf("invalid substrate_code %q", code)
 			}
@@ -598,9 +612,7 @@ func importSubstratePoints(ctx context.Context, tx pgx.Tx, path string, transect
 			batch.Queue(`
 				INSERT INTO substrate_point (transect_id, segment, position_m, substrate_layer, substrate_code)
 				VALUES ($1, $2, $3, $4, $5)
-				ON CONFLICT (transect_id, position_m, substrate_layer) DO UPDATE SET
-					segment = EXCLUDED.segment,
-					substrate_code = EXCLUDED.substrate_code
+				ON CONFLICT (transect_id, position_m, substrate_layer) DO NOTHING
 			`, transectID, segment, pos, layer, code)
 		}
 
@@ -631,17 +643,24 @@ func importSubstrateBleaching(ctx context.Context, tx pgx.Tx, path string, trans
 		if !ok {
 			return 0, fmt.Errorf("transect %q not found in substrate_bleaching", transectKey)
 		}
-		segment, _ := strconv.Atoi(r["segment"])
-		hcBleached, _ := strconv.Atoi(r["hc_bleached_count"])
-		scBleached, _ := strconv.Atoi(r["sc_bleached_count"])
+		segment, err := strconv.Atoi(r["segment"])
+		if err != nil || segment < 1 || segment > 4 {
+			return 0, fmt.Errorf("invalid segment %q", r["segment"])
+		}
+		hcBleached, hcStatus, err := parseImportCount(r["hc_bleached_count"], r["hc_record_status"])
+		if err != nil {
+			return 0, err
+		}
+		scBleached, scStatus, err := parseImportCount(r["sc_bleached_count"], r["sc_record_status"])
+		if err != nil {
+			return 0, err
+		}
 
 		batch.Queue(`
-			INSERT INTO substrate_bleaching (transect_id, segment, hc_bleached_count, sc_bleached_count)
-			VALUES ($1, $2, $3, $4)
-			ON CONFLICT (transect_id, segment) DO UPDATE SET
-				hc_bleached_count = EXCLUDED.hc_bleached_count,
-				sc_bleached_count = EXCLUDED.sc_bleached_count
-		`, transectID, segment, hcBleached, scBleached)
+			INSERT INTO substrate_bleaching (transect_id, segment, hc_bleached_count, sc_bleached_count,hc_record_status,sc_record_status)
+			VALUES ($1, $2, $3, $4,$5,$6)
+			ON CONFLICT (transect_id, segment) DO NOTHING
+		`, transectID, segment, hcBleached, scBleached, hcStatus, scStatus)
 	}
 
 	br := tx.SendBatch(ctx, batch)
@@ -685,15 +704,20 @@ func importBeltObservations(ctx context.Context, tx pgx.Tx, path string, transec
 			if !ok {
 				return 0, fmt.Errorf("taxon %q not found in belt_observation", key)
 			}
-			segment, _ := strconv.Atoi(r["segment"])
-			count, _ := strconv.Atoi(r["count"])
+			segment, err := strconv.Atoi(r["segment"])
+			if err != nil || segment < 1 || segment > 4 {
+				return 0, fmt.Errorf("invalid segment %q", r["segment"])
+			}
+			count, status, err := parseImportCount(r["count"], r["record_status"])
+			if err != nil {
+				return 0, err
+			}
 
 			batch.Queue(`
-				INSERT INTO belt_observation (transect_id, taxon_id, segment, count)
-				VALUES ($1, $2, $3, $4)
-				ON CONFLICT (transect_id, taxon_id, segment) DO UPDATE SET
-					count = EXCLUDED.count
-			`, transectID, taxonID, segment, count)
+				INSERT INTO belt_observation (transect_id, taxon_id, segment, count,record_status)
+				VALUES ($1, $2, $3, $4,$5)
+				ON CONFLICT (transect_id, taxon_id, segment) DO NOTHING
+			`, transectID, taxonID, segment, count, status)
 		}
 
 		br := tx.SendBatch(ctx, batch)
@@ -737,18 +761,32 @@ func importImpactObservations(ctx context.Context, tx pgx.Tx, path string, trans
 			if !ok {
 				return 0, fmt.Errorf("impact %q not found in impact_observation", key)
 			}
-			segment, _ := strconv.Atoi(r["segment"])
-			rawValue, err := strconv.ParseFloat(r["raw_value"], 64)
-			if err != nil {
-				return 0, fmt.Errorf("parse raw_value %q: %w", r["raw_value"], err)
+			segment, err := strconv.Atoi(r["segment"])
+			if err != nil || segment < 1 || segment > 4 {
+				return 0, fmt.Errorf("invalid segment %q", r["segment"])
+			}
+			status := "recorded"
+			rawValue := 0.0
+			if r["raw_value"] == "NA" || r["raw_value"] == "-" || r["record_status"] == "not_recorded" {
+				status = "not_recorded"
+			} else {
+				rawValue, err = strconv.ParseFloat(r["raw_value"], 64)
+				if err != nil || math.IsNaN(rawValue) || math.IsInf(rawValue, 0) || rawValue < 0 {
+					return 0, fmt.Errorf("invalid raw value %q", r["raw_value"])
+				}
+				if (group == "trash" || group == "coral_damage") && math.Trunc(rawValue) != rawValue {
+					return 0, fmt.Errorf("impact count must be integer")
+				}
+				if (group == "bleaching" || group == "disease") && rawValue > 100 {
+					return 0, fmt.Errorf("percent must be 0–100")
+				}
 			}
 
 			batch.Queue(`
-				INSERT INTO impact_observation (transect_id, impact_type_id, segment, raw_value)
-				VALUES ($1, $2, $3, $4)
-				ON CONFLICT (transect_id, impact_type_id, segment) DO UPDATE SET
-					raw_value = EXCLUDED.raw_value
-			`, transectID, impactID, segment, rawValue)
+				INSERT INTO impact_observation (transect_id, impact_type_id, segment, raw_value,record_status)
+				VALUES ($1, $2, $3, $4,$5)
+				ON CONFLICT (transect_id, impact_type_id, segment) DO NOTHING
+			`, transectID, impactID, segment, rawValue, status)
 		}
 
 		br := tx.SendBatch(ctx, batch)
@@ -763,4 +801,37 @@ func importImpactObservations(ctx context.Context, tx pgx.Tx, path string, trans
 		}
 	}
 	return total, nil
+}
+
+func normalizeImportSubstrate(code, format string) (string, error) {
+	code = strings.TrimSpace(code)
+	switch format {
+	case "entry0":
+		return service.NormalizeEntrySubstrate(code), nil
+	case "legacy10":
+		if code == "0" {
+			return "", fmt.Errorf("legacy 0 is ambiguous; use explicit canonical NA or OT")
+		}
+		if code == "10" {
+			return "OT", nil
+		}
+		return service.NormalizeEntrySubstrate(code), nil
+	case "canonical":
+		if _, err := strconv.Atoi(code); err == nil {
+			return "", fmt.Errorf("numeric substrate %q requires --substrate-format entry0 or legacy10", code)
+		}
+		return code, nil
+	default:
+		return "", fmt.Errorf("unknown substrate source convention %q", format)
+	}
+}
+func parseImportCount(value, status string) (int, string, error) {
+	if value == "NA" || value == "-" || status == "not_recorded" {
+		return 0, "not_recorded", nil
+	}
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 || n > 2147483647 {
+		return 0, "", fmt.Errorf("invalid count %q; missing data must be explicit NA", value)
+	}
+	return n, "recorded", nil
 }
