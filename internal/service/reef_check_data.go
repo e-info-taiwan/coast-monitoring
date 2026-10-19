@@ -13,27 +13,30 @@ import (
 
 // ReefData types describe the imported v1.7 domain, independent of the legacy UUID surveys.
 type ReefDataEvent struct {
-	ID             int      `json:"id"`
-	EventID        string   `json:"event_id"`
-	SurveyID       int      `json:"survey_id"`
-	SurveyDate     string   `json:"survey_date"`
-	EventTime      string   `json:"event_time"`
-	DepthM         float64  `json:"depth_m"`
-	SiteID         int      `json:"site_id"`
-	SiteName       string   `json:"site_name"`
-	SiteEnglish    string   `json:"site_english"`
-	Region         string   `json:"region"`
-	County         string   `json:"county"`
-	Location       string   `json:"location"`
-	Latitude       *float64 `json:"latitude"`
-	Longitude      *float64 `json:"longitude"`
-	StartDate      string   `json:"start_date"`
-	EndDate        string   `json:"end_date"`
-	Label          string   `json:"label"`
-	Methods        []string `json:"methods"`
-	CWAStationID   *string  `json:"cwa_station_id,omitempty"`
-	CWAStationName *string  `json:"cwa_station_name,omitempty"`
-	WaterTemp      *float64 `json:"water_temp_c,omitempty"`
+	EntryMetadata     *ReefCheckEntryMetadata `json:"entry_metadata,omitempty"`
+	ActivityName      string                  `json:"activity_name,omitempty"`
+	PublicationStatus string                  `json:"publication_status,omitempty"`
+	ID                int                     `json:"id"`
+	EventID           string                  `json:"event_id"`
+	SurveyID          int                     `json:"survey_id"`
+	SurveyDate        string                  `json:"survey_date"`
+	EventTime         string                  `json:"event_time"`
+	DepthM            float64                 `json:"depth_m"`
+	SiteID            int                     `json:"site_id"`
+	SiteName          string                  `json:"site_name"`
+	SiteEnglish       string                  `json:"site_english"`
+	Region            string                  `json:"region"`
+	County            string                  `json:"county"`
+	Location          string                  `json:"location"`
+	Latitude          *float64                `json:"latitude"`
+	Longitude         *float64                `json:"longitude"`
+	StartDate         string                  `json:"start_date"`
+	EndDate           string                  `json:"end_date"`
+	Label             string                  `json:"label"`
+	Methods           []string                `json:"methods"`
+	CWAStationID      *string                 `json:"cwa_station_id,omitempty"`
+	CWAStationName    *string                 `json:"cwa_station_name,omitempty"`
+	WaterTemp         *float64                `json:"water_temp_c,omitempty"`
 }
 
 type ReefDataMetadata struct {
@@ -46,11 +49,12 @@ type ReefDataMetadata struct {
 }
 
 type ReefDataPoint struct {
-	ID       int64   `json:"id"`
-	Segment  int     `json:"segment"`
-	Position float64 `json:"position_m"`
-	Layer    string  `json:"substrate_layer"`
-	Code     string  `json:"substrate_code"`
+	ID         int64   `json:"id"`
+	Segment    int     `json:"segment"`
+	Position   float64 `json:"position_m"`
+	Layer      string  `json:"substrate_layer"`
+	Code       string  `json:"substrate_code"`
+	IsBleached *bool   `json:"is_bleached"`
 }
 
 type ReefDataBleaching struct {
@@ -61,27 +65,32 @@ type ReefDataBleaching struct {
 }
 
 type ReefDataBelt struct {
-	ID        int64  `json:"id"`
-	Segment   int    `json:"segment"`
-	TaxonID   int    `json:"taxon_id"`
-	Group     string `json:"taxon_group"`
-	NameZH    string `json:"name_zh"`
-	NameEN    string `json:"name_en"`
-	Size      string `json:"size_class"`
-	Aggregate bool   `json:"is_aggregate"`
-	Count     int    `json:"count"`
+	RecordStatus string `json:"record_status,omitempty"`
+	ObservedSize string `json:"observed_size,omitempty"`
+	Notes        string `json:"notes,omitempty"`
+	ID           int64  `json:"id"`
+	Segment      int    `json:"segment"`
+	TaxonID      int    `json:"taxon_id"`
+	Group        string `json:"taxon_group"`
+	NameZH       string `json:"name_zh"`
+	NameEN       string `json:"name_en"`
+	Size         string `json:"size_class"`
+	Aggregate    bool   `json:"is_aggregate"`
+	Count        int    `json:"count"`
 }
 
 type ReefDataImpact struct {
-	ID          int64   `json:"id"`
-	Segment     int     `json:"segment"`
-	TypeID      int     `json:"impact_type_id"`
-	Group       string  `json:"impact_group"`
-	NameZH      string  `json:"name_zh"`
-	NameEN      string  `json:"name_en"`
-	ValueType   string  `json:"value_type"`
-	HasRawCount bool    `json:"has_raw_count"`
-	RawValue    float64 `json:"raw_value"`
+	RecordStatus string  `json:"record_status,omitempty"`
+	ID           int64   `json:"id"`
+	Segment      int     `json:"segment"`
+	TypeID       int     `json:"impact_type_id"`
+	Group        string  `json:"impact_group"`
+	NameZH       string  `json:"name_zh"`
+	NameEN       string  `json:"name_en"`
+	ValueType    string  `json:"value_type"`
+	HasRawCount  bool    `json:"has_raw_count"`
+	RawValue     float64 `json:"raw_value"`
+	DerivedLevel *int    `json:"derived_level,omitempty"`
 }
 
 type ReefDataParticipant struct {
@@ -275,18 +284,20 @@ type ReefCheckEventInput struct {
 }
 
 type ReefCheckTransectInput struct {
-	TransectKey    string   `json:"transect_key"`
-	EventID        string   `json:"event_id"`
-	Method         string   `json:"method"`
-	StartTime      string   `json:"start_time"`
-	WaterTempC     *float64 `json:"water_temp_c"`
-	VisibilityM    *float64 `json:"visibility_m,omitempty"`
-	VisibilityMinM *float64 `json:"visibility_min_m,omitempty"`
-	VisibilityMaxM *float64 `json:"visibility_max_m,omitempty"`
-	Recorders      []string `json:"recorders"`
-	TeamLeader     string   `json:"team_leader"`
-	TeamScientist  string   `json:"team_scientist"`
-	Comments       string   `json:"comments"`
+	TransectKey     string   `json:"transect_key"`
+	EventID         string   `json:"event_id"`
+	Method          string   `json:"method"`
+	StartTime       string   `json:"start_time"`
+	WaterTempC      *float64 `json:"water_temp_c"`
+	VisibilityM     *float64 `json:"visibility_m,omitempty"`
+	VisibilityMinM  *float64 `json:"visibility_min_m,omitempty"`
+	VisibilityMaxM  *float64 `json:"visibility_max_m,omitempty"`
+	Recorders       []string `json:"recorders"`
+	TeamLeader      string   `json:"team_leader"`
+	TeamScientist   string   `json:"team_scientist"`
+	Comments        string   `json:"comments"`
+	FishLengthMode  string   `json:"fish_length_mode,omitempty"`
+	CoralMorphology string   `json:"coral_morphology,omitempty"`
 }
 
 type ReefCheckSubstratePointInput struct {
@@ -295,6 +306,7 @@ type ReefCheckSubstratePointInput struct {
 	PositionM      float64 `json:"position_m"`
 	SubstrateCode  string  `json:"substrate_code"`
 	SubstrateLayer string  `json:"substrate_layer"`
+	IsBleached     *bool   `json:"is_bleached"`
 }
 
 type ReefCheckBleachingInput struct {
@@ -313,6 +325,8 @@ type ReefCheckBeltObservationInput struct {
 	Segment              int    `json:"segment"`
 	Count                *int   `json:"count"`
 	RecordStatus         string `json:"record_status"`
+	ObservedSize         string `json:"observed_size,omitempty"`
+	Notes                string `json:"notes,omitempty"`
 }
 
 type ReefCheckImpactObservationInput struct {
@@ -333,6 +347,11 @@ type ReefCheckMudAuditInput struct {
 }
 
 type ReefCheckSurveySubmission struct {
+	ActivityCode       string                            `json:"activity_code"`
+	EntryMetadata      ReefCheckEntryMetadata            `json:"entry_metadata"`
+	RKCNote            string                            `json:"rkc_bleaching_note"`
+	OtherDamageNote    string                            `json:"other_damage_note"`
+	BleachingMode      string                            `json:"bleaching_mode"`
 	Format             string                            `json:"format"`
 	Status             string                            `json:"status"`
 	MissingReason      string                            `json:"missing_reason"`
@@ -383,24 +402,95 @@ func (s *ReefCheckSurveySubmission) Validate() error {
 		if visibilityMin != nil && visibilityMax != nil && *visibilityMin > *visibilityMax {
 			return bad("最低能見度不能大於最高能見度")
 		}
+		if t.Method == "belt_fish" && t.FishLengthMode != "" && t.FishLengthMode != "split" && t.FishLengthMode != "combined" {
+			return bad("魚類調查必須指定 split 或 combined 體長模式")
+		}
+	}
+	validSubstrate := map[string]bool{
+		"NA": true, "HC": true, "HC-a": true, "HC-b": true, "HC-c": true,
+		"SC": true, "RKC": true, "NIA": true, "SP": true, "RC": true,
+		"RB": true, "SD": true, "SI": true, "OT": true,
+		"SI(HC)": true, "SI(SC)": true, "SI(RKC)": true, "SI(NIA)": true,
+		"SI(SP)": true, "SI(RC)": true, "SI(RB)": true, "SI(SD)": true,
+	}
+	for _, p := range s.SubstratePoints {
+		if p.Segment < 1 || p.Segment > 4 || !finite(p.PositionM) || p.PositionM < 0 || p.PositionM > 100 {
+			return bad("底質點位置或段次無效")
+		}
+		if !validSubstrate[p.SubstrateCode] {
+			return bad(fmt.Sprintf("無效底質 canonical code %q", p.SubstrateCode))
+		}
+		if p.SubstrateLayer != "" && p.SubstrateLayer != "surface" && p.SubstrateLayer != "down" {
+			return bad("底質圖層必須為 surface 或 down")
+		}
+		bleachable := p.SubstrateCode == "HC" || p.SubstrateCode == "HC-a" || p.SubstrateCode == "HC-b" || p.SubstrateCode == "HC-c" || p.SubstrateCode == "SC"
+		if p.IsBleached != nil && (!bleachable || p.SubstrateLayer == "down") {
+			return bad("逐格白化只適用於表面 HC／SC 底質")
+		}
+	}
+	for _, o := range s.BeltObservations {
+		if o.Segment < 1 || o.Segment > 4 {
+			return bad("Belt 段次必須介於 1–4")
+		}
+		if o.Count != nil && *o.Count < 0 {
+			return bad("Belt 數量必須是非負整數")
+		}
+	}
+	for _, b := range s.SubstrateBleaching {
+		if b.Segment < 1 || b.Segment > 4 || (b.SubstrateCode != "HC" && b.SubstrateCode != "SC") || b.BleachedPoints != nil && *b.BleachedPoints < 0 {
+			return bad("原始分段白化數量或段次無效")
+		}
+	}
+	for _, o := range s.ImpactObservations {
+		if o.Segment < 1 || o.Segment > 4 {
+			return bad("環境衝擊段次必須介於 1–4")
+		}
+		switch o.ImpactGroup {
+		case "coral_damage", "trash":
+			if o.ImpactValueType != "count" {
+				return bad("珊瑚損害與垃圾必須上傳原始整數件數，不接受人工分級")
+			}
+		case "bleaching", "disease":
+			if o.ImpactValueType != "percent" {
+				return bad("白化與疾病必須上傳 0–100 百分比")
+			}
+		default:
+			return bad("未知的環境衝擊類別")
+		}
+		if o.RawValue == nil {
+			continue
+		}
+		if !finite(*o.RawValue) || *o.RawValue < 0 {
+			return bad("環境衝擊原始值必須是非負數")
+		}
+		if (o.ImpactGroup == "coral_damage" || o.ImpactGroup == "trash") && !integer(*o.RawValue) {
+			return bad("珊瑚損害與垃圾原始件數必須是整數")
+		}
+		if (o.ImpactGroup == "bleaching" || o.ImpactGroup == "disease") && *o.RawValue > 100 {
+			return bad("白化與疾病必須上傳 0–100 百分比")
+		}
+	}
+	if s.Format == "reefcheck-web-v4" {
+		return s.validateTabletEntry()
 	}
 	return nil
 }
 
 type ReefCheckSubmissionResult struct {
-	Status       string   `json:"status"`
-	ReceiptID    string   `json:"receipt_id"`
-	EventID      string   `json:"event_id"`
-	EventDBID    int      `json:"id"`
-	SurveyDBID   int      `json:"survey_id"`
-	SiteNameZH   string   `json:"site_name_zh"`
-	SiteNameEN   string   `json:"site_name_en"`
-	SurveyDate   string   `json:"survey_date"`
-	EventTime    string   `json:"event_time"`
-	DepthM       float64  `json:"depth_m"`
-	Methods      []string `json:"methods"`
-	ReviewStatus string   `json:"review_status"`
-	SavedAt      string   `json:"saved_at"`
+	PublicationStatus string   `json:"publication_status,omitempty"`
+	Status            string   `json:"status"`
+	ReceiptID         string   `json:"receipt_id"`
+	EventID           string   `json:"event_id"`
+	EventDBID         int      `json:"id"`
+	SurveyDBID        int      `json:"survey_id"`
+	SiteNameZH        string   `json:"site_name_zh"`
+	SiteNameEN        string   `json:"site_name_en"`
+	SurveyDate        string   `json:"survey_date"`
+	EventTime         string   `json:"event_time"`
+	DepthM            float64  `json:"depth_m"`
+	Methods           []string `json:"methods"`
+	ReviewStatus      string   `json:"review_status"`
+	SavedAt           string   `json:"saved_at"`
 }
 
 type ReefCheckConfig struct {
@@ -411,16 +501,20 @@ type ReefCheckConfig struct {
 }
 
 type ReefDataTransect struct {
-	ID      int    `json:"id"`
-	EventID string `json:"event_id"`
-	Method  string `json:"method"`
+	OtherDamageNote string `json:"other_damage_note,omitempty"`
+	CoralMorphology string `json:"coral_morphology,omitempty"`
+	ID              int    `json:"id"`
+	EventID         string `json:"event_id"`
+	Method          string `json:"method"`
+	FishLengthMode  string `json:"fish_length_mode,omitempty"`
 	ReefDataMetadata
-	Points       []ReefDataPoint       `json:"points"`
-	Bleaching    []ReefDataBleaching   `json:"bleaching"`
-	Belt         []ReefDataBelt        `json:"belt"`
-	Impacts      []ReefDataImpact      `json:"impacts"`
-	Participants []ReefDataParticipant `json:"participants"`
-	Version      string                `json:"version"`
+	Points           []ReefDataPoint                  `json:"points"`
+	Bleaching        []ReefDataBleaching              `json:"bleaching"`
+	DerivedBleaching []ReefCheckPointBleachingSummary `json:"derived_bleaching"`
+	Belt             []ReefDataBelt                   `json:"belt"`
+	Impacts          []ReefDataImpact                 `json:"impacts"`
+	Participants     []ReefDataParticipant            `json:"participants"`
+	Version          string                           `json:"version"`
 }
 
 type ReefDataDetail struct {

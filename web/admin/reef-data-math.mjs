@@ -10,13 +10,19 @@ export function statistics(values) {
 }
 
 export function impactValue(row) {
-  return row.has_raw_count ? Math.min(row.raw_value, 3) : row.raw_value
+  if (row.record_status === 'not_recorded' || row.raw_value == null) return null
+  if (!row.has_raw_count) return row.raw_value
+  if (row.raw_value === 0) return 0
+  if (row.raw_value === 1) return 1
+  if (row.raw_value <= 4) return 2
+  return 3
 }
 
 export function substrateSummary(points, layer = "surface") {
   const selected = points.filter(p => p.substrate_layer === layer)
   const valid = selected.filter(p => p.substrate_code !== "NA")
-  const codes = [...new Set(valid.map(p => p.substrate_code))].sort()
+  const summaryCode = code => /^HC-[abc]$/.test(code) ? "HC" : code
+  const codes = [...new Set(valid.map(p => summaryCode(p.substrate_code)))].sort()
   return {
     recorded: selected.length,
     unknown: selected.length - valid.length,
@@ -24,7 +30,7 @@ export function substrateSummary(points, layer = "surface") {
     rows: codes.map(code => {
       const counts = [1, 2, 3, 4].map(segment => {
         const segmentPoints = valid.filter(p => p.segment === segment)
-        return segmentPoints.length ? segmentPoints.filter(p => p.substrate_code === code).length : null
+        return segmentPoints.length ? segmentPoints.filter(p => summaryCode(p.substrate_code) === code).length : null
       })
       const stats = statistics(counts)
       return { code, counts, ...stats, cover: valid.length ? stats.total / valid.length * 100 : null }
@@ -33,6 +39,7 @@ export function substrateSummary(points, layer = "surface") {
 }
 
 export function bleachingPercent(points, segment, code, count) {
-  const n = points.filter(p => p.substrate_layer === "surface" && p.segment === segment && p.substrate_code === code).length
+  const matches = value => code === "HC" ? value === "HC" || /^HC-[abc]$/.test(value) : value === code
+  const n = points.filter(p => p.substrate_layer === "surface" && p.segment === segment && matches(p.substrate_code)).length
   return n ? count / n * 100 : null
 }

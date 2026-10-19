@@ -69,3 +69,73 @@ func TestReefDataLineCodesAndNullableMetadata(t *testing.T) {
 		}
 	}
 }
+
+func TestReefCheckSubmissionValidatesNewEntryContract(t *testing.T) {
+	base := func() ReefCheckSurveySubmission {
+		return ReefCheckSurveySubmission{
+			Event:     ReefCheckEventInput{SurveyDate: "2026-10-02", DepthM: 5},
+			Transects: []ReefCheckTransectInput{{Method: "line"}},
+			SubstratePoints: []ReefCheckSubstratePointInput{
+				{Segment: 1, PositionM: 0, SubstrateCode: "OT", SubstrateLayer: "surface"},
+				{Segment: 1, PositionM: 0.5, SubstrateCode: "HC-a", SubstrateLayer: "surface"},
+			},
+		}
+	}
+
+	validBase := base()
+	if err := validBase.Validate(); err != nil {
+		t.Fatalf("canonical OT and HC-a rejected: %v", err)
+	}
+	bleached := true
+	validBleaching := base()
+	validBleaching.SubstratePoints[1].IsBleached = &bleached
+	if err := validBleaching.Validate(); err != nil {
+		t.Fatalf("per-point coral bleaching rejected: %v", err)
+	}
+	invalidBleaching := base()
+	invalidBleaching.SubstratePoints[0].IsBleached = &bleached
+	if err := invalidBleaching.Validate(); !errors.Is(err, ErrValidation) {
+		t.Fatalf("per-point bleaching accepted for non-coral substrate: %v", err)
+	}
+	badNumericAlias := base()
+	badNumericAlias.SubstratePoints[0].SubstrateCode = "10"
+	if err := badNumericAlias.Validate(); !errors.Is(err, ErrValidation) {
+		t.Fatalf("new-entry numeric alias 10 accepted: %v", err)
+	}
+
+	pendingFishMode := base()
+	pendingFishMode.Transects = []ReefCheckTransectInput{{Method: "belt_fish"}}
+	pendingFishMode.SubstratePoints = nil
+	if err := pendingFishMode.Validate(); err != nil {
+		t.Fatalf("legacy fish submission without confirmed mode rejected: %v", err)
+	}
+	validFish := base()
+	validFish.Transects = []ReefCheckTransectInput{{Method: "belt_fish", FishLengthMode: "split"}}
+	validFish.SubstratePoints = nil
+	if err := validFish.Validate(); err != nil {
+		t.Fatalf("fish split mode rejected: %v", err)
+	}
+	invalidFish := validFish
+	invalidFish.Transects = []ReefCheckTransectInput{{Method: "belt_fish", FishLengthMode: "mixed"}}
+	if err := invalidFish.Validate(); !errors.Is(err, ErrValidation) {
+		t.Fatalf("invalid fish length mode accepted: %v", err)
+	}
+
+	validImpact := base()
+	validImpact.Transects = []ReefCheckTransectInput{{Method: "belt_invert"}}
+	validImpact.SubstratePoints = nil
+	validImpact.ImpactObservations = []ReefCheckImpactObservationInput{{ImpactGroup: "coral_damage", ImpactValueType: "count", Segment: 1, RawValue: dataPtr(4.0)}}
+	if err := validImpact.Validate(); err != nil {
+		t.Fatalf("raw coral-damage count rejected: %v", err)
+	}
+	for _, invalid := range []ReefCheckImpactObservationInput{
+		{ImpactGroup: "coral_damage", ImpactValueType: "level", Segment: 1, RawValue: dataPtr(3.0)},
+		{ImpactGroup: "trash", ImpactValueType: "count", Segment: 1, RawValue: dataPtr(1.5)},
+	} {
+		sub := validImpact
+		sub.ImpactObservations = []ReefCheckImpactObservationInput{invalid}
+		if err := sub.Validate(); !errors.Is(err, ErrValidation) {
+			t.Fatalf("invalid impact input accepted: %+v (%v)", invalid, err)
+		}
+	}
+}

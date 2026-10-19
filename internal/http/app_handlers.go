@@ -256,6 +256,10 @@ func (h *AppHandlers) SubmitAppReefCheckSurvey(w http.ResponseWriter, r *http.Re
 	if !decodeAdminJSON(w, r, &sub) {
 		return
 	}
+	if sub.Format != "reefcheck-web-v4" && actor.Role != policy.RoleAdmin {
+		writeError(w, http.StatusBadRequest, "請使用最新版填報頁，舊格式只供管理員處理歷史資料")
+		return
+	}
 	res, err := h.ReefData.SubmitSurvey(r.Context(), sub, &actor)
 	if err != nil {
 		writeServiceError(w, err, "submit reef check survey failed")
@@ -275,6 +279,10 @@ func (h *AppHandlers) SubmitPublicReefCheckSurvey(w http.ResponseWriter, r *http
 	}
 	var sub service.ReefCheckSurveySubmission
 	if !decodeAdminJSON(w, r, &sub) {
+		return
+	}
+	if sub.Format != "reefcheck-web-v4" {
+		writeError(w, http.StatusBadRequest, "請使用最新版填報頁並驗證活動代碼")
 		return
 	}
 	res, err := h.ReefData.SubmitSurvey(r.Context(), sub, actorPtr)
@@ -310,5 +318,3 @@ func (h *AppHandlers) GetPublicReefCheckConfig(w http.ResponseWriter, r *http.Re
 	}
 	writeJSON(w, http.StatusOK, cfg)
 }
-
-

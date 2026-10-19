@@ -149,7 +149,6 @@ func TestAdminCanUseAppObservationRoute(t *testing.T) {
 	}
 }
 
-
 func appRouterForUser(user policy.User, observations *fakeAppObservationService, auditLogs *fakeAdminAuditLogService, runner AdminMutationRunner) http.Handler {
 	handlers := testAuthHandlers()
 	handlers.Auth = &fakeHTTPAuthService{sessionUser: user}
@@ -168,8 +167,6 @@ func appRouterForUser(user policy.User, observations *fakeAppObservationService,
 		},
 	})
 }
-
-
 
 func appRequest(method, target string, body *bytes.Buffer) *http.Request {
 	req := adminRequest(method, target, body)
@@ -193,8 +190,6 @@ func testObservation(observerID uuid.UUID, count int) service.Observation {
 		UpdatedAt:  time.Date(2026, 5, 27, 4, 5, 6, 0, time.UTC),
 	}
 }
-
-
 
 type fakeAppObservationService struct {
 	observations []service.Observation
@@ -310,7 +305,7 @@ func TestSubmitPublicReefCheckSurvey(t *testing.T) {
 		},
 	})
 
-	body := `{"event":{"site_name_zh":"野柳","survey_date":"2025-01-01","event_time":"09:00","depth_m":5.0},"transects":[{"method":"line"}]}`
+	body := `{"format":"reefcheck-web-v4","activity_code":"RC-TEST","event":{"site_name_zh":"野柳","survey_date":"2025-01-01","event_time":"09:00","depth_m":5.0},"transects":[{"method":"line"}]}`
 	req := httptest.NewRequest(http.MethodPost, "/api/public/reef-check/surveys", bytes.NewBufferString(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
@@ -381,4 +376,3 @@ func TestSubmitAppReefCheckSurveyRequiresSession(t *testing.T) {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
 	}
 }
-

@@ -208,6 +208,7 @@ func TestReefDataSubmitSurvey(t *testing.T) {
 	repo := NewReefDataRepository(tx)
 
 	bleachHC := 5
+	pointBleached := true
 	cnt := 3
 	rawVal := 1.0
 	sub := service.ReefCheckSurveySubmission{
@@ -220,11 +221,11 @@ func TestReefDataSubmitSurvey(t *testing.T) {
 		},
 		Transects: []service.ReefCheckTransectInput{
 			{Method: "line", StartTime: "09:30", Recorders: []string{"志工甲", "志工乙"}, TeamLeader: "隊長王"},
-			{Method: "belt_fish", StartTime: "09:30", Recorders: []string{"志工丙"}},
+			{Method: "belt_fish", FishLengthMode: "split", StartTime: "09:30", Recorders: []string{"志工丙"}},
 			{Method: "belt_invert", StartTime: "09:30", Recorders: []string{"志工丁"}},
 		},
 		SubstratePoints: []service.ReefCheckSubstratePointInput{
-			{Segment: 1, PositionM: 0.0, SubstrateCode: "HC", SubstrateLayer: "surface"},
+			{Segment: 1, PositionM: 0.0, SubstrateCode: "HC", SubstrateLayer: "surface", IsBleached: &pointBleached},
 			{Segment: 1, PositionM: 0.5, SubstrateCode: "SI", SubstrateLayer: "surface"},
 		},
 		MudAudit: []service.ReefCheckMudAuditInput{
@@ -237,7 +238,7 @@ func TestReefDataSubmitSurvey(t *testing.T) {
 			{TaxonGroup: "fish", TaxonNameENLookup: "Butterflyfish", Segment: 1, Count: &cnt},
 		},
 		ImpactObservations: []service.ReefCheckImpactObservationInput{
-			{ImpactGroup: "trash", ImpactNameENLookup: "Trash: general", Segment: 1, RawValue: &rawVal},
+			{ImpactGroup: "trash", ImpactNameENLookup: "Trash: general", ImpactValueType: "count", Segment: 1, RawValue: &rawVal},
 		},
 	}
 
@@ -247,6 +248,20 @@ func TestReefDataSubmitSurvey(t *testing.T) {
 	}
 	if res.Status != "saved" || res.ReceiptID == "" || res.EventID == "" {
 		t.Fatalf("unexpected res: %+v", res)
+	}
+	var storedBleached *bool
+	if err := tx.QueryRow(ctx, `SELECT is_bleached FROM substrate_point p JOIN transect t ON t.id=p.transect_id WHERE t.event_id=$1 AND p.position_m=0 AND p.substrate_layer='surface'`, res.EventID).Scan(&storedBleached); err != nil {
+		t.Fatalf("read stored per-point bleaching: %v", err)
+	}
+	if storedBleached == nil || !*storedBleached {
+		t.Fatalf("stored per-point bleaching = %v, want true", storedBleached)
+	}
+	var rawHC, derivedHC int
+	if err := tx.QueryRow(ctx, `SELECT b.hc_bleached_count,d.derived_hc_bleached_point_count FROM substrate_bleaching b JOIN substrate_bleaching_point_summary d USING(transect_id,segment) JOIN transect t ON t.id=b.transect_id WHERE t.event_id=$1 AND b.segment=1`, res.EventID).Scan(&rawHC, &derivedHC); err != nil {
+		t.Fatal(err)
+	}
+	if rawHC != bleachHC || derivedHC != 1 {
+		t.Fatalf("source raw count overwritten: raw=%d derived=%d", rawHC, derivedHC)
 	}
 
 	cfg, err := repo.Config(ctx)

@@ -135,3 +135,39 @@ func TestReefDataUIHasExpectedFeatures(t *testing.T) {
 		}
 	}
 }
+
+func TestVolunteerFormUsesV18EntryRules(t *testing.T) {
+	dir := staticDir("web/public/reef-check")
+	appBody, err := os.ReadFile(filepath.Join(dir, "app.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalogBody, err := os.ReadFile(filepath.Join(dir, "catalog.js"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	app := string(appBody)
+	catalog := string(catalogBody)
+	for _, want := range []string{
+		"if(t==='0')return 'OT'",
+		"HC-${t.toLowerCase()}",
+		"fish_length_mode:k==='fish'&&state.fishLengthMode?state.fishLengthMode:undefined",
+		"r.group==='trash'||r.group==='coral_damage'",
+		"data-action=\"toggle-bleach-point\"",
+		"is_bleached:isBleachableCode",
+		"new URLSearchParams(window.location.search).get('debug')==='1'",
+		"DEBUG · 未儲存",
+	} {
+		if !strings.Contains(app, want) {
+			t.Fatalf("volunteer app missing v1.8 rule %q", want)
+		}
+	}
+	for _, want := range []string{"['HC-a'", "['HC-b'", "['HC-c'", "'count','coral_damage'", "'count','trash'"} {
+		if !strings.Contains(catalog, want) {
+			t.Fatalf("volunteer catalog missing v1.8 rule %q", want)
+		}
+	}
+	if strings.Contains(app, "/^(?:[1-9]|10)$/") {
+		t.Fatal("volunteer app still accepts legacy numeric 10 as new OT input")
+	}
+}

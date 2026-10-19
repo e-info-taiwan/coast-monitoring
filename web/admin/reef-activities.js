@@ -1,0 +1,14 @@
+const $=s=>document.querySelector(s);
+const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let csrf='',busy=false;
+async function api(path,options={}){
+ const res=await fetch('/api'+path,{credentials:'include',...options,headers:{'Content-Type':'application/json','X-CSRF-Token':csrf,...options.headers}});
+ const data=await res.json();if(!res.ok)throw new Error(data.error||'操作失敗');return data;
+}
+async function refresh(){const list=await api('/admin/reef-check-data/activities');$('#activity-list').innerHTML=list.length?`<table><thead><tr><th>活動</th><th>調查日期</th><th>狀態</th><th>操作</th></tr></thead><tbody>${list.map(a=>`<tr><td>${esc(a.name)}</td><td>${esc(a.start_date)}–${esc(a.end_date)}</td><td>${a.is_active?'啟用':'停用'}</td><td><button data-id="${a.id}" data-action="rotate">重新產生代碼</button>${a.is_active?`<button data-id="${a.id}" data-action="disable">停用</button>`:''}</td></tr>`).join('')}</tbody></table>`:'<p>目前沒有活動。</p>';}
+function showCode(data){const el=$('#new-code');el.hidden=!data.code;el.textContent=data.code?`活動代碼：${data.code}（請保存並提供給志工）`:'';}
+async function perform(fn){if(busy)return;busy=true;$('#status').textContent='處理中…';document.querySelectorAll('button').forEach(el=>el.disabled=true);try{await fn();$('#status').textContent='已完成。';}catch(err){$('#status').textContent=err.message;}finally{busy=false;document.querySelectorAll('button').forEach(el=>el.disabled=false);}}
+$('#activity-form').addEventListener('submit',e=>{e.preventDefault();void perform(async()=>{const form=e.target,fd=new FormData(form),expiry=fd.get('expires_at');const result=await api('/admin/reef-check-data/activities',{method:'POST',body:JSON.stringify({name:fd.get('name'),start_date:fd.get('start_date'),end_date:fd.get('end_date'),site_ids:[...form.elements.sites.selectedOptions].map(o=>Number(o.value)),expires_at:expiry?new Date(expiry).toISOString():null})});showCode(result);await refresh();});});
+$('#activity-list').addEventListener('click',e=>{const b=e.target.closest('[data-action]');if(!b)return;if(!confirm(b.dataset.action==='rotate'?'重新產生後，舊代碼會立即失效。確定重新產生？':'停用後，此活動代碼不能再用於填報。確定停用？'))return;void perform(async()=>{const result=await api(`/admin/reef-check-data/activities/${b.dataset.id}`,{method:'PATCH',body:JSON.stringify({action:b.dataset.action})});showCode(result);await refresh();});});
+async function init(){try{const session=await api('/session');if(!session.authenticated||session.user?.role!=='admin')throw new Error('請先登入管理後台的管理員帳號，再開啟此頁。');csrf=session.csrf_token||'';const sites=await api('/public/reef-check/sites');$('#activity-form').elements.sites.innerHTML=sites.map(s=>`<option value="${s.id}">${esc(s.name_zh)}</option>`).join('');$('#workspace').hidden=false;await refresh();}catch(err){$('#status').textContent=err.message;}}
+void init();

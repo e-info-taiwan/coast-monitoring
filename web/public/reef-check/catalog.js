@@ -1,7 +1,7 @@
 /* Labels / keys from the existing import specification and 2024 site lookup.
    This prototype is not a new authority for unresolved site reconciliation. */
 window.REEF = {
-  substrates: [['HC','硬珊瑚'],['SC','軟珊瑚'],['RKC','新死珊瑚'],['NIA','藻類'],['SP','海綿'],['RC','岩石'],['RB','碎石'],['SD','沙'],['SI','泥沙'],['OT','其他']],
+  substrates: [['HC','硬珊瑚','1'],['SC','軟珊瑚','2'],['RKC','新死珊瑚','3'],['NIA','藻類','4'],['SP','海綿','5'],['RC','岩石','6'],['RB','碎石','7'],['SD','沙','8'],['SI','泥沙','9'],['OT','其他','0'],['HC-a','硬珊瑚 a 型','a'],['HC-b','硬珊瑚 b 型','b'],['HC-c','硬珊瑚 c 型','c']],
   methods: {
     line: {name:'底質探查',short:'底質',en:'LINE TRANSECT',description:'沿測線每 0.5 m 記一點，對照四段底質手板。',caption:'四段 × 40 點 · 含泥下底質'},
     fish: {name:'魚類探查',short:'魚類',en:'BELT · FISH',description:'依魚種與體長級距，填入四段觀察到的數量。',caption:'魚種 × 四段 · 自動計算合計'},
@@ -17,8 +17,8 @@ window.REEF = {
   ],
   rare: [['Sharks','鯊魚',''],['Turtles','海龜',''],['Mantas','魟','']],
   impact: [
-    ['Coral damage: boat/anchor','珊瑚損害：船錨','level','coral_damage'],['Coral damage: dynamite','珊瑚損害：炸魚','level','coral_damage'],['Coral damage: other','珊瑚損害：其他','level','coral_damage'],
-    ['Trash: fish nets','漁業垃圾（漁網）','level','trash'],['Trash: general','一般垃圾','level','trash'],
+    ['Coral damage: boat/anchor','珊瑚損害：船錨','count','coral_damage'],['Coral damage: dynamite','珊瑚損害：炸魚','count','coral_damage'],['Coral damage: other','珊瑚損害：其他','count','coral_damage'],
+    ['Trash: fish nets','漁業垃圾（漁網）','count','trash'],['Trash: general','一般垃圾','count','trash'],
     ['Bleaching (% of population)','珊瑚白化佔總體百分比','percent','bleaching'],['Bleaching (% of colony)','珊瑚白化佔群體百分比','percent','bleaching'],['Black Band (% colonies)','黑帶病佔珊瑚百分比','percent','disease'],['White Band (% colonies)','白帶病佔珊瑚百分比','percent','disease']
   ],
   sites: [
