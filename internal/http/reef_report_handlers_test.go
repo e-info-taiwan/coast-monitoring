@@ -100,3 +100,26 @@ func TestReefReportDoesNotSilentlyTruncate(t *testing.T) {
 		t.Fatal(w.Code, len(stub.loaded))
 	}
 }
+
+func TestReefTemplateDownloadTypes(t *testing.T) {
+	h := &AdminHandlers{ReefData: &reportStub{}}
+	for _, tc := range []struct {
+		path, kind, content string
+		status              int
+	}{
+		{"/report.zip", "", "application/zip", 200},
+		{"/report.xlsx", "summary", "spreadsheetml", 200},
+		{"/report.xlsx", "line", "application/json", 400},
+		{"/report.xlsx", "invalid", "application/json", 400},
+	} {
+		req := dataHandlerRequest("GET", tc.path+"?kind="+tc.kind, "", policy.RoleAdmin)
+		route := chi.NewRouteContext()
+		route.URLParams.Add("id", "12")
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, route))
+		w := httptest.NewRecorder()
+		h.ExportReefReport(w, req)
+		if w.Code != tc.status || !strings.Contains(w.Header().Get("Content-Type"), tc.content) {
+			t.Fatal(tc, w.Code, w.Header(), w.Body.String())
+		}
+	}
+}

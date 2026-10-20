@@ -11,7 +11,7 @@ It supports filtering, detail views, and audited edits of existing transect meta
 Migration `000006` removes the legacy Reef Check tables and links participants to users. See [the v1.7 admin guide](docs/reef-check-v17-admin.md)
 for supported fields, calculation rules, local database verification, and API details.
 
-管理後台支援單場次與篩選場次的 Excel 報告下載，含底質、魚類、無脊椎、環境影響及 Mean/SD/SE 圖表。見 [報告輸出說明](docs/reef-check-reports.md)。
+管理後台支援單場次與篩選場次的原範本報告套組（ZIP），也可單獨下載 Line、Belt 與 Summary Excel，保留範本版面與圖表。見 [報告輸出說明](docs/reef-check-reports.md)。
 
 ## Local Development
 

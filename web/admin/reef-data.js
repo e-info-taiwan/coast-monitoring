@@ -135,7 +135,7 @@ export function createReefData({ apiFetch, onCount }) {
           <p class="meta-line">依樣點、日期、時間與深度查看實際調查；未記錄的調查方法不補成零。</p>
         </div>
         <div class="rd-header-actions">
-          <button type="button" class="tiny-button" id="rd-export-filtered" data-empty="${!filtered.length}" ${s.exporting || !filtered.length ? "disabled" : ""}>下載篩選場次 Excel（${filtered.length}）</button>
+          <button type="button" class="tiny-button rd-report-button" id="rd-export-filtered" data-empty="${!filtered.length}" ${s.exporting || !filtered.length ? "disabled" : ""}>下載篩選報告 ZIP（${filtered.length}）</button>
           <a class="tiny-button" href="/reef-activities.html">活動代碼管理</a>
           <button type="button" class="primary-button" id="rd-create-event">＋ 新增調查場次</button>
           <button type="button" class="tiny-button" id="rd-refresh">重新整理</button>
@@ -193,7 +193,7 @@ export function createReefData({ apiFetch, onCount }) {
     }
     panel.querySelector("#rd-export-filtered")?.addEventListener("click", event => {
       const query = new URLSearchParams({ year: s.year, site: s.site, method: s.method, search: s.search })
-      downloadReport(`/admin/reef-check-data/reports.xlsx?${query}`, "ReefCheck-場次報告.xlsx", event.currentTarget)
+      downloadReport(`/admin/reef-check-data/reports.zip?${query}`, "ReefCheck-範本報告套組.zip", event.currentTarget)
     })
     panel.querySelector("#rd-create-event")?.addEventListener("click", showCreateEventModal)
     panel.querySelectorAll("[data-event]").forEach(b => { b.onclick = () => openEvent(b.dataset.event) })
@@ -203,7 +203,7 @@ export function createReefData({ apiFetch, onCount }) {
     if (s.exporting || s.editing) return
     s.exporting = true
     const label = button.textContent
-    button.disabled = true
+    panel?.querySelectorAll(".rd-report-button").forEach(b => { b.disabled = true })
     button.textContent = "正在產生報告…"
     try {
       const blob = await apiFetch(path, { responseType: "blob" })
@@ -222,8 +222,7 @@ export function createReefData({ apiFetch, onCount }) {
       button.disabled = false
       button.textContent = label
       if (panel) {
-        const currentButton = panel.querySelector("#rd-export-event, #rd-export-filtered")
-        if (currentButton) currentButton.disabled = s.editing || currentButton.dataset.empty === "true"
+        panel.querySelectorAll(".rd-report-button").forEach(b => { b.disabled = s.editing || b.dataset.empty === "true" })
       }
     }
   }
@@ -277,7 +276,8 @@ export function createReefData({ apiFetch, onCount }) {
           <p class="rd-id">${esc(e.event_id)}</p>
         </div>
         <div class="rd-header-actions">
-          <button type="button" class="tiny-button" id="rd-export-event" ${s.editing || s.exporting ? "disabled" : ""}>下載 Excel 報告</button>
+          <button type="button" class="tiny-button rd-report-button" id="rd-export-event" ${s.editing || s.exporting ? "disabled" : ""}>下載報告套組 ZIP</button>
+          ${[["summary", "Summary"], ...(s.detail.transects.some(tr => tr.method === "line") ? [["line", "底質 Excel"]] : []), ...(s.detail.transects.some(tr => tr.method === "belt_fish" || tr.method === "belt_invert") ? [["belt", "魚類／無脊椎 Excel"]] : [])].map(([kind, label]) => `<button type="button" class="tiny-button rd-report-button" data-report-kind="${kind}" ${s.editing || s.exporting ? "disabled" : ""}>${label}</button>`).join("")}
           <button type="button" class="danger-button" id="rd-delete-event">刪除此場次</button>
         </div>
       </div>
@@ -319,7 +319,10 @@ export function createReefData({ apiFetch, onCount }) {
       renderList()
     }
     panel.querySelector("#rd-export-event")?.addEventListener("click", event => {
-      downloadReport(`/admin/reef-check-data/events/${e.id}/report.xlsx`, `${e.site_name}-${e.survey_date}-${e.depth_m}m-報告.xlsx`, event.currentTarget)
+      downloadReport(`/admin/reef-check-data/events/${e.id}/report.zip`, `${e.site_name}-${e.survey_date}-${e.depth_m}m-報告套組.zip`, event.currentTarget)
+    })
+    panel.querySelectorAll("[data-report-kind]").forEach(button => {
+      button.onclick = () => downloadReport(`/admin/reef-check-data/events/${e.id}/report.xlsx?kind=${button.dataset.reportKind}`, `${e.site_name}-${e.survey_date}-${e.depth_m}m-${button.dataset.reportKind}.xlsx`, button)
     })
     panel.querySelector("#rd-delete-event")?.addEventListener("click", deleteCurrentEvent)
     panel.querySelectorAll("[data-transect]").forEach(b => {

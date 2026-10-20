@@ -95,18 +95,27 @@ func (h *AdminHandlers) ExportReefReports(w http.ResponseWriter, r *http.Request
 	h.writeReefWorkbook(w, r, details)
 }
 func (h *AdminHandlers) writeReefWorkbook(w http.ResponseWriter, r *http.Request, details []service.ReefDataDetail) {
-	taxa, err := h.ReefData.ListTaxa(r.Context())
+	var data []byte
+	var err error
+	contentType := "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	filename := "reef-check-report.xlsx"
+	if strings.HasSuffix(r.URL.Path, ".zip") {
+		data, err = report.TemplateArchive(details)
+		contentType = "application/zip"
+		filename = "reef-check-reports.zip"
+	} else {
+		kind := r.URL.Query().Get("kind")
+		if kind == "" {
+			kind = "summary"
+		}
+		data, err = report.TemplateWorkbook(details, kind)
+	}
 	if err != nil {
-		writeServiceError(w, err, "無法載入物種對照表")
+		writeServiceError(w, err, "無法產生範本報告")
 		return
 	}
-	data, err := report.ReefWorkbook(details, taxa)
-	if err != nil {
-		writeServiceError(w, err, "無法產生 Excel 報告")
-		return
-	}
-	w.Header().Set("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-	w.Header().Set("Content-Disposition", `attachment; filename="reef-check-report.xlsx"`)
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Length", strconv.Itoa(len(data)))
