@@ -573,7 +573,7 @@ function clearAlerts() {
   }
 }
 
-async function apiFetch(path, { method = "GET", body, auth = true, headers = {} } = {}) {
+async function apiFetch(path, { method = "GET", body, auth = true, headers = {}, responseType = "json" } = {}) {
   const init = {
     method,
     credentials: "include",
@@ -591,6 +591,7 @@ async function apiFetch(path, { method = "GET", body, auth = true, headers = {} 
   }
 
   const response = await fetch(`${API_BASE}${path}`, init)
+  if (response.ok && responseType === "blob") return response.blob()
   const raw = await response.text()
   let data = null
   if (raw) {

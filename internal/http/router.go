@@ -72,6 +72,8 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/audit-logs", deps.AdminHandlers.ListAuditLogs)
 		r.Patch("/reef-check-data/events/{id}/publication", deps.PublicHandlers.Publish)
 		r.Get("/reef-check-data/events", deps.AdminHandlers.ListReefDataEvents)
+		r.Get("/reef-check-data/reports.xlsx", deps.AdminHandlers.ExportReefReports)
+		r.Get("/reef-check-data/events/{id}/report.xlsx", deps.AdminHandlers.ExportReefReport)
 		r.Get("/reef-check-data/activities", deps.AdminHandlers.ReefActivities)
 		r.Post("/reef-check-data/activities", deps.AdminHandlers.ReefActivities)
 		r.Patch("/reef-check-data/activities/{id}", deps.AdminHandlers.ReefActivities)
