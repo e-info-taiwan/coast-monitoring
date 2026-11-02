@@ -1,3 +1,4 @@
+import { renderPublicationReview } from "./reef-publication-review.js"
 // 公開內容管理：嵌入 /admin/ 單頁後台的模組（與 reef-data.js 相同模式）。
 // 列表在 resource panel 內渲染，編輯與核對使用後台共用的右側 drawer。
 
@@ -475,7 +476,7 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
         body.querySelector("[data-pc-cancel]").onclick = () => drawer.close()
         const detailEl = body.querySelector("#pc-review-detail")
         apiFetch(`/admin/reef-check-data/events/${item.id}`)
-          .then(detail => { detailEl.innerHTML = `<pre class="pc-pre">${esc(JSON.stringify(detail, null, 2))}</pre>` })
+          .then(detail => { detailEl.innerHTML = renderPublicationReview(detail) })
           .catch(error => { detailEl.innerHTML = `<p class="pc-form-error" role="alert">無法載入核對資料：${esc(error.message)}</p>` })
         const form = body.querySelector("#pc-publish-form")
         form.onsubmit = async event => {

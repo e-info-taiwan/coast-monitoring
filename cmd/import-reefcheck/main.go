@@ -23,6 +23,7 @@ import (
 func main() {
 	var (
 		csvDir          = flag.String("csv-dir", "", "Path to the csv directory containing the import files")
+		publishOnly     = flag.Bool("publish-existing-only", false, "Publish untouched historical drafts listed in event.csv without reimporting observations")
 		dryRun          = flag.Bool("dry-run", false, "Validate all source rows in a transaction and roll back")
 		substrateFormat = flag.String("substrate-format", "canonical", "canonical, entry0, or legacy10; numeric 0/10 require an explicit convention")
 		dbURL           = flag.String("db-url", "", "PostgreSQL database URL or connection string")
@@ -64,7 +65,12 @@ func main() {
 		log.Fatalf("record import attempt (apply migrations first): %v", err)
 	}
 	start := time.Now()
-	importErr := runImport(ctx, pool, *csvDir, *dryRun, *substrateFormat)
+	var importErr error
+	if *publishOnly {
+		importErr = publishExisting(ctx, pool, *csvDir, *dryRun)
+	} else {
+		importErr = runImport(ctx, pool, *csvDir, *dryRun, *substrateFormat)
+	}
 	status := "completed"
 	if *dryRun {
 		status = "validated"
@@ -74,7 +80,7 @@ func main() {
 		status = "failed"
 		message = importErr.Error()
 	}
-	report, _ := json.Marshal(map[string]any{"dry_run": *dryRun, "duration_ms": time.Since(start).Milliseconds(), "error": message})
+	report, _ := json.Marshal(map[string]any{"dry_run": *dryRun, "publish_existing_only": *publishOnly, "duration_ms": time.Since(start).Milliseconds(), "error": message})
 	if _, err = pool.Exec(ctx, `UPDATE reef_import_attempt SET status=$2,report=$3::jsonb,updated_at=now() WHERE id=$1`, attemptID, status, report); err != nil {
 		log.Fatalf("save import result: %v", err)
 	}
@@ -461,8 +467,8 @@ func importEvents(ctx context.Context, tx pgx.Tx, path string, surveyMap map[str
 		}
 
 		_, err = tx.Exec(ctx, `
-			INSERT INTO event (survey_id, event_id, survey_date, event_time, depth_m)
-			VALUES ($1, $2, $3, $4, $5)
+			INSERT INTO event (survey_id, event_id, survey_date, event_time, depth_m, publication_status)
+			VALUES ($1, $2, $3, $4, $5, 'published')
 			ON CONFLICT (event_id) DO NOTHING
 		`, surveyID, eventID, surveyDate, eventTime, depthM)
 		if err != nil {
@@ -834,4 +840,44 @@ func parseImportCount(value, status string) (int, string, error) {
 		return 0, "", fmt.Errorf("invalid count %q; missing data must be explicit NA", value)
 	}
 	return n, "recorded", nil
+}
+
+// Only IDs from the supplied historical manifest are eligible. Manual publication
+// decisions and web submissions are preserved, including deliberate drafts.
+func publishExisting(ctx context.Context, pool *pgxpool.Pool, dir string, dryRun bool) error {
+	rows, err := readCSV(filepath.Join(dir, "event.csv"))
+	if err != nil {
+		return err
+	}
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if row["event_id"] == "" {
+			return fmt.Errorf("event.csv contains an empty event_id")
+		}
+		ids = append(ids, row["event_id"])
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	tag, err := tx.Exec(ctx, `WITH previous AS (
+ SELECT e.id,e.publication_status FROM event e
+ WHERE e.event_id=ANY($1::text[]) AND e.publication_status='draft'
+ AND e.submission_snapshot IS NULL
+ AND NOT EXISTS(SELECT 1 FROM reef_check_entry_metadata m WHERE m.event_id=e.id)
+ AND NOT EXISTS(SELECT 1 FROM reef_publication_audit a WHERE a.event_id=e.id)
+ FOR UPDATE), changed AS (
+ UPDATE event e SET publication_status='published',updated_at=now()
+ FROM previous p WHERE e.id=p.id RETURNING e.id)
+ INSERT INTO reef_publication_audit(event_id,old_status,new_status)
+ SELECT p.id,p.publication_status,'published' FROM previous p JOIN changed c ON c.id=p.id`, ids)
+	if err != nil {
+		return err
+	}
+	log.Printf("Historical drafts published: %d (dry-run: %t)", tag.RowsAffected(), dryRun)
+	if dryRun {
+		return nil
+	}
+	return tx.Commit(ctx)
 }

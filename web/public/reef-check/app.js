@@ -109,7 +109,7 @@ function allowedSites(){return state.activity&&!state.activity.demo?C.sites.filt
 async function verifyActivity(){
   if(activityBusy)return;const code=state.activityCode.trim();if(!code){$('#activity-error').textContent='請輸入活動代碼。';return;}
   activityBusy=true;render();
-  try{const res=await fetch('/api/public/reef-check/activities/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code}),credentials:'include'});const data=await res.json();if(!res.ok)throw new Error(data.error||'活動代碼無效或已停用。');state.activity=data;persist();}
+  try{const res=await fetch('/api/public/reef-check/activities/verify',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({code}),credentials:'include'});const data=await res.json();if(!res.ok)throw new Error(data.error||'活動代碼無效或已停用。');state.activity=data;const sites=allowedSites();if(sites.length===1)state.meta.site=sites[0][2];else if(!sites.some(s=>s[2]===state.meta.site))state.meta.site='';if(data.start_date===data.end_date)state.meta.date=data.start_date;else if(state.meta.date<data.start_date||state.meta.date>data.end_date)state.meta.date='';persist();}
   catch(err){state.activity=null;activityBusy=false;render();$('#activity-error').textContent=window.location.protocol==='file:'?'本機預覽無法驗證正式活動；請開啟測試模式查看，正式填報需在網站上驗證。':err.message;return;}
   activityBusy=false;render();
 }

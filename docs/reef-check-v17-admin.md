@@ -111,3 +111,16 @@ REEF_DATA_TEST_DATABASE_URL="$DATABASE_URL" REEF_DATA_CONFIRMED_PACKAGE=1 go tes
 
 Cloud Build trigger `coast-monitoring-dev` 監聽 `main`，採用 `cloudbuild.yaml`。
 本次加入前端語法／統計測試步驟。推送 main 後由既有 trigger 執行測試、建置與 dev 部署；實際部署結果以 Cloud Build 與 Cloud Run revision 為準。
+
+## 2026-11-02 發布與活動需求更新
+
+PRD 的活動代碼生命週期、帶入填報與發布核對驗收條件見 [志工填報 PRD 補充](volunteer-entry-2026-10-14.md#prd-補充活動建立歷史發布與管理者核對2026-11-02)。歷史匯入新增預設發布；志工新增仍待審核。
+
+既有歷史資料用原確認匯入包批次發布（先套用既有 migrations，`DATABASE_URL` 指向目標資料庫）：
+
+```sh
+go run ./cmd/import-reefcheck --csv-dir /path/to/confirmed/csv --publish-existing-only --dry-run
+go run ./cmd/import-reefcheck --csv-dir /path/to/confirmed/csv --publish-existing-only
+```
+
+只改清單內未有人工發布決策的歷史草稿及其 audit，不重新匯入觀測資料；先查看 dry-run 筆數。重跑不會重複發布。原始匯入包仍需完整，供來源 SHA-256 與匯入嘗試紀錄使用。

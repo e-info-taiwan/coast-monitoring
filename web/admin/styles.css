@@ -3537,3 +3537,19 @@ body.no-scroll {
   .pc-table td.pc-nowrap small { display: inline; margin-left: 4px; }
   .pc-table .pc-actions { margin-left: auto; width: auto; }
 }
+
+/* Publication handboard review, aligned with the volunteer's four segments. */
+.pr-scroll { overflow-x: auto; margin: 16px 0; max-width: 100%; }
+.pr-table { border-collapse: collapse; width: 100%; font-size: 13px; }
+.pr-table caption { text-align: left; font-weight: 700; padding: 12px; background: #dcefee; }
+.pr-table th, .pr-table td { border: 1px solid #819f9b; padding: 8px; text-align: center; white-space: nowrap; }
+.pr-table thead { background: #dcefee; color: #226460; }
+.pr-table small { display: block; font-size: 11px; color: #526e6b; }
+.pr-board { min-width: 1150px; }
+.pr-board tbody tr:nth-child(5n) { border-bottom: 2px solid #456e69; }
+.pr-board tbody th { background: #eef6f5; }
+.pr-missing { color: #b32c24; font-weight: 600; }
+.pr-meta { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; }
+.pr-meta dd { margin: 4px 0; overflow-wrap: anywhere; }
+.pr-meta dt { color: #61716e; }
+.pr-transect { border-top: 1px solid #c6d4d1; margin-top: 20px; padding-top: 12px; }
