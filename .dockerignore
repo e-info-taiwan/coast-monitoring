@@ -1,0 +1,9 @@
+.git
+.local
+.env
+.env.*
+!.env.example
+coral_data_RD_handoff_*.zip
+coral_data_RD_handoff_*.zip.sha256
+**/__pycache__
+.worktrees

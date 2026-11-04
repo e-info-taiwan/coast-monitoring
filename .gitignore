@@ -12,3 +12,6 @@ pocketbase-local
 
 # Local database exports and verification artifacts
 .local/
+coral_data_RD_handoff_*.zip
+coral_data_RD_handoff_*.zip.sha256
+**/__pycache__/
