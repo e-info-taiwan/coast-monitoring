@@ -9,6 +9,31 @@ import (
 	"testing"
 )
 
+func TestReefActivitiesPageAndAssets(t *testing.T) {
+	router := NewRouter(Dependencies{})
+	for _, path := range []string{"/admin/reef-activities.html", "/admin/reef-activities.js", "/admin/styles.css"} {
+		t.Run(path, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			if strings.HasSuffix(path, ".html") {
+				for _, marker := range []string{`id="activity-form"`, `src="./reef-activities.js"`, `href="./styles.css"`, `href="/admin/"`} {
+					if !strings.Contains(rec.Body.String(), marker) {
+						t.Fatalf("activity page missing %s", marker)
+					}
+				}
+			}
+		})
+	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/reef-activities.html", nil))
+	if rec.Code != http.StatusTemporaryRedirect || rec.Header().Get("Location") != "/admin/reef-activities.html" {
+		t.Fatalf("legacy activity URL: status=%d location=%s", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
 func TestRootServesReefCheckHTML(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()

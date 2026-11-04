@@ -168,6 +168,9 @@ func NewRouter(deps Dependencies) http.Handler {
 		http.Redirect(w, r, "/admin/", http.StatusTemporaryRedirect)
 	})
 	r.Handle("/admin/*", http.StripPrefix("/admin/", http.FileServer(http.Dir(staticDir("web/admin")))))
+	r.Get("/reef-activities.html", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/admin/reef-activities.html", http.StatusTemporaryRedirect)
+	})
 	r.Get("/admin", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/admin/", http.StatusTemporaryRedirect)
 	})

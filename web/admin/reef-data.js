@@ -18,6 +18,7 @@ export function createReefData({ apiFetch, onCount }) {
     users: [],
     divers: [],
     cwaStations: [],
+    cwaStationsError: "",
     error: "",
     loading: false,
     loaded: false,
@@ -65,11 +66,12 @@ export function createReefData({ apiFetch, onCount }) {
 
   async function getCWAStations() {
     if (!s.cwaStations.length) {
+      s.cwaStationsError = ""
       try {
         const res = await apiFetch("/admin/cwa-marine/stations")
-        s.cwaStations = res?.stations || []
+        s.cwaStations = res || []
       } catch (err) {
-        console.warn("無法取得氣象署測站清單", err)
+        s.cwaStationsError = `無法載入測站清單：${err.message || "請稍後重試"}。可先手動填寫水溫，或關閉視窗後重新開啟以重試。`
         s.cwaStations = []
       }
     }
@@ -136,7 +138,7 @@ export function createReefData({ apiFetch, onCount }) {
         </div>
         <div class="rd-header-actions">
           <button type="button" class="tiny-button rd-report-button" id="rd-export-filtered" data-empty="${!filtered.length}" ${s.exporting || !filtered.length ? "disabled" : ""}>下載篩選報告 ZIP（${filtered.length}）</button>
-          <a class="tiny-button" href="/reef-activities.html">活動代碼管理</a>
+          <a class="tiny-button" href="/admin/reef-activities.html">活動代碼管理</a>
           <button type="button" class="primary-button" id="rd-create-event">＋ 新增調查場次</button>
           <button type="button" class="tiny-button" id="rd-refresh">重新整理</button>
         </div>
@@ -638,14 +640,14 @@ export function createReefData({ apiFetch, onCount }) {
       const areaA = a.area_name || ""
       const areaB = b.area_name || ""
       const cmp = areaA.localeCompare(areaB, "zh-TW")
-      return cmp !== 0 ? cmp : (a.station_name || "").localeCompare(b.station_name || "", "zh-TW")
+      return cmp !== 0 ? cmp : (a.name_zh || "").localeCompare(b.name_zh || "", "zh-TW")
     })
 
     const stationOptions = sortedStations.map(st => {
       const area = st.area_name ? `[${st.area_name}] ` : ""
       const type = st.station_type ? ` · ${st.station_type}` : ""
-      const label = `${area}${st.station_name} (${st.station_id}${type})`
-      return `<option value="${esc(st.station_id)}">${esc(label)}</option>`
+      const label = `${area}${st.name_zh} (${st.id}${type})`
+      return `<option value="${esc(st.id)}">${esc(label)}</option>`
     }).join("")
 
     const today = new Date().toISOString().slice(0, 10)
@@ -674,7 +676,7 @@ export function createReefData({ apiFetch, onCount }) {
           <option value="">(不指定 / 無對應測站)</option>
           ${stationOptions}
         </select>
-        <small class="meta-line">選擇樣點時將自動帶入預設推薦測站，亦可自由手動更換</small>
+        <small class="meta-line" id="rd-cwa-station-hint" role="status">${esc(s.cwaStationsError || (stations.length ? "選擇樣點時將自動帶入預設推薦測站，亦可自由手動更換" : "目前沒有可用測站，請先同步氣象署測站資料；水溫可手動填寫。"))}</small>
       </label>
       <label>
         當日水溫 (°C)
@@ -714,22 +716,30 @@ export function createReefData({ apiFetch, onCount }) {
         const tempInput = overlay.querySelector("#rd-create-water-temp")
         const fetchBtn = overlay.querySelector("#rd-fetch-temp-btn")
         const hintP = overlay.querySelector("#rd-cwa-temp-hint")
+        const stationHint = overlay.querySelector("#rd-cwa-station-hint")
 
         let fetchSeq = 0
-        async function fetchSeaTemp(isAuto = false) {
+        let autoFilledTemperature = null
+        async function fetchSeaTemp() {
+          const currentSeq = ++fetchSeq
+          if (autoFilledTemperature !== null && tempInput.value === autoFilledTemperature) {
+            tempInput.value = ""
+          }
+          autoFilledTemperature = null
           const stationId = stationSel?.value?.trim()
           const dateVal = dateInput?.value?.trim()
           const timeVal = timeInput?.value?.trim() || "09:00"
 
           if (!stationId || !dateVal) {
-            if (!isAuto && hintP) {
-              hintP.textContent = "請先選擇氣象署測站與調查日期"
+            if (fetchBtn) fetchBtn.disabled = false
+            if (hintP) {
+              hintP.textContent = "請先選擇氣象署測站與調查日期；也可手動填寫水溫。"
               hintP.style.color = "#c05621"
             }
             return
           }
 
-          const currentSeq = ++fetchSeq
+          const initialTemperature = tempInput.value
           if (hintP) {
             hintP.textContent = "正在向氣象署檢索海溫..."
             hintP.style.color = "var(--primary,#00705a)"
@@ -743,15 +753,19 @@ export function createReefData({ apiFetch, onCount }) {
               time: timeVal,
             })
             const data = await apiFetch(`/admin/cwa-marine/sea-temp?${query.toString()}`)
-            if (currentSeq !== fetchSeq) return
+            if (currentSeq !== fetchSeq || !overlay.isConnected) return
 
-            if (data && typeof data.temperature_c === "number") {
-              if (tempInput) {
-                tempInput.value = data.temperature_c.toFixed(1)
+            if (data && typeof data.sea_temp_c === "number") {
+              // Preserve a manual value, including edits made while the request was pending.
+              if (initialTemperature !== "" || tempInput.value !== initialTemperature) {
+                hintP.textContent = `氣象署海溫 ${data.sea_temp_c}°C；已保留手動填寫的水溫。`
+                return
               }
+              autoFilledTemperature = data.sea_temp_c.toFixed(1)
+              tempInput.value = autoFilledTemperature
               if (hintP) {
                 const obsTime = data.observed_at ? data.observed_at.slice(0, 16).replace("T", " ") : ""
-                hintP.textContent = `✓ 已自動帶入氣象署海溫 ${data.temperature_c}°C${obsTime ? `（觀測時間：${obsTime}）` : ""}`
+                hintP.textContent = `✓ 已自動帶入氣象署海溫 ${data.sea_temp_c}°C${obsTime ? `（觀測時間：${obsTime}）` : ""}`
                 hintP.style.color = "#2f855a"
               }
             } else {
@@ -761,13 +775,13 @@ export function createReefData({ apiFetch, onCount }) {
               }
             }
           } catch (err) {
-            if (currentSeq !== fetchSeq) return
+            if (currentSeq !== fetchSeq || !overlay.isConnected) return
             if (hintP) {
               hintP.textContent = `查詢海溫提示: ${err.message || "未取得海溫紀錄，可手動填寫"}`
               hintP.style.color = "#718096"
             }
           } finally {
-            if (fetchBtn) fetchBtn.disabled = false
+            if (fetchBtn && currentSeq === fetchSeq) fetchBtn.disabled = false
           }
         }
 
@@ -775,17 +789,24 @@ export function createReefData({ apiFetch, onCount }) {
         siteSel?.addEventListener("change", () => {
           const siteId = Number(siteSel.value)
           const site = sortedSites.find(s => s.id === siteId)
-          if (site && site.cwa_station_id) {
-            if (stationSel) stationSel.value = site.cwa_station_id
-            fetchSeaTemp(true)
+          stationSel.value = site?.cwa_station_id || ""
+          if (stationSel.value) {
+            stationHint.textContent = "已帶入此樣點的預設測站，可手動更換。"
+          } else {
+            stationHint.textContent = s.cwaStationsError || (!stations.length
+              ? "目前沒有可用測站，請先同步氣象署測站資料；水溫可手動填寫。"
+              : site?.cwa_station_id
+                ? "此樣點的預設測站目前不可用，請手動選擇其他測站。"
+                : "此樣點尚未設定對應測站，可手動選擇測站或填寫水溫。")
           }
+          fetchSeaTemp()
         })
 
         // When station, date, or time changes, trigger fetch
-        stationSel?.addEventListener("change", () => fetchSeaTemp(true))
-        dateInput?.addEventListener("change", () => fetchSeaTemp(true))
-        timeInput?.addEventListener("change", () => fetchSeaTemp(true))
-        fetchBtn?.addEventListener("click", () => fetchSeaTemp(false))
+        stationSel?.addEventListener("change", () => fetchSeaTemp())
+        dateInput?.addEventListener("change", () => fetchSeaTemp())
+        timeInput?.addEventListener("change", () => fetchSeaTemp())
+        fetchBtn?.addEventListener("click", () => fetchSeaTemp())
       },
       onSubmit: async (f, close) => {
         const siteID = Number(f.get("site_id"))
@@ -993,6 +1014,8 @@ export function createReefData({ apiFetch, onCount }) {
       s.sites = []
       s.users = []
       s.divers = []
+      s.cwaStations = []
+      s.cwaStationsError = ""
       s.detail = null
       s.loaded = false
       s.editing = false

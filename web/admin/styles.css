@@ -3162,6 +3162,7 @@ body.no-scroll {
   width: 100%;
   max-width: 560px;
   max-height: 90vh;
+  max-height: 90dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -3172,6 +3173,7 @@ body.no-scroll {
   to { opacity: 1; transform: scale(1); }
 }
 .rd-dialog-head {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -3183,7 +3185,16 @@ body.no-scroll {
   font-size: 1.15rem;
   color: var(--fg);
 }
+#rd-dialog-form {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
 .rd-dialog-body {
+  flex: 1;
+  min-height: 0;
   padding: 1.5rem;
   overflow-y: auto;
   display: flex;
@@ -3211,6 +3222,7 @@ body.no-scroll {
   font: inherit;
 }
 .rd-dialog-foot {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: flex-end;
