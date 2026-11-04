@@ -636,20 +636,6 @@ export function createReefData({ apiFetch, onCount }) {
       return `<option value="${site.id}">${esc(label)}</option>`
     }).join("")
 
-    const sortedStations = [...stations].sort((a, b) => {
-      const areaA = a.area_name || ""
-      const areaB = b.area_name || ""
-      const cmp = areaA.localeCompare(areaB, "zh-TW")
-      return cmp !== 0 ? cmp : (a.name_zh || "").localeCompare(b.name_zh || "", "zh-TW")
-    })
-
-    const stationOptions = sortedStations.map(st => {
-      const area = st.area_name ? `[${st.area_name}] ` : ""
-      const type = st.station_type ? ` · ${st.station_type}` : ""
-      const label = `${area}${st.name_zh} (${st.id}${type})`
-      return `<option value="${esc(st.id)}">${esc(label)}</option>`
-    }).join("")
-
     const today = new Date().toISOString().slice(0, 10)
     const bodyHTML = `
       <label>
@@ -672,19 +658,17 @@ export function createReefData({ apiFetch, onCount }) {
       </label>
       <label>
         氣象署海象測站 (CWA Station)
-        <select name="cwa_station_id" id="rd-create-station">
-          <option value="">(不指定 / 無對應測站)</option>
-          ${stationOptions}
-        </select>
-        <small class="meta-line" id="rd-cwa-station-hint" role="status">${esc(s.cwaStationsError || (stations.length ? "選擇樣點時將自動帶入預設推薦測站，亦可自由手動更換" : "目前沒有可用測站，請先同步氣象署測站資料；水溫可手動填寫。"))}</small>
+        <input type="text" id="rd-create-station-display" value="請先選擇樣點" readonly aria-describedby="rd-cwa-station-hint">
+        <input type="hidden" name="cwa_station_id" id="rd-create-station">
+        <small class="meta-line" id="rd-cwa-station-hint" role="status">${esc(s.cwaStationsError || (stations.length ? "依選擇的樣點自動帶入對應測站。" : "目前沒有可用測站，請先同步氣象署測站資料；水溫可手動填寫。"))}</small>
       </label>
       <label>
         當日水溫 (°C)
         <div style="display:flex;gap:0.5rem;align-items:center;">
           <input type="number" name="water_temp_c" id="rd-create-water-temp" step="0.1" min="0" max="45" placeholder="例如 26.5" style="flex:1;">
-          <button type="button" class="tiny-button" id="rd-fetch-temp-btn" style="white-space:nowrap;">查詢海溫</button>
+          <button type="button" class="tiny-button" id="rd-fetch-temp-btn" style="white-space:nowrap;" disabled>查詢海溫</button>
         </div>
-        <small class="meta-line" id="rd-cwa-temp-hint">選擇測站與日期後，系統將自動從中央氣象署檢索最接近海溫</small>
+        <small class="meta-line" id="rd-cwa-temp-hint">選擇有對應測站的樣點與日期後，系統將自動查詢海溫；也可手動填寫水溫。</small>
       </label>
       <label>
         水深 (Depth m) *
@@ -712,7 +696,8 @@ export function createReefData({ apiFetch, onCount }) {
         const siteSel = overlay.querySelector("#rd-create-site")
         const dateInput = overlay.querySelector("#rd-create-date")
         const timeInput = overlay.querySelector("#rd-create-time")
-        const stationSel = overlay.querySelector("#rd-create-station")
+        const stationInput = overlay.querySelector("#rd-create-station")
+        const stationDisplay = overlay.querySelector("#rd-create-station-display")
         const tempInput = overlay.querySelector("#rd-create-water-temp")
         const fetchBtn = overlay.querySelector("#rd-fetch-temp-btn")
         const hintP = overlay.querySelector("#rd-cwa-temp-hint")
@@ -726,14 +711,14 @@ export function createReefData({ apiFetch, onCount }) {
             tempInput.value = ""
           }
           autoFilledTemperature = null
-          const stationId = stationSel?.value?.trim()
+          const stationId = stationInput.value.trim()
           const dateVal = dateInput?.value?.trim()
           const timeVal = timeInput?.value?.trim() || "09:00"
 
           if (!stationId || !dateVal) {
-            if (fetchBtn) fetchBtn.disabled = false
+            if (fetchBtn) fetchBtn.disabled = true
             if (hintP) {
-              hintP.textContent = "請先選擇氣象署測站與調查日期；也可手動填寫水溫。"
+              hintP.textContent = "需有對應測站及調查日期才能查詢海溫；也可手動填寫水溫。"
               hintP.style.color = "#c05621"
             }
             return
@@ -785,25 +770,28 @@ export function createReefData({ apiFetch, onCount }) {
           }
         }
 
-        // When site changes, autofill recommended CWA station
+        // The station is determined by the selected site's configured mapping.
         siteSel?.addEventListener("change", () => {
           const siteId = Number(siteSel.value)
           const site = sortedSites.find(s => s.id === siteId)
-          stationSel.value = site?.cwa_station_id || ""
-          if (stationSel.value) {
-            stationHint.textContent = "已帶入此樣點的預設測站，可手動更換。"
+          const station = stations.find(st => st.id === site?.cwa_station_id)
+          stationInput.value = station?.id || ""
+          if (station) {
+            stationDisplay.value = `${station.name_zh} (${station.id})`
+            stationHint.textContent = "已自動帶入此樣點的對應測站。"
+          } else if (!site) {
+            stationDisplay.value = "請先選擇樣點"
+            stationHint.textContent = "依選擇的樣點自動帶入對應測站。"
           } else {
-            stationHint.textContent = s.cwaStationsError || (!stations.length
-              ? "目前沒有可用測站，請先同步氣象署測站資料；水溫可手動填寫。"
-              : site?.cwa_station_id
-                ? "此樣點的預設測站目前不可用，請手動選擇其他測站。"
-                : "此樣點尚未設定對應測站，可手動選擇測站或填寫水溫。")
+            stationDisplay.value = site.cwa_station_id ? "對應測站目前不可用" : "未設定對應測站"
+            stationHint.textContent = !site.cwa_station_id
+              ? "此樣點尚未設定對應測站，水溫請手動填寫；可至樣點管理設定對應測站。"
+              : s.cwaStationsError || "此樣點的對應測站目前不可用，水溫請手動填寫；請確認測站設定或同步測站資料。"
           }
           fetchSeaTemp()
         })
 
-        // When station, date, or time changes, trigger fetch
-        stationSel?.addEventListener("change", () => fetchSeaTemp())
+        // Date and time changes query the same site-linked station.
         dateInput?.addEventListener("change", () => fetchSeaTemp())
         timeInput?.addEventListener("change", () => fetchSeaTemp())
         fetchBtn?.addEventListener("click", () => fetchSeaTemp())

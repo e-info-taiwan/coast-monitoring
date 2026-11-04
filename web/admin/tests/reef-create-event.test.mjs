@@ -15,6 +15,7 @@ class Element {
     for (const match of html.matchAll(/<(input|select|small|button|form|p)\b([^>]*\bid="([^"]+)"[^>]*)>/g)) {
       const node = this.querySelector(`#${match[3]}`)
       node.value = match[2].match(/\bvalue="([^"]*)"/)?.[1] || ''
+      node.disabled = /\bdisabled\b/.test(match[2])
       if (match[1] === 'select') {
         const body = html.slice(match.index + match[0].length).split('</select>')[0]
         node.options = [...body.matchAll(/value="([^"]*)"/g)].map(m => m[1])
@@ -46,7 +47,7 @@ async function setup({stations = [{id: '1106', name_zh: '龍洞', area_name: '�
   const app = context.createReefData({onCount() {}, apiFetch: async (path, options) => {
     calls.push({path, options})
     if (path.endsWith('/stations')) { if (stations instanceof Error) throw stations; return stations }
-    if (path.endsWith('/sites')) return [{id: 1, name_zh: '樣點 A', cwa_station_id: '1106'}, {id: 2, name_zh: '樣點 B'}]
+    if (path.endsWith('/sites')) return [{id: 1, name_zh: '樣點 A', cwa_station_id: '1106'}, {id: 2, name_zh: '樣點 B'}, {id: 3, name_zh: '樣點 C', cwa_station_id: '1200'}]
     if (path.includes('/sea-temp?')) return temperature(path)
     if (options?.method === 'POST') return {event: {id: 9}}
     if (path.endsWith('/events/9')) return {event: {id: 9, event_time: '09:00'}, transects: []}
@@ -61,12 +62,15 @@ async function setup({stations = [{id: '1106', name_zh: '龍洞', area_name: '�
 test('station array/id/name and sea_temp_c populate the form and submitted event', async () => {
   const {overlay, node, calls, panel} = await setup()
   assert.match(panel.innerHTML, /href="\/admin\/reef-activities.html"/)
-  assert.match(overlay.innerHTML, /value="1106">.*龍洞/)
+  assert.doesNotMatch(overlay.innerHTML, /<select name="cwa_station_id"/)
+  assert.equal(node('rd-create-station').value, '')
+  assert.equal(node('rd-fetch-temp-btn').disabled, true)
   assert.match(overlay.innerHTML, /type="submit"[^>]*>建立場次/)
   node('rd-create-site').value = '1'
   node('rd-create-site').handlers.change()
   await tick()
   assert.equal(node('rd-create-station').value, '1106')
+  assert.equal(node('rd-create-station-display').value, '龍洞 (1106)')
   assert.equal(node('rd-create-water-temp').value, '26.5')
   assert.match(calls.find(c => c.path.includes('/sea-temp?')).path, /station_id=1106/)
   const form = node('rd-dialog-form')
@@ -89,8 +93,32 @@ test('switching to an unlinked site clears station, automatic temperature and pe
   await tick()
   assert.equal(node('rd-create-station').value, '')
   assert.equal(node('rd-create-water-temp').value, '')
-  assert.equal(node('rd-fetch-temp-btn').disabled, false)
+  assert.equal(node('rd-fetch-temp-btn').disabled, true)
   assert.match(node('rd-cwa-station-hint').textContent, /尚未設定/)
+})
+
+test('only the selected site station is shown and queried, even when other stations exist', async () => {
+  const {node, calls, overlay} = await setup({stations: [{id: '1106', name_zh: '龍洞'}, {id: '1200', name_zh: '另一測站'}]})
+  assert.doesNotMatch(overlay.innerHTML, /另一測站/)
+  for (const [site, id, name] of [['1', '1106', '龍洞'], ['3', '1200', '另一測站']]) {
+    node('rd-create-site').value = site
+    node('rd-create-site').handlers.change()
+    await tick()
+    assert.equal(node('rd-create-station').value, id)
+    assert.equal(node('rd-create-station-display').value, `${name} (${id})`)
+    assert.match(calls.at(-1).path, new RegExp(`station_id=${id}`))
+  }
+})
+
+test('unavailable mapped station never falls back to an unrelated station', async () => {
+  const {node, calls} = await setup({stations: [{id: '1200', name_zh: '另一測站'}]})
+  node('rd-create-site').value = '1'
+  node('rd-create-site').handlers.change()
+  await tick()
+  assert.equal(node('rd-create-station').value, '')
+  assert.equal(node('rd-create-station-display').value, '對應測站目前不可用')
+  assert.equal(node('rd-fetch-temp-btn').disabled, true)
+  assert.equal(calls.some(c => c.path.includes('/sea-temp?')), false)
 })
 
 test('automatic temperatures are cleared on site change; manual values are retained', async () => {
