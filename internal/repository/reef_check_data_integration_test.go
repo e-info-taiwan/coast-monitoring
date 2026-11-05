@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -20,7 +19,7 @@ func TestReefDataPostgresRoundTrip(t *testing.T) {
 		t.Skip("set REEF_DATA_TEST_DATABASE_URL to a migrated local PostgreSQL database")
 	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := integrationPool(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +129,7 @@ func TestReefDataConfirmedPackage(t *testing.T) {
 		t.Skip("requires the local confirmed-only v1.7 import")
 	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := integrationPool(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +194,7 @@ func TestReefDataSubmitSurvey(t *testing.T) {
 		t.Skip("set REEF_DATA_TEST_DATABASE_URL to a migrated local PostgreSQL database")
 	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := integrationPool(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +260,7 @@ func TestReefDataSubmitSurvey(t *testing.T) {
 		t.Fatalf("duplicate=%v", err)
 	}
 	var count, status string
-	if err = tx.QueryRow(ctx, `SELECT COALESCE(count::text,'NA'),record_status FROM belt_observation b JOIN transect t ON t.id=b.transect_id WHERE t.event_id=$1 AND b.segment=2`, res.EventID).Scan(&count, &status); err != nil || status != "not_recorded" || count!="NA" {
+	if err = tx.QueryRow(ctx, `SELECT COALESCE(count::text,'NA'),record_status FROM belt_observation b JOIN transect t ON t.id=b.transect_id WHERE t.event_id=$1 AND b.segment=2`, res.EventID).Scan(&count, &status); err != nil || status != "not_recorded" || count != "NA" {
 		t.Fatalf("NA lost: %s %s %v", count, status, err)
 	}
 

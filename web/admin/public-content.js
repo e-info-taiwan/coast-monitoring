@@ -112,7 +112,7 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
     s.error = ""
     if (panel) renderPanel()
     try {
-      const needsSites = ["profile", "annotation", "chart"].includes(kind)
+      const needsSites = ["profile", "annotation", "chart", "activity"].includes(kind)
       const [items] = await Promise.all([apiFetch(listPath(kind)), needsSites ? ensureSites() : null])
       if (request !== requestID) return
       s.items = Array.isArray(items) ? items : items?.items || []
@@ -316,14 +316,21 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
     const siteOptions = [["", "請選擇"], ...s.sites.map(site => [String(site.id), site.name_zh])]
     const basic = field("title", "標題／名稱", d.title, "text", { wide: true }) + textarea("summary", "摘要", d.summary, 4) + field("sort_order", "排序", d.sort_order ?? 0, "number", { help: "數字越小越前面" })
     const parts = [section("基本資料", basic)]
-    if (kind === "settings") parts.push(section("首頁設定", field("article_limit", "首頁最新消息顯示筆數", d.article_limit ?? 7, "number", { help: "可設定 1–50 筆" })))
-    if (kind === "article") parts.push(section("文章資訊", field("external_url", "文章外部網址", d.external_url, "url", { wide: true }) + field("image_url", "縮圖網址", d.image_url, "url", { wide: true }) + field("date", "發布日期", d.date, "date")))
+    if (kind === "settings") {
+      const popup=d.intro_popup||{}
+      parts.push(section("首頁設定",field("article_limit","首頁最新消息顯示筆數",d.article_limit??7,"number",{help:"可設定 1–50 筆"})+field("popup_kicker","彈窗引題",popup.kicker)+field("popup_title","彈窗標題",popup.title)+textarea("popup_body","彈窗說明",popup.body)+textarea("popup_steps","操作提示（每行一項）",(popup.steps||[]).join("\n"))+field("popup_button_label","開始按鈕文字",popup.button_label)))
+    }
+    if (kind === "article") parts.push(section("文章資訊", select("category","文章分類",[["news","最新消息"],["observation_report","觀測報告"]],d.category||"news") + field("external_url", "文章外部網址", d.external_url, "url", { wide: true }) + field("image_url", "縮圖網址", d.image_url, "url", { wide: true }) + field("date", "發布日期", d.date, "date")))
     if (kind === "activity") parts.push(section("活動資訊",
       field("start_at", "開始時間", toLocalInput(d.start_at), "datetime-local") + field("end_at", "結束時間", toLocalInput(d.end_at), "datetime-local") +
       field("location", "地點", d.location, "text", { wide: true }) +
       select("recruitment_type", "招募類型", [["public", "公開招募"], ["internal", "內部活動"]], d.recruitment_type) +
       select("status", "活動狀態", ACTIVITY_STATUS, d.status) +
       field("registration_url", "報名網址", d.registration_url, "url", { wide: true }), "時間以台灣時間（UTC+8）儲存。"))
+    if(kind==="activity") {
+      parts.push(section("調查填報",select("entry_enabled","允許志工填報",[["false","不啟用"],["true","啟用並產生活動代碼"]],String(d.entry_enabled||false))+field("expires_at","代碼失效時間（可空白）",toLocalInput(d.expires_at),"datetime-local")))
+      parts.push(`<section class="pc-form-section"><h3>允許填報樣點</h3><div class="pc-checks">${s.sites.map(site=>`<label><input name="site_ids" type="checkbox" value="${esc(site.id)}" ${(d.site_ids||[]).includes(site.id)?"checked":""}>${esc(site.name_zh)}</label>`).join("")}</div>${item?.entry_config_id?`<button type="button" data-entry-action="rotate">重發代碼</button><button type="button" data-entry-action="disable">停用填報</button>`:""}<p role="status" id="pc-entry-result">${item?.entry_code?`請保存新代碼：${esc(item.entry_code)}`:""}</p></section>`)
+    }
     if (["profile", "annotation", "chart"].includes(kind)) {
       parts.push(section("樣點", select("site_id", kind === "chart" ? "樣點（共用圖表可留空）" : "樣點", siteOptions, String(item?.site_id || ""), { wide: true })))
     }
@@ -354,7 +361,7 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
   async function openEditor(item, { notice = "" } = {}) {
     const kind = s.kind
     const meta = kindMeta(kind)
-    if (["profile", "annotation", "chart"].includes(kind)) await ensureSites()
+    if (["profile", "annotation", "chart", "activity"].includes(kind)) await ensureSites()
     let dirty = false
     drawer.open({
       eyebrow: meta.title,
@@ -383,6 +390,14 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
           const remove = event.target.closest("[data-remove-row]")
           if (remove) { remove.closest(".pc-repeat")?.remove(); dirty = true }
         })
+        body.querySelectorAll("[data-entry-action]").forEach(button=>button.onclick=async()=>{
+          if(dirty){window.alert("請先儲存活動修改，再操作代碼。");return}
+          if(!window.confirm("此操作會讓舊代碼失效，既有觀測仍保留活動歸屬。確定繼續？"))return
+          button.disabled=true
+          try { const result=await apiFetch(`/admin/reef-check-data/activities/${item.entry_config_id}`,{method:"PATCH",body:{action:button.dataset.entryAction}})
+            await load();const refreshed=s.items.find(x=>x.id===item.id);openEditor({...refreshed,entry_code:result.code},{notice:result.code?"已重發代碼，請保存。":"已停用填報。"})
+          }catch(error){body.querySelector("#pc-entry-result").textContent=error.message;button.disabled=false}
+        })
         form.onsubmit = async event => {
           event.preventDefault()
           const ok = await save(form, kind, item)
@@ -396,9 +411,11 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
     const f = new FormData(form)
     const d = {}
     for (const [k, v] of f) {
-      if (["site_id", "site_ids", "publication_status", "geometry"].includes(k) || k.startsWith("t_") || k.startsWith("m_")) continue
+      if (["site_id", "site_ids", "publication_status", "geometry"].includes(k) || k.startsWith("t_") || k.startsWith("m_") || k.startsWith("popup_")) continue
       if (["area_m2", "investment_ntd", "year_from", "year_to", "article_limit"].includes(k)) { if (v !== "") d[k] = Number(v) }
       else if (k === "sort_order") d[k] = Number(v)
+      else if (k === "entry_enabled") d[k] = v === "true"
+      else if (k === "expires_at") { if(v) d[k]=`${v}:00+08:00` }
       else if (k === "is_visible") d[k] = v === "true"
       else if (k === "depths_m") d[k] = v ? String(v).split(",").map(Number) : []
       else if (k === "category_keys") d[k] = v ? String(v).split(",").map(x => x.trim()) : []
@@ -415,7 +432,8 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
       d.timeline = [...form.querySelectorAll(".timeline-row")].map(el => ({ title: val(el, "t_title"), date: val(el, "t_date"), date_precision: val(el, "t_precision"), description: val(el, "t_description"), status: val(el, "t_status"), source_url: val(el, "t_source"), sort_order: Number(val(el, "t_sort")), is_published: val(el, "t_published") === "true" }))
       d.media = [...form.querySelectorAll(".media-row")].map(el => ({ url: val(el, "m_url"), alt: val(el, "m_alt"), is_valid: val(el, "m_valid") === "true", license_confirmed: val(el, "m_licensed") === "true", is_published: val(el, "m_published") === "true" }))
     }
-    if (kind === "chart") d.site_ids = f.getAll("site_ids").map(Number)
+    if (kind === "settings") d.intro_popup={kicker:f.get("popup_kicker")||"",title:f.get("popup_title")||"",body:f.get("popup_body")||"",steps:String(f.get("popup_steps")||"").split("\n").filter(x=>x.trim()),button_label:f.get("popup_button_label")||""}
+    if (kind === "chart" || kind === "activity") d.site_ids = f.getAll("site_ids").map(Number)
     return { data: d, siteID: f.get("site_id") ? Number(f.get("site_id")) : null, status: f.get("publication_status") || "draft" }
   }
 
@@ -432,10 +450,11 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
       return false
     }
     if (payload.status === "archived" && current?.publication_status !== "archived" && !window.confirm("確定封存此內容？封存後不再出現在公開網站。")) return false
+    if (kind==="article" && current?.related_site_ids?.length && !window.confirm(`這會修改共用報告，影響樣點：${current.related_site_ids.map(siteName).join("、")}。確定儲存？`)) return false
     submit.disabled = true
     submit.textContent = "儲存中…"
     try {
-      const body = { kind, data: payload.data, site_id: payload.siteID, publication_status: payload.status, version: current?.updated_at || "", confirm: payload.status === "archived" }
+      const body = { kind, data: payload.data, site_id: payload.siteID, publication_status: payload.status, version: current?.updated_at || "", confirm: payload.status === "archived" || Boolean(kind==="article"&&current?.related_site_ids?.length) }
       const saved = await apiFetch(`/admin/public-content/${kind}${current ? `/${current.id}` : ""}`, { method: current ? "PATCH" : "POST", body })
       const message = current ? "已儲存變更。" : "已建立草稿；核對後可改為「已發布」。"
       notify({ tone: "ok", title: message, id: "pc-save" })

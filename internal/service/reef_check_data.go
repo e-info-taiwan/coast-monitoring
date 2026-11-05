@@ -14,31 +14,35 @@ import (
 
 // ReefData types describe the imported v1.7 domain, independent of the legacy UUID surveys.
 type ReefDataEvent struct {
-	MissingReason     string                  `json:"missing_reason"`
-	EntryMetadata     *ReefCheckEntryMetadata `json:"entry_metadata,omitempty"`
-	ActivityName      string                  `json:"activity_name,omitempty"`
-	PublicationStatus string                  `json:"publication_status,omitempty"`
-	ID                int                     `json:"id"`
-	EventID           string                  `json:"event_id"`
-	SurveyID          int                     `json:"survey_id"`
-	SurveyDate        string                  `json:"survey_date"`
-	EventTime         string                  `json:"event_time"`
-	DepthM            float64                 `json:"depth_m"`
-	SiteID            int                     `json:"site_id"`
-	SiteName          string                  `json:"site_name"`
-	SiteEnglish       string                  `json:"site_english"`
-	Region            string                  `json:"region"`
-	County            string                  `json:"county"`
-	Location          string                  `json:"location"`
-	Latitude          *float64                `json:"latitude"`
-	Longitude         *float64                `json:"longitude"`
-	StartDate         string                  `json:"start_date"`
-	EndDate           string                  `json:"end_date"`
-	Label             string                  `json:"label"`
-	Methods           []string                `json:"methods"`
-	CWAStationID      *string                 `json:"cwa_station_id,omitempty"`
-	CWAStationName    *string                 `json:"cwa_station_name,omitempty"`
-	WaterTemp         *float64                `json:"water_temp_c,omitempty"`
+	ActivityID            *int                    `json:"activity_id"`
+	TemperatureSource     *string                 `json:"sea_temp_source"`
+	TemperatureObservedAt *time.Time              `json:"sea_temp_observed_at"`
+	TemperatureFetchedAt  *time.Time              `json:"sea_temp_fetched_at"`
+	MissingReason         string                  `json:"missing_reason"`
+	EntryMetadata         *ReefCheckEntryMetadata `json:"entry_metadata,omitempty"`
+	ActivityName          string                  `json:"activity_name,omitempty"`
+	PublicationStatus     string                  `json:"publication_status,omitempty"`
+	ID                    int                     `json:"id"`
+	EventID               string                  `json:"event_id"`
+	SurveyID              int                     `json:"survey_id"`
+	SurveyDate            string                  `json:"survey_date"`
+	EventTime             string                  `json:"event_time"`
+	DepthM                float64                 `json:"depth_m"`
+	SiteID                int                     `json:"site_id"`
+	SiteName              string                  `json:"site_name"`
+	SiteEnglish           string                  `json:"site_english"`
+	Region                string                  `json:"region"`
+	County                string                  `json:"county"`
+	Location              string                  `json:"location"`
+	Latitude              *float64                `json:"latitude"`
+	Longitude             *float64                `json:"longitude"`
+	StartDate             string                  `json:"start_date"`
+	EndDate               string                  `json:"end_date"`
+	Label                 string                  `json:"label"`
+	Methods               []string                `json:"methods"`
+	CWAStationID          *string                 `json:"cwa_station_id,omitempty"`
+	CWAStationName        *string                 `json:"cwa_station_name,omitempty"`
+	WaterTemp             *float64                `json:"water_temp_c,omitempty"`
 }
 
 type ReefDataMetadata struct {
@@ -112,29 +116,33 @@ type ReefDataParticipant struct {
 }
 
 type ReefDataSite struct {
-	ID             int      `json:"id"`
-	NameZH         string   `json:"name_zh"`
-	NameEN         string   `json:"name_en"`
-	Region         string   `json:"region"`
-	County         string   `json:"county"`
-	Location       string   `json:"location"`
-	Latitude       *float64 `json:"latitude"`
-	Longitude      *float64 `json:"longitude"`
-	IsActive       bool     `json:"is_active"`
-	CWAStationID   *string  `json:"cwa_station_id,omitempty"`
-	CWAStationName *string  `json:"cwa_station_name,omitempty"`
+	CWAStationSource    string     `json:"cwa_station_source"`
+	CWAStationUpdatedAt *time.Time `json:"cwa_station_updated_at"`
+	CWAStationUpdatedBy *string    `json:"cwa_station_updated_by"`
+	ID                  int        `json:"id"`
+	NameZH              string     `json:"name_zh"`
+	NameEN              string     `json:"name_en"`
+	Region              string     `json:"region"`
+	County              string     `json:"county"`
+	Location            string     `json:"location"`
+	Latitude            *float64   `json:"latitude"`
+	Longitude           *float64   `json:"longitude"`
+	IsActive            bool       `json:"is_active"`
+	CWAStationID        *string    `json:"cwa_station_id,omitempty"`
+	CWAStationName      *string    `json:"cwa_station_name,omitempty"`
 }
 
 type ReefDataSiteInput struct {
-	Region       string   `json:"region"`
-	County       string   `json:"county"`
-	Location     string   `json:"location"`
-	NameZH       string   `json:"name_zh"`
-	NameEN       string   `json:"name_en"`
-	Latitude     *float64 `json:"latitude,omitempty"`
-	Longitude    *float64 `json:"longitude,omitempty"`
-	IsActive     *bool    `json:"is_active,omitempty"`
-	CWAStationID *string  `json:"cwa_station_id,omitempty"`
+	CWAStationUpdatedBy string   `json:"-"`
+	Region              string   `json:"region"`
+	County              string   `json:"county"`
+	Location            string   `json:"location"`
+	NameZH              string   `json:"name_zh"`
+	NameEN              string   `json:"name_en"`
+	Latitude            *float64 `json:"latitude,omitempty"`
+	Longitude           *float64 `json:"longitude,omitempty"`
+	IsActive            *bool    `json:"is_active,omitempty"`
+	CWAStationID        *string  `json:"cwa_station_id,omitempty"`
 }
 
 type ReefDataUser struct {
@@ -234,20 +242,25 @@ type ReefDataParticipantInput struct {
 }
 
 type ReefDataCreateInput struct {
-	FishSizeMode string   `json:"fish_size_mode"`
-	SiteID       int      `json:"site_id"`
-	SurveyDate   string   `json:"survey_date"`
-	StartDate    string   `json:"start_date,omitempty"`
-	EndDate      string   `json:"end_date,omitempty"`
-	EventTime    string   `json:"event_time"`
-	DepthM       float64  `json:"depth_m"`
-	Label        string   `json:"label,omitempty"`
-	Methods      []string `json:"methods"`
-	CWAStationID *string  `json:"cwa_station_id,omitempty"`
-	WaterTemp    *float64 `json:"water_temp_c,omitempty"`
+	ActivityID        *int     `json:"activity_id,omitempty"`
+	TemperatureSource string   `json:"sea_temp_source,omitempty"`
+	FishSizeMode      string   `json:"fish_size_mode"`
+	SiteID            int      `json:"site_id"`
+	SurveyDate        string   `json:"survey_date"`
+	StartDate         string   `json:"start_date,omitempty"`
+	EndDate           string   `json:"end_date,omitempty"`
+	EventTime         string   `json:"event_time"`
+	DepthM            float64  `json:"depth_m"`
+	Label             string   `json:"label,omitempty"`
+	Methods           []string `json:"methods"`
+	CWAStationID      *string  `json:"cwa_station_id,omitempty"`
+	WaterTemp         *float64 `json:"water_temp_c,omitempty"`
 }
 
 func (c *ReefDataCreateInput) Validate(validSiteIDs map[int]bool) error {
+	if c.ActivityID != nil && *c.ActivityID <= 0 {
+		return fmt.Errorf("%w: 活動編號無效", ErrValidation)
+	}
 	if c.SiteID <= 0 || (validSiteIDs != nil && !validSiteIDs[c.SiteID]) {
 		return fmt.Errorf("%w: 請選擇有效樣點", ErrValidation)
 	}

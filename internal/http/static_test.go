@@ -19,7 +19,7 @@ func TestReefActivitiesPageAndAssets(t *testing.T) {
 				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
 			}
 			if strings.HasSuffix(path, ".html") {
-				for _, marker := range []string{`id="activity-form"`, `src="./reef-activities.js"`, `href="./styles.css"`, `href="/admin/"`} {
+				for _, marker := range []string{`http-equiv="refresh"`, `href="/admin/#public_content:activity"`, `href="./styles.css"`} {
 					if !strings.Contains(rec.Body.String(), marker) {
 						t.Fatalf("activity page missing %s", marker)
 					}

@@ -24,6 +24,7 @@ export function createReefData({ apiFetch, onCount }) {
     loaded: false,
     detail: null,
     transectID: null,
+    publication_status:"published", activity_id:"", event_ids:"", survey_date:"", depth_m:"",
     year: "",
     site: "",
     method: "",
@@ -125,7 +126,7 @@ export function createReefData({ apiFetch, onCount }) {
     const years = [...new Set(s.events.map(e => e.survey_date.slice(0, 4)))].sort().reverse().map(y => [y, y])
     const sites = [...new Map(s.events.map(e => [e.site_id, [e.site_id, `${e.site_name} · ${e.site_english}`]])).values()].sort((a, b) => a[1].localeCompare(b[1], "zh-TW"))
     const query = s.search.trim().toLowerCase()
-    const filtered = s.events.filter(e => (!s.year || e.survey_date.startsWith(s.year)) && (!s.site || String(e.site_id) === s.site) && (!s.method || e.methods.includes(s.method)) && (!query || [e.event_id, e.site_name, e.site_english, e.county, e.region, e.label].join(" ").toLowerCase().includes(query)))
+    const filtered = s.events.filter(e => (s.publication_status==="all" || e.publication_status===s.publication_status) && (!s.activity_id || String(e.activity_id)===s.activity_id) && (!s.event_ids || s.event_ids.split(",").map(x=>x.trim()).includes(e.event_id)) && (!s.survey_date || e.survey_date===s.survey_date) && (!s.depth_m || e.depth_m===Number(s.depth_m)) && (!s.year || e.survey_date.startsWith(s.year)) && (!s.site || String(e.site_id) === s.site) && (!s.method || e.methods.includes(s.method)) && (!query || [e.event_id, e.site_name, e.site_english, e.county, e.region, e.label].join(" ").toLowerCase().includes(query)))
     const pages = Math.max(1, Math.ceil(filtered.length / 30))
     s.page = Math.min(s.page, pages - 1)
     const rows = filtered.slice(s.page * 30, (s.page + 1) * 30)
@@ -138,7 +139,7 @@ export function createReefData({ apiFetch, onCount }) {
         </div>
         <div class="rd-header-actions">
           <button type="button" class="tiny-button rd-report-button" id="rd-export-filtered" data-empty="${!filtered.length}" ${s.exporting || !filtered.length ? "disabled" : ""}>下載篩選報告 ZIP（${filtered.length}）</button>
-          <a class="tiny-button" href="/admin/reef-activities.html">活動代碼管理</a>
+          <a class="tiny-button" href="/admin/#public_content:activity">活動與填報代碼</a>
           <button type="button" class="primary-button" id="rd-create-event">＋ 新增調查場次</button>
           <button type="button" class="tiny-button" id="rd-refresh">重新整理</button>
         </div>
@@ -150,6 +151,11 @@ export function createReefData({ apiFetch, onCount }) {
         <div><strong>${sites.length}</strong><span>有觀測的樣點</span></div>
       </div>
       <form id="rd-filters" class="rd-filters">
+        <label>發布狀態<select name="publication_status">${[["published","已發布"],["draft","草稿"],["archived","封存"],["all","全部"]].map(([v,l])=>`<option value="${v}" ${s.publication_status===v?"selected":""}>${l}</option>`).join("")}</select></label>
+        <label>活動<select name="activity_id">${options([...new Map(s.events.filter(e=>e.activity_id).map(e=>[e.activity_id,[e.activity_id,e.activity_name||`活動 ${e.activity_id}`]])).values()],s.activity_id,"全部活動")}</select></label>
+        <label>場次編號（逗號分隔）<input name="event_ids" value="${esc(s.event_ids)}"></label>
+        <label>日期<input name="survey_date" type="date" value="${esc(s.survey_date)}"></label>
+        <label>深度 m<input name="depth_m" type="number" min="0" step="any" value="${esc(s.depth_m)}"></label>
         <label>年份<select name="year">${options(years, s.year, "全部年份")}</select></label>
         <label>樣點<select name="site">${options(sites, s.site, "全部樣點")}</select></label>
         <label>調查方法<select name="method">${options(Object.entries(methods), s.method, "全部方法")}</select></label>
@@ -175,12 +181,12 @@ export function createReefData({ apiFetch, onCount }) {
     panel.querySelector("#rd-filters").onsubmit = event => {
       event.preventDefault()
       const f = new FormData(event.currentTarget)
-      for (const key of ["year", "site", "method", "search"]) s[key] = String(f.get(key) || "")
+      for (const key of ["year", "site", "method", "search", "publication_status","activity_id","event_ids","survey_date","depth_m"]) s[key] = String(f.get(key) || "")
       s.page = 0
       renderList()
     }
     panel.querySelector("#rd-clear").onclick = () => {
-      s.year = s.site = s.method = s.search = ""
+      s.year = s.site = s.method = s.search = s.activity_id = s.event_ids = s.survey_date = s.depth_m = "";s.publication_status="published"
       s.page = 0
       renderList()
     }
@@ -194,7 +200,7 @@ export function createReefData({ apiFetch, onCount }) {
       if (panel === current) render(current)
     }
     panel.querySelector("#rd-export-filtered")?.addEventListener("click", event => {
-      const query = new URLSearchParams({ year: s.year, site: s.site, method: s.method, search: s.search })
+      const query = new URLSearchParams({ year: s.year, site: s.site, method: s.method, search: s.search,publication_status:s.publication_status,activity_id:s.activity_id,event_ids:s.event_ids,survey_date:s.survey_date,depth_m:s.depth_m })
       downloadReport(`/admin/reef-check-data/reports.zip?${query}`, "ReefCheck-範本報告套組.zip", event.currentTarget)
     })
     panel.querySelector("#rd-create-event")?.addEventListener("click", showCreateEventModal)
@@ -612,10 +618,12 @@ export function createReefData({ apiFetch, onCount }) {
   async function showCreateEventModal() {
     let sites = []
     let stations = []
+    let activities=[]
     try {
-      [sites, stations] = await Promise.all([
+      [sites, stations,activities] = await Promise.all([
         getSites(),
         getCWAStations(),
+        apiFetch("/admin/public-content/activity"),
       ])
     } catch (err) {
       alert("無法載入樣點清單: " + err.message)
@@ -638,6 +646,7 @@ export function createReefData({ apiFetch, onCount }) {
 
     const today = new Date().toISOString().slice(0, 10)
     const bodyHTML = `
+      <label>所屬活動（選填）<select name="activity_id"><option value="">獨立調查／歷史資料</option>${activities.filter(a=>a.data.entry_enabled).map(a=>`<option value="${a.id}">${esc(a.data.title)}</option>`).join("")}</select></label>
       <label>
         樣點 (Site) *
         <select name="site_id" id="rd-create-site" required>
@@ -660,6 +669,9 @@ export function createReefData({ apiFetch, onCount }) {
         氣象署海象測站 (CWA Station)
         <input type="text" id="rd-create-station-display" value="請先選擇樣點" readonly aria-describedby="rd-cwa-station-hint">
         <input type="hidden" name="cwa_station_id" id="rd-create-station">
+        <input type="hidden" name="sea_temp_source" id="rd-temperature-source" value="manual">
+        <button type="button" id="rd-station-override">變更本次測站</button>
+        <select id="rd-station-override-select" aria-label="本次觀測測站" hidden><option value="">請選擇</option></select>
         <small class="meta-line" id="rd-cwa-station-hint" role="status">${esc(s.cwaStationsError || (stations.length ? "依選擇的樣點自動帶入對應測站。" : "目前沒有可用測站，請先同步氣象署測站資料；水溫可手動填寫。"))}</small>
       </label>
       <label>
@@ -746,6 +758,7 @@ export function createReefData({ apiFetch, onCount }) {
                 hintP.textContent = `氣象署海溫 ${data.sea_temp_c}°C；已保留手動填寫的水溫。`
                 return
               }
+              overlay.querySelector("#rd-temperature-source").value="automatic"
               autoFilledTemperature = data.sea_temp_c.toFixed(1)
               tempInput.value = autoFilledTemperature
               if (hintP) {
@@ -770,7 +783,19 @@ export function createReefData({ apiFetch, onCount }) {
           }
         }
 
-        // The station is determined by the selected site's configured mapping.
+        tempInput.addEventListener("input",()=>{overlay.querySelector("#rd-temperature-source").value="manual"})
+        const override=overlay.querySelector("#rd-station-override-select")
+        overlay.querySelector("#rd-station-override").onclick=()=>{
+          override.innerHTML=`<option value="">請選擇</option>${stations.filter(st=>st.is_active!==false).map(st=>`<option value="${esc(st.id)}">${esc(st.name_zh)} (${esc(st.id)})</option>`).join("")}`
+          override.hidden=false
+        }
+        override.onchange=()=>{
+          const st=stations.find(x=>x.id===override.value);if(!st)return
+          fetchSeq++;if(tempInput.value===autoFilledTemperature)tempInput.value="";autoFilledTemperature=""
+          stationInput.value=st.id;stationDisplay.value=`${st.name_zh} (${st.id})`
+          stationHint.textContent="僅變更本次觀測測站，不修改樣點預設。";fetchSeaTemp()
+        }
+        // Defaults still show only the mapped station; override is explicit.
         siteSel?.addEventListener("change", () => {
           const siteId = Number(siteSel.value)
           const site = sortedSites.find(s => s.id === siteId)
@@ -817,6 +842,7 @@ export function createReefData({ apiFetch, onCount }) {
         }
 
         const body = {
+          activity_id:f.get("activity_id")?Number(f.get("activity_id")):null,
           site_id: siteID,
           survey_date: surveyDate,
           event_time: eventTime,
@@ -825,6 +851,7 @@ export function createReefData({ apiFetch, onCount }) {
           methods: selectedMethods,
  fish_size_mode:String(f.get("fish_size_mode")),
           cwa_station_id: cwaStationID,
+          sea_temp_source:String(f.get("sea_temp_source")||"manual"),
         }
         if (waterTempC !== null) {
           body.water_temp_c = waterTempC

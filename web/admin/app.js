@@ -1,3 +1,4 @@
+import { openSiteWorkspace } from "./site-workspace.js"
 import { createReefData } from "./reef-data.js"
 import { createPublicContent, kindMeta, PUBLIC_CONTENT_KINDS, PUBLIC_CONTENT_PREFIX } from "./public-content.js"
 
@@ -475,7 +476,8 @@ function isKnownKey(key) {
 
 function keyFromHash() {
   try {
-    const key = decodeURIComponent(window.location.hash.slice(1))
+    let key = decodeURIComponent(window.location.hash.slice(1))
+    if(["profile","annotation","chart"].some(kind=>key===`${PUBLIC_CONTENT_PREFIX}${kind}`))key="sites"
     return isKnownKey(key) && canSeeNav(key) ? key : ""
   } catch (_) {
     return ""
@@ -892,7 +894,7 @@ function renderSidebar() {
     },
     {
       title: "公開內容管理",
-      items: PUBLIC_CONTENT_KINDS.map(({ kind, title }) => ({ key: `${PUBLIC_CONTENT_PREFIX}${kind}`, title, count: null })),
+      items: PUBLIC_CONTENT_KINDS.filter(x=>!["profile","annotation","chart"].includes(x.kind)).map(({ kind, title }) => ({ key: `${PUBLIC_CONTENT_PREFIX}${kind}`, title, count: null })),
     },
     {
       title: "Reef Check 字典設定",
@@ -1646,6 +1648,10 @@ function bindResourceEvents(resourceKey) {
       }
       if (action === "open" || action === "edit") {
         event.stopPropagation()
+        if(resourceKey==="sites") {
+          openSiteWorkspace({siteID:record.id,apiFetch,drawer:{open:openCustomDrawer},notify:showAlert,onSaved:()=>loadResource("sites")}).catch(error=>showAlert({tone:"danger",title:"樣點載入失敗",message:error.message}))
+          return
+        }
         state.draft = record
         openDrawer()
         return

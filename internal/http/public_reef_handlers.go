@@ -84,6 +84,12 @@ func (h *PublicHandlers) Compare(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "比較需剛好兩個不同樣點")
 		return
 	}
+	first, e1 := strconv.Atoi(ids[0])
+	second, e2 := strconv.Atoi(ids[1])
+	if e1 != nil || e2 != nil || first <= 0 || second <= 0 || first == second {
+		writeError(w, 400, "比較需剛好兩個不同樣點")
+		return
+	}
 	f, err := service.ParsePublicReefFilter(r.URL.Query())
 	if err != nil {
 		writeServiceError(w, err, "")
@@ -117,7 +123,7 @@ func writeReefCSV(w http.ResponseWriter, data []service.PublicReefSeries) {
 	_, _ = w.Write([]byte{0xef, 0xbb, 0xbf})
 	c := csv.NewWriter(w)
 	defer c.Flush()
-	_ = c.Write([]string{"site_id", "site_name", "event_id", "survey_date", "event_time", "depth_m", "chart", "key", "name", "size_class", "fish_size_mode", "value", "unit", "total", "mean", "sd", "se", "n", "calculation_status", "missing_reason", "data_updated_at", "density_per_100m2", "unit_label"})
+	_ = c.Write([]string{"site_id", "site_name", "event_id", "survey_date", "event_time", "depth_m", "chart", "key", "name", "size_class", "fish_size_mode", "value", "unit", "total", "mean", "sd", "se", "n", "calculation_status", "missing_reason", "data_updated_at", "density_per_100m2", "unit_label", "taxon_id", "taxon_group"})
 	num := func(v *float64) string {
 		if v == nil {
 			return ""
@@ -130,6 +136,11 @@ func writeReefCSV(w http.ResponseWriter, data []service.PublicReefSeries) {
 			mode = *a.Mode
 		}
 		cells := []string{strconv.Itoa(a.SiteID), a.SiteName, a.EventID, a.Date, a.Time, strconv.FormatFloat(a.Depth, 'f', -1, 64), a.Chart, a.Key, a.Name, a.Size, mode, num(a.Value), a.Unit, num(a.Total), num(a.Mean), num(a.SD), num(a.SE), strconv.Itoa(a.N), a.Status, a.MissingReason, a.UpdatedAt, num(a.DensityPer100M2), a.UnitLabel}
+		taxonID := ""
+		if a.TaxonID != nil {
+			taxonID = strconv.Itoa(*a.TaxonID)
+		}
+		cells = append(cells, taxonID, a.TaxonGroup)
 		for i, v := range cells {
 			if len(v) > 0 && strings.ContainsAny(v[:1], "=+-@\t\r") {
 				cells[i] = "'" + v

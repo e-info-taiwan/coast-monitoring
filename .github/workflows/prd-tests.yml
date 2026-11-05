@@ -1,0 +1,35 @@
+name: PRD regression
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: coast_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d coast_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgres://postgres:test@localhost:5432/coast_test?sslmode=disable
+      REEF_DATA_TEST_DATABASE_URL: postgres://postgres:test@localhost:5432/coast_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - run: go run ./cmd/migrate
+      - run: go test ./... -count=1 -timeout=120s
+      - run: npm ci --prefix scripts/prd-db --ignore-scripts --no-audit --no-fund
+      - run: node --test scripts/prd-db/*.test.mjs web/admin/tests/*.test.mjs web/site/map-clusters.test.mjs web/public/reef-check/tests/*.cjs

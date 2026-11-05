@@ -3,6 +3,7 @@ package httpx
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"coast-monitoring/internal/service"
@@ -23,7 +24,45 @@ func (h *AdminHandlers) ListCWAMarineStations(w http.ResponseWriter, r *http.Req
 		writeServiceError(w, err, "無法載入氣象署測站清單")
 		return
 	}
+	var lat, lng *float64
+	if raw := r.URL.Query().Get("site_id"); raw != "" {
+		id, e := strconv.Atoi(raw)
+		if e != nil || id <= 0 {
+			writeError(w, 400, "樣點無效")
+			return
+		}
+		if h.ReefData == nil {
+			writeError(w, 503, "樣點服務暫時無法使用")
+			return
+		}
+		site, e := h.ReefData.GetSite(r.Context(), id)
+		if e != nil {
+			writeServiceError(w, e, "")
+			return
+		}
+		lat, lng = site.Latitude, site.Longitude
+	}
+	service.DescribeStationCandidates(stations, lat, lng)
 	writeJSON(w, http.StatusOK, stations)
+}
+
+func (h *AdminHandlers) CWASyncStatus(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireReefDataAdmin(w, r, h != nil && h.CWAMarine != nil); !ok {
+		return
+	}
+	store, ok := h.CWAMarine.(interface {
+		SyncStatus(context.Context) (any, error)
+	})
+	if !ok {
+		writeError(w, 503, "同步狀態暫時無法使用")
+		return
+	}
+	v, err := store.SyncStatus(r.Context())
+	if err != nil {
+		writeServiceError(w, err, "")
+		return
+	}
+	writeJSON(w, 200, v)
 }
 
 func (h *AdminHandlers) GetCWAMarineSeaTemp(w http.ResponseWriter, r *http.Request) {

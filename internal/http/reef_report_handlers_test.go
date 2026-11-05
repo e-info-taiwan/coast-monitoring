@@ -33,9 +33,9 @@ func (s *reportStub) Event(_ context.Context, id int) (service.ReefDataDetail, e
 }
 func TestReefReportAdminDownloadAndFilters(t *testing.T) {
 	stub := &reportStub{events: []service.ReefDataEvent{
-		{ID: 1, SiteID: 2, SiteName: "合界", SurveyDate: "2026-04-11", Methods: []string{"line", "belt_fish"}},
-		{ID: 2, SiteID: 2, SiteName: "合界", SurveyDate: "2025-04-11", Methods: []string{"line"}},
-		{ID: 3, SiteID: 3, SiteName: "其他", SurveyDate: "2026-04-11", Methods: []string{"line"}},
+		{PublicationStatus: "published", ID: 1, SiteID: 2, SiteName: "合界", SurveyDate: "2026-04-11", Methods: []string{"line", "belt_fish"}},
+		{PublicationStatus: "published", ID: 2, SiteID: 2, SiteName: "合界", SurveyDate: "2025-04-11", Methods: []string{"line"}},
+		{PublicationStatus: "published", ID: 3, SiteID: 3, SiteName: "其他", SurveyDate: "2026-04-11", Methods: []string{"line"}},
 	}}
 	h := &AdminHandlers{ReefData: stub}
 	req := dataHandlerRequest("GET", "/api/admin/reef-check-data/reports.xlsx?year=2026&site=2&method=belt_fish&search=合界", "", policy.RoleAdmin)
@@ -91,13 +91,37 @@ func TestReefReportSingleEventAndFailure(t *testing.T) {
 func TestReefReportDoesNotSilentlyTruncate(t *testing.T) {
 	stub := &reportStub{}
 	for i := 0; i < 101; i++ {
-		stub.events = append(stub.events, service.ReefDataEvent{ID: i + 1})
+		stub.events = append(stub.events, service.ReefDataEvent{ID: i + 1, PublicationStatus: "published"})
 	}
 	h := &AdminHandlers{ReefData: stub}
 	w := httptest.NewRecorder()
 	h.ExportReefReports(w, dataHandlerRequest("GET", "/reports.xlsx", "", policy.RoleAdmin))
 	if w.Code != 400 || len(stub.loaded) != 0 {
 		t.Fatal(w.Code, len(stub.loaded))
+	}
+}
+
+func TestReefReportIntersectsActivityEventsDateDepthAndPublication(t *testing.T) {
+	activity := 10
+	base := service.ReefDataEvent{ID: 1, EventID: "a", ActivityID: &activity, SurveyDate: "2026-01-01", DepthM: 5, PublicationStatus: "published"}
+	draft := base
+	draft.ID = 2
+	draft.EventID = "b"
+	draft.PublicationStatus = "draft"
+	deep := base
+	deep.ID = 3
+	deep.EventID = "c"
+	deep.DepthM = 10
+	other := base
+	other.ID = 4
+	other.EventID = "d"
+	other.ActivityID = nil
+	stub := &reportStub{events: []service.ReefDataEvent{base, draft, deep, other}}
+	h := &AdminHandlers{ReefData: stub}
+	w := httptest.NewRecorder()
+	h.ExportReefReports(w, dataHandlerRequest("GET", "/reports.xlsx?activity_id=10&event_ids=a,b,c,d&survey_date=2026-01-01&depth_m=5", "", policy.RoleAdmin))
+	if w.Code != 200 || len(stub.loaded) != 1 || stub.loaded[0] != 1 {
+		t.Fatal(w.Code, stub.loaded)
 	}
 }
 

@@ -3,6 +3,7 @@ package httpx
 import (
 	"context"
 	"encoding/json"
+	"github.com/coreos/go-oidc/v3/oidc"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -20,8 +21,8 @@ func TestNewGoogleOAuthProviderRequiresConfig(t *testing.T) {
 }
 
 func TestNewGoogleOAuthProviderUsesOIDCDiscovery(t *testing.T) {
-	var issuer string
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	issuer := "https://oidc.example.invalid"
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/.well-known/openid-configuration":
 			writeTestJSON(t, w, map[string]any{
@@ -36,21 +37,21 @@ func TestNewGoogleOAuthProviderUsesOIDCDiscovery(t *testing.T) {
 		default:
 			http.NotFound(w, r)
 		}
-	}))
-	defer server.Close()
-	issuer = server.URL
+	})
+	client := &http.Client{Transport: discoveryTransport{handler}}
+	ctx := oidc.ClientContext(context.Background(), client)
 
-	provider, err := newGoogleOAuthProvider(context.Background(), GoogleOAuthConfig{
+	provider, err := newGoogleOAuthProvider(ctx, GoogleOAuthConfig{
 		ClientID:     "client-id",
 		ClientSecret: "client-secret",
 		RedirectURL:  "https://app.example.com/api/auth/google/callback",
-	}, server.URL)
+	}, issuer)
 	if err != nil {
 		t.Fatalf("newGoogleOAuthProvider error = %v", err)
 	}
 
 	authURL := provider.AuthCodeURL("state-token")
-	if !strings.HasPrefix(authURL, server.URL+"/auth?") {
+	if !strings.HasPrefix(authURL, issuer+"/auth?") {
 		t.Fatalf("AuthCodeURL = %q, want local auth endpoint", authURL)
 	}
 	for _, want := range []string{"client_id=client-id", "redirect_uri=https%3A%2F%2Fapp.example.com%2Fapi%2Fauth%2Fgoogle%2Fcallback", "scope=openid+email+profile", "state=state-token"} {
@@ -66,4 +67,12 @@ func writeTestJSON(t *testing.T, w http.ResponseWriter, value map[string]any) {
 	if err := json.NewEncoder(w).Encode(value); err != nil {
 		t.Fatalf("Encode discovery response error = %v", err)
 	}
+}
+
+type discoveryTransport struct{ handler http.Handler }
+
+func (d discoveryTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	w := httptest.NewRecorder()
+	d.handler.ServeHTTP(w, r)
+	return w.Result(), nil
 }

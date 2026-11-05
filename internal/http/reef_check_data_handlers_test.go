@@ -5,7 +5,9 @@ import (
 	"coast-monitoring/internal/repository"
 	"coast-monitoring/internal/service"
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"net/http"
@@ -275,6 +277,10 @@ func TestDeleteReefDataEvent(t *testing.T) {
 	}
 }
 
+func (s *dataHandlerStub) ParticipantSnapshot(_ context.Context, id int) (json.RawMessage, error) {
+	return json.RawMessage(fmt.Sprintf(`{"id":%d,"role":"member","diver_id":7}`, id)), nil
+}
+
 func TestAddAndRemoveReefDataParticipant(t *testing.T) {
 	stub := &dataHandlerStub{}
 	audit := &dataAuditStub{}
@@ -310,6 +316,9 @@ func TestAddAndRemoveReefDataParticipant(t *testing.T) {
 	}
 	if len(audit.created) != 2 || audit.created[1].Action != repository.AuditActionDelete || audit.created[1].TargetTable != "transect_participant" {
 		t.Fatalf("unexpected audit record for remove: %+v", audit.created)
+	}
+	if audit.created[1].BeforeData == nil {
+		t.Fatal("delete audit lost participant snapshot")
 	}
 }
 
