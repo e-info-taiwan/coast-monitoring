@@ -15,6 +15,7 @@ test("site areas save independently and unsaved changes retain leave guard", asy
   const display = {
     site_id: 1,
     effective_settings: [{ chart_key: "taxa_density", source: "default", is_visible: true }],
+    chart_options: {taxa_density: {years:[2018,2025],depths:[5,10],taxa:[{value:'3',label:'蝶魚'}]}},
     groups: [],
     report_links: [],
   }
@@ -68,6 +69,14 @@ test("site areas save independently and unsaved changes retain leave guard", asy
     assert.equal(guard(), false)
     window.confirm = () => true
     assert.equal(guard(), true)
+    await chart.querySelector('[data-restore]').onclick()
+    assert.equal(chart.elements.year_from.value, '2018')
+    assert.equal(chart.elements.default_depth_m.value, '5')
+    assert.equal(chart.querySelector('[name="taxon_ids"]').value, '3')
+    assert.equal(chart.querySelector('[name="taxon_ids"]').checked, true)
+    await chart.onsubmit({preventDefault(){}})
+    assert.equal(writes.at(-1).body.year_from, null)
+    assert.equal(writes.at(-1).body.taxon_ids, null)
   } finally {
     Object.assign(globalThis, savedGlobals)
     dom.window.close()

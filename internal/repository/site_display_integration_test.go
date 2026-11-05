@@ -139,6 +139,10 @@ func TestSiteDisplayActivityReportAndChartTransactions(t *testing.T) {
 	}
 	display, err = repo.SiteDisplay(ctx, ids[0], true)
 	must(err)
+	options := display.ChartOptions["live_coral_history"]
+	if len(options.Years) != 1 || options.Years[0] != 2026 || len(options.Depths) != 1 || options.Depths[0] != 5 || len(options.Categories) != 1 || options.Categories[0].Label != "活珊瑚覆蓋率" {
+		t.Fatalf("hidden chart lost database-derived choices: %#v", options)
+	}
 	link := display.ReportLinks[0]
 	link.Visible = false
 	must(repo.SaveReportLink(ctx, link, actor))

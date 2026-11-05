@@ -204,13 +204,27 @@ type ReportLink struct {
 	Version   string `json:"version"`
 }
 type SiteDisplay struct {
-	SiteID            int                `json:"site_id"`
-	Profile           *PublicContent     `json:"profile"`
-	Reports           []PublicContent    `json:"reports"`
-	LatestReport      *PublicContent     `json:"latest_report"`
-	ReportLinks       []ReportLink       `json:"report_links,omitempty"`
-	Annotations       []PublicContent    `json:"annotations"`
-	EffectiveSettings []ChartSetting     `json:"effective_settings"`
-	DraftSettings     []ChartSetting     `json:"draft_settings,omitempty"`
-	Groups            []SharedChartGroup `json:"groups"`
+	ChartOptions      map[string]ChartDataOptions `json:"chart_options,omitempty"`
+	SiteID            int                         `json:"site_id"`
+	Profile           *PublicContent              `json:"profile"`
+	Reports           []PublicContent             `json:"reports"`
+	LatestReport      *PublicContent              `json:"latest_report"`
+	ReportLinks       []ReportLink                `json:"report_links,omitempty"`
+	Annotations       []PublicContent             `json:"annotations"`
+	EffectiveSettings []ChartSetting              `json:"effective_settings"`
+	DraftSettings     []ChartSetting              `json:"draft_settings,omitempty"`
+	Groups            []SharedChartGroup          `json:"groups"`
+}
+
+// Choices come from published observations before display overrides are applied.
+// Hiding a series must not make it impossible to select again in the editor.
+type ChartChoice struct {
+	Value string `json:"value"`
+	Label string `json:"label"`
+}
+type ChartDataOptions struct {
+	Years      []int         `json:"years"`
+	Depths     []float64     `json:"depths"`
+	Categories []ChartChoice `json:"categories"`
+	Taxa       []ChartChoice `json:"taxa"`
 }

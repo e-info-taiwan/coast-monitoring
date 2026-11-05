@@ -1,3 +1,4 @@
+import { stationDescription, chartFields, bindChartFields, collectChartFields } from "./site-chart-fields.js"
 const esc = (v) =>
   String(v ?? "")
     .replaceAll("&", "&amp;")
@@ -48,7 +49,7 @@ export async function openSiteWorkspace({ siteID, apiFetch, drawer, notify, onSa
   const revisions = new Map()
   const states = new Map()
   const form = (id, title, body) =>
-    `<form data-form="${id}" class="editor-form pc-form"><h3>${esc(title)}</h3><div class="pc-grid">${body}</div><p role="status" data-result></p><button class="primary-button" type="submit">儲存${esc(title)}</button></form>`
+    `<form data-form="${id}" class="editor-form pc-form"><h3>${esc(title)}</h3><div class="pc-grid">${body}</div><p role="status" data-result></p><div class="editor-actions sw-actions"><button class="primary-button" type="submit">儲存${esc(title)}</button></div></form>`
   const basic = [
     field("name_zh", "中文名稱", site.name_zh),
     field("name_en", "英文名稱", site.name_en),
@@ -96,30 +97,7 @@ export async function openSiteWorkspace({ siteID, apiFetch, drawer, notify, onSa
       return form(
         `chart-${e.chart_key}`,
         labels[e.chart_key],
-        select(
-          "is_visible",
-          "顯示",
-          [
-            ["", "繼承預設"],
-            ["true", "顯示"],
-            ["false", "隱藏"],
-          ],
-          c.is_visible == null ? "" : String(c.is_visible),
-        ) +
-          field("sort_order", "順序（空白繼承）", c.sort_order, "number") +
-          field("year_from", "起始年份", c.year_from, "number") +
-          field("year_to", "結束年份", c.year_to, "number") +
-          field("default_depth_m", "初始深度（公尺）", c.default_depth_m, "number") +
-          field(
-            "category_keys",
-            "項目代碼（逗號分隔，空白繼承，[] 不選項目）",
-            c.category_keys == null ? "" : c.category_keys.length ? c.category_keys.join(",") : "[]",
-          ) +
-          field(
-            "taxon_ids",
-            "物種編號（逗號分隔，空白繼承，[] 不選物種）",
-            c.taxon_ids == null ? "" : c.taxon_ids.length ? c.taxon_ids.join(",") : "[]",
-          ) +
+        chartFields(c, e, display.chart_options?.[e.chart_key]) +
           select("publication_status", "發布狀態", statusOptions, c.publication_status || "draft") +
           `<p>目前公開設定來源：${esc(e.source === "site" ? "本站設定" : "內建預設")}</p><button type="button" data-restore="${e.chart_key}">還原預設</button>`,
       )
@@ -178,7 +156,7 @@ export async function openSiteWorkspace({ siteID, apiFetch, drawer, notify, onSa
         const value = stationSelect.value,
           query = body.querySelector("#sw-station-search").value.toLowerCase()
         const rows = stations.filter((s) => s.id === value || `${s.id} ${s.name_zh}`.toLowerCase().includes(query))
-        stationSelect.innerHTML = `<option value="">不設定測站</option>${rows.map((s) => `<option value="${esc(s.id)}" ${s.id === value ? "selected" : ""}>${esc(s.name_zh)} (${esc(s.id)})${s.distance_km == null ? "" : ` · ${s.distance_km.toFixed(1)} km`}${s.availability === "available" ? " · 可提供海溫" : s.is_active === false ? " · 停用" : " · 海溫／座標待確認"}</option>`).join("")}`
+        stationSelect.innerHTML = `<option value="">不設定測站</option>${rows.map((s) => `<option value="${esc(s.id)}" ${s.id === value ? "selected" : ""}>${esc(s.name_zh)} (${esc(s.id)}) · ${esc(stationDescription(s))}</option>`).join("")}`
         if (value && !rows.some((s) => s.id === value)) {
           const option = document.createElement("option")
           option.value = value
@@ -306,7 +284,7 @@ export async function openSiteWorkspace({ siteID, apiFetch, drawer, notify, onSa
           links
             .map(
               (l) =>
-                `<div class="pc-form-section"><b>${esc(all.find((a) => a.id === l.article_id)?.data.title || `報告 ${l.article_id}`)}</b><button type="button" data-report-toggle="${l.article_id}">${l.is_visible ? "在本站隱藏" : "在本站顯示"}</button><button type="button" data-report-remove="${l.article_id}">解除本站關聯</button></div>`,
+                `<div class="pc-form-section sw-report"><b>${esc(all.find((a) => a.id === l.article_id)?.data.title || `報告 ${l.article_id}`)}</b><div class="sw-actions"><button type="button" data-report-toggle="${l.article_id}">${l.is_visible ? "在本站隱藏" : "在本站顯示"}</button><button type="button" data-report-remove="${l.article_id}">解除本站關聯</button></div></div>`,
             )
             .join("") || "<p>尚無關聯報告</p>"
       }
@@ -343,20 +321,16 @@ export async function openSiteWorkspace({ siteID, apiFetch, drawer, notify, onSa
       for (const e of display.effective_settings) {
         const key = `chart-${e.chart_key}`,
           f = body.querySelector(`[data-form="${key}"]`)
+        bindChartFields(f)
         bindForm(f, async (data) => {
-          const input = { ...states.get(key), chart_key: e.chart_key }
-          for (const k of ["sort_order", "year_from", "year_to", "default_depth_m"])
-            input[k] = numeric(String(data.get(k)))
-          input.is_visible = data.get("is_visible") === "" ? null : data.get("is_visible") === "true"
-          input.category_keys = parseOptionalList(String(data.get("category_keys")))
-          input.taxon_ids = parseOptionalList(String(data.get("taxon_ids")), true)
+          const input = collectChartFields(data, { ...states.get(key), chart_key: e.chart_key })
           input.publication_status = data.get("publication_status")
           if (input.publication_status === "archived" && !window.confirm("確定封存這項圖表設定？"))
             throw new Error("已取消")
           input.confirm = true
           states.set(key, await apiFetch(`/admin/sites/${siteID}/charts`, { method: "PATCH", body: input }))
         })
-        f.querySelector("[data-restore]").onclick = async () => {
+        const restoreHandler = async () => {
           if (!window.confirm("還原此圖的內建預設，不修改觀測或其他圖表。確定？")) return
           try {
             await apiFetch(`/admin/sites/${siteID}/charts`, {
@@ -370,16 +344,25 @@ export async function openSiteWorkspace({ siteID, apiFetch, drawer, notify, onSa
               },
             })
             states.set(key, { chart_key: e.chart_key, site_id: Number(siteID) })
-            f.reset()
-            for (const input of f.querySelectorAll("input")) input.value = ""
-            f.elements.is_visible.value = ""
-            f.elements.publication_status.value = "draft"
+            const fresh = { chart_key: e.chart_key, site_id: Number(siteID) }
+            f.querySelector('.pc-grid').innerHTML = chartFields(fresh, e, display.chart_options?.[e.chart_key]) +
+              select("publication_status", "發布狀態", statusOptions, "draft") +
+              `<p>目前公開設定來源：內建預設</p>`
+            // Keep the restore action available after re-rendering the fields.
+            const restore = document.createElement("button")
+            restore.type = "button"
+            restore.textContent = "還原預設"
+            restore.dataset.restore = e.chart_key
+            restore.onclick = restoreHandler
+            f.querySelector('.pc-grid').append(restore)
+            bindChartFields(f)
             dirty.delete(key)
             f.querySelector("[data-result]").textContent = "已還原預設"
           } catch (e) {
             f.querySelector("[data-result]").textContent = e.message
           }
         }
+        f.querySelector("[data-restore]").onclick = restoreHandler
       }
       function groupForm(group) {
         const key = `group-${group.id || Date.now()}`,
