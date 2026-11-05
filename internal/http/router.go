@@ -96,6 +96,10 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Delete("/divers/{id}", deps.AdminHandlers.DeleteDiver)
 
 		r.Get("/sites", deps.AdminHandlers.ListSites)
+		r.Get("/sites/{id}/display", deps.PublicHandlers.SiteDisplay)
+		r.Patch("/sites/{id}/charts", deps.PublicHandlers.SaveSiteDisplay)
+		r.Patch("/sites/{id}/reports", deps.PublicHandlers.SaveSiteDisplay)
+		r.Patch("/sites/{id}/groups", deps.PublicHandlers.SaveSiteDisplay)
 		r.Post("/sites", deps.AdminHandlers.CreateSite)
 		r.Patch("/sites/{id}", deps.AdminHandlers.UpdateSite)
 		r.Delete("/sites/{id}", deps.AdminHandlers.DeleteSite)
@@ -118,6 +122,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/cwa-marine/stations", deps.AdminHandlers.ListCWAMarineStations)
 		r.Get("/cwa-marine/sea-temp", deps.AdminHandlers.GetCWAMarineSeaTemp)
 		r.Post("/cwa-marine/sync", deps.AdminHandlers.SyncCWAMarine)
+		r.Get("/cwa-marine/sync-status", deps.AdminHandlers.CWASyncStatus)
 	})
 	if deps.CronHandlers != nil {
 		r.Post("/api/cron/sync-cwa-marine", deps.CronHandlers.SyncCWAMarine)
@@ -143,6 +148,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/reef-check/entry-sites", deps.AppHandlers.ListPublicReefCheckSites)
 		r.Post("/reef-check/activities/verify", deps.AppHandlers.VerifyReefActivity)
 		r.Get("/reef-check/sites", deps.PublicHandlers.Sites)
+		r.Get("/reef-check/sites/{id}/display", deps.PublicHandlers.SiteDisplay)
 		r.Get("/reef-check/sites/{id}/series", deps.PublicHandlers.Series)
 		r.Get("/reef-check/sites/{id}/export.csv", deps.PublicHandlers.Series)
 		r.Get("/reef-check/compare", deps.PublicHandlers.Compare)

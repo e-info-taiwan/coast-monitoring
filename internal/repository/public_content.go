@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 )
 
-func (r ReefDataRepository) ListContent(ctx context.Context, kind string, public bool) ([]service.PublicContent, error) {
-	rows, err := r.db.Query(ctx, `SELECT id,kind,publication_status,data,updated_at::text,site_id FROM public_content WHERE ($1='' OR kind=$1) AND (NOT $2 OR publication_status='published') ORDER BY COALESCE((data->>'sort_order')::int,0),CASE WHEN kind='article' THEN data->>'date' END DESC,id`, kind, public)
+func (r ReefDataRepository) listContentRows(ctx context.Context, kind string, public bool) ([]service.PublicContent, error) {
+	rows, err := r.db.Query(ctx, `SELECT id,kind,publication_status,CASE WHEN kind='development' THEN
+ (SELECT d.data||jsonb_build_object('timeline',COALESCE((SELECT jsonb_agg(t.data ORDER BY t.sort_order) FROM development_case_timeline t WHERE t.case_id=d.id),'[]'::jsonb),'media',COALESCE((SELECT jsonb_agg(m.data ORDER BY m.sort_order) FROM development_case_media m WHERE m.case_id=d.id),'[]'::jsonb)) FROM development_case d WHERE d.id=public_content.id)
+ ELSE data END,updated_at::text,site_id FROM public_content WHERE ($1='' OR kind=$1) AND (NOT $2 OR publication_status='published') ORDER BY COALESCE((data->>'sort_order')::int,0),CASE WHEN kind='article' THEN data->>'date' END DESC,id`, kind, public)
 	if err != nil {
 		return nil, err
 	}
@@ -43,7 +45,7 @@ func (r ReefDataRepository) ListContent(ctx context.Context, kind string, public
 	}
 	return out, rows.Err()
 }
-func (r ReefDataRepository) SaveContent(ctx context.Context, id int, c service.PublicContentInput, actor string) (service.PublicContent, error) {
+func (r ReefDataRepository) saveContentRow(ctx context.Context, id int, c service.PublicContentInput, actor string) (service.PublicContent, error) {
 	if err := c.Validate(); err != nil {
 		return service.PublicContent{}, err
 	}
@@ -80,6 +82,9 @@ func (r ReefDataRepository) PublicAudit(ctx context.Context) ([]json.RawMessage,
 	rows, err := r.db.Query(ctx, `SELECT jsonb_build_object('id',id,'kind',kind,'created_at',created_at,'details',details) FROM (
  SELECT id,'內容異動'::text AS kind,created_at,jsonb_build_object('content_id',content_id,'actor_id',actor_id,'before',before_data,'after',after_data) AS details FROM public_content_audit
  UNION ALL SELECT id,'調查發布',created_at,jsonb_build_object('event_id',event_id,'actor_id',actor_id,'before',old_status,'after',new_status) FROM reef_publication_audit
+ UNION ALL SELECT id,'樣點顯示異動',occurred_at,jsonb_build_object('entity',entity,'entity_id',entity_id,'actor_id',actor_id,'before',before_data,'after',after_data) FROM reef_site_display_audit
+ UNION ALL SELECT id,'活動填報設定',occurred_at,jsonb_build_object('activity_config_id',activity_id,'action',action,'actor_id',actor_id,'before',before_data,'after',after_data) FROM reef_check_activity_audit
+ UNION ALL SELECT id,'遷移待對帳',created_at,jsonb_build_object('kind',kind,'source_id',source_id,'target_id',target_id,'reason',reason,'resolved_at',resolved_at) FROM reef_prd_migration_review
  UNION ALL SELECT id,'匯入作業',created_at,jsonb_build_object('source_sha256',source_sha256,'source_format',source_format,'status',status,'report',report) FROM reef_import_attempt
  ) records ORDER BY created_at DESC LIMIT 200`)
 	if err != nil {

@@ -15,17 +15,20 @@ import (
 var taiwanLoc = time.FixedZone("CST", 8*3600)
 
 type CWAMarineStation struct {
-	ID          string   `json:"id"`
-	NameZH      string   `json:"name_zh"`
-	NameEN      string   `json:"name_en"`
-	StationType string   `json:"station_type"`
-	AreaName    string   `json:"area_name"`
-	CountyName  string   `json:"county_name"`
-	TownName    string   `json:"town_name"`
-	Latitude    *float64 `json:"latitude"`
-	Longitude   *float64 `json:"longitude"`
-	Address     string   `json:"address"`
-	IsActive    bool     `json:"is_active"`
+	HasSeaTemperature bool     `json:"has_sea_temperature"`
+	DistanceKM        *float64 `json:"distance_km"`
+	Availability      string   `json:"availability"`
+	ID                string   `json:"id"`
+	NameZH            string   `json:"name_zh"`
+	NameEN            string   `json:"name_en"`
+	StationType       string   `json:"station_type"`
+	AreaName          string   `json:"area_name"`
+	CountyName        string   `json:"county_name"`
+	TownName          string   `json:"town_name"`
+	Latitude          *float64 `json:"latitude"`
+	Longitude         *float64 `json:"longitude"`
+	Address           string   `json:"address"`
+	IsActive          bool     `json:"is_active"`
 }
 
 type CWAObservationRecord struct {
@@ -48,11 +51,11 @@ type CWATempResult struct {
 }
 
 type CWASyncReport struct {
-	StationsCount     int           `json:"stations_count"`
-	ObservationsSaved int           `json:"observations_saved"`
-	SitesLinked       int           `json:"sites_linked"`
-	Errors            []string      `json:"errors,omitempty"`
-	DurationMs        int64         `json:"duration_ms"`
+	StationsCount     int      `json:"stations_count"`
+	ObservationsSaved int      `json:"observations_saved"`
+	SitesLinked       int      `json:"sites_linked"`
+	Errors            []string `json:"errors,omitempty"`
+	DurationMs        int64    `json:"duration_ms"`
 }
 
 type CWAMarineRepository interface {
@@ -143,6 +146,13 @@ func (s *CWAMarineService) SyncStationHistory(ctx context.Context, stationID str
 func (s *CWAMarineService) SyncAll(ctx context.Context) (*CWASyncReport, error) {
 	start := time.Now()
 	report := &CWASyncReport{}
+	if tracker, ok := s.Repo.(cwaSyncTracker); ok {
+		id, e := tracker.BeginSync(ctx)
+		if e != nil {
+			return nil, e
+		}
+		defer finishSync(tracker, id, report)
+	}
 
 	// 1. Sync stations
 	stCount, err := s.SyncStations(ctx)

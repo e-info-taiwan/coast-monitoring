@@ -61,7 +61,7 @@ async function setup({stations = [{id: '1106', name_zh: '龍洞', area_name: '�
 
 test('station array/id/name and sea_temp_c populate the form and submitted event', async () => {
   const {overlay, node, calls, panel} = await setup()
-  assert.match(panel.innerHTML, /href="\/admin\/reef-activities.html"/)
+  assert.match(panel.innerHTML, /href="\/admin\/#public_content:activity"/)
   assert.doesNotMatch(overlay.innerHTML, /<select name="cwa_station_id"/)
   assert.equal(node('rd-create-station').value, '')
   assert.equal(node('rd-fetch-temp-btn').disabled, true)

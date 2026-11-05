@@ -30,6 +30,29 @@ func (h *AdminHandlers) ExportReefReports(w http.ResponseWriter, r *http.Request
 		return
 	}
 	q := r.URL.Query()
+	filters, err := service.ParsePublicReefFilter(q)
+	if err != nil {
+		writeServiceError(w, err, "匯出篩選無效")
+		return
+	}
+	activity := 0
+	if raw := q.Get("activity_id"); raw != "" {
+		var e error
+		activity, e = strconv.Atoi(raw)
+		if e != nil || activity <= 0 {
+			writeError(w, 400, "活動編號無效")
+			return
+		}
+	}
+	status := q.Get("publication_status")
+	if status == "" {
+		status = "published"
+	}
+	if status != "published" && status != "draft" && status != "archived" && status != "all" {
+		writeError(w, 400, "發布狀態無效")
+		return
+	}
+
 	year, siteID, method, search := q.Get("year"), q.Get("site"), q.Get("method"), strings.ToLower(strings.TrimSpace(q.Get("search")))
 	if year != "" {
 		n, e := strconv.Atoi(year)
@@ -56,6 +79,31 @@ func (h *AdminHandlers) ExportReefReports(w http.ResponseWriter, r *http.Request
 	}
 	var selected []service.ReefDataEvent
 	for _, e := range events {
+		if status != "all" && e.PublicationStatus != status {
+			continue
+		}
+		if activity > 0 && (e.ActivityID == nil || *e.ActivityID != activity) {
+			continue
+		}
+		if filters.Date != "" && e.SurveyDate != filters.Date {
+			continue
+		}
+		if filters.Depth != nil && e.DepthM != *filters.Depth {
+			continue
+		}
+		if filters.EventID != "" && e.EventID != filters.EventID {
+			continue
+		}
+		if len(filters.EventIDs) > 0 {
+			found := false
+			for _, id := range filters.EventIDs {
+				found = found || id == e.EventID
+			}
+			if !found {
+				continue
+			}
+		}
+
 		if year != "" && !strings.HasPrefix(e.SurveyDate, year) {
 			continue
 		}
@@ -89,6 +137,15 @@ func (h *AdminHandlers) ExportReefReports(w http.ResponseWriter, r *http.Request
 		if err != nil {
 			writeServiceError(w, err, "無法載入報告資料")
 			return
+		}
+		if method != "" {
+			selectedTransects := []service.ReefDataTransect{}
+			for _, tr := range d.Transects {
+				if tr.Method == method {
+					selectedTransects = append(selectedTransects, tr)
+				}
+			}
+			d.Transects = selectedTransects
 		}
 		details = append(details, d)
 	}

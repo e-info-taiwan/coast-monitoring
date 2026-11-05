@@ -4,6 +4,8 @@ Coast Monitoring is a single Go service backed by PostgreSQL. The server exposes
 
 See [the PRD implementation audit](docs/prd-implementation-audit.md) for new public features, publication controls, migrations, validation evidence, and outstanding customer inputs.
 
+PRD 0.9.13 / Schema 1.16: [acceptance cases](docs/prd-test-cases-2026-11-04.md) and [implementation gaps / test results](docs/prd-implementation-audit-2026-11-04.md). Run the target-spec checks with `go test -tags prd_acceptance ./internal/service ./internal/http -run TestPRD20261104 -v`; these currently fail on documented missing requirements and are separate from regression tests.
+
 ## Reef Check v1.7 imported observations
 
 The admin landing page reads imported observations from `survey → event → transect`.

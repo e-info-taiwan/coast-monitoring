@@ -4,7 +4,6 @@ import (
 	"coast-monitoring/internal/service"
 	"context"
 	"encoding/json"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"math"
 	"os"
 	"testing"
@@ -16,7 +15,7 @@ func TestPRDSummariesAndPublication(t *testing.T) {
 		t.Skip("local PostgreSQL required")
 	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := integrationPool(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +126,7 @@ func TestPRDContentWorkflow(t *testing.T) {
 		t.Skip("local PostgreSQL required")
 	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := integrationPool(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}

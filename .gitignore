@@ -15,3 +15,6 @@ pocketbase-local
 coral_data_RD_handoff_*.zip
 coral_data_RD_handoff_*.zip.sha256
 **/__pycache__/
+
+# Test-only JavaScript dependencies
+scripts/prd-db/node_modules/

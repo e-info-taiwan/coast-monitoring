@@ -6,9 +6,11 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type PublicReefFilter struct {
+	GroupID      int       `json:"group_id"`
 	BBox         []float64 `json:"bbox"`
 	Method       string    `json:"method"`
 	CategoryKeys []string  `json:"category_keys"`
@@ -18,6 +20,12 @@ type PublicReefFilter struct {
 	EventID      string    `json:"event_id"`
 	Charts       []string  `json:"charts"`
 	TaxonIDs     []int     `json:"taxon_ids"`
+	EventIDs     []string  `json:"event_ids"`
+	Date         string    `json:"survey_date"`
+	TaxonGroup   string    `json:"taxon_group"`
+	Unit         string    `json:"unit"`
+	SizeClass    string    `json:"size_class"`
+	FishSizeMode string    `json:"fish_size_mode"`
 }
 
 func ParsePublicReefFilter(q url.Values) (PublicReefFilter, error) {
@@ -64,7 +72,46 @@ func ParsePublicReefFilter(q url.Values) (PublicReefFilter, error) {
 			return bad()
 		}
 	}
+	if raw := q.Get("group_id"); raw != "" {
+		id, err := strconv.Atoi(raw)
+		if err != nil || id <= 0 {
+			return bad()
+		}
+		f.GroupID = id
+	}
 	f.EventID = q.Get("event_id")
+	f.EventIDs = []string{}
+	if s := q.Get("event_ids"); s != "" {
+		f.EventIDs = strings.Split(s, ",")
+		if len(f.EventIDs) > 500 {
+			return bad()
+		}
+		for _, id := range f.EventIDs {
+			if strings.TrimSpace(id) == "" || len(id) > 300 {
+				return bad()
+			}
+		}
+	}
+	f.Date = q.Get("survey_date")
+	if _, err := time.Parse("2006-01-02", f.Date); f.Date != "" && err != nil {
+		return bad()
+	}
+	f.TaxonGroup = q.Get("taxon_group")
+	if f.TaxonGroup != "" && f.TaxonGroup != "fish" && f.TaxonGroup != "invert" && f.TaxonGroup != "rare" {
+		return bad()
+	}
+	f.Unit = q.Get("unit")
+	if f.Unit != "" && !ValidPublicUnit(f.Unit) {
+		return bad()
+	}
+	f.SizeClass = q.Get("size_class")
+	if len(f.SizeClass) > 100 {
+		return bad()
+	}
+	f.FishSizeMode = q.Get("fish_size_mode")
+	if f.FishSizeMode != "" && f.FishSizeMode != "split" && f.FishSizeMode != "combined" {
+		return bad()
+	}
 	if s := q.Get("bbox"); s != "" {
 		parts := strings.Split(s, ",")
 		if len(parts) != 4 {
@@ -96,6 +143,8 @@ func ParsePublicReefFilter(q url.Values) (PublicReefFilter, error) {
 }
 
 type PublicReefSeries struct {
+	TaxonID         *int     `json:"taxon_id"`
+	TaxonGroup      string   `json:"taxon_group"`
 	SiteID          int      `json:"site_id"`
 	SiteName        string   `json:"site_name"`
 	EventID         string   `json:"event_id"`
@@ -122,12 +171,23 @@ type PublicReefSeries struct {
 }
 
 type PublicContent struct {
-	SiteID    *int            `json:"site_id"`
-	ID        int             `json:"id"`
-	Kind      string          `json:"kind"`
-	Status    string          `json:"publication_status"`
-	Data      json.RawMessage `json:"data"`
-	UpdatedAt string          `json:"updated_at"`
+	EntryCode      string          `json:"entry_code,omitempty"`
+	EntryConfigID  *int            `json:"entry_config_id,omitempty"`
+	RelatedSiteIDs []int           `json:"related_site_ids,omitempty"`
+	SiteID         *int            `json:"site_id"`
+	ID             int             `json:"id"`
+	Kind           string          `json:"kind"`
+	Status         string          `json:"publication_status"`
+	Data           json.RawMessage `json:"data"`
+	UpdatedAt      string          `json:"updated_at"`
+}
+
+func ValidPublicUnit(s string) bool {
+	switch s {
+	case "percent", "individuals_per_100m2", "individuals_per_subsample", "count", "historical_level", "derived_level", "bleached_points":
+		return true
+	}
+	return false
 }
 
 // Keep display text separate from stable machine-readable units.

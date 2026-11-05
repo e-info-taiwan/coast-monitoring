@@ -341,11 +341,21 @@ func (h *AdminHandlers) RemoveReefDataParticipant(w http.ResponseWriter, r *http
 		if s.ReefData == nil || s.AuditLogs == nil {
 			return errAdminMutationUnavailable
 		}
+		snapshots, ok := s.ReefData.(interface {
+			ParticipantSnapshot(context.Context, int) (json.RawMessage, error)
+		})
+		if !ok {
+			return errAdminMutationUnavailable
+		}
+		before, err := snapshots.ParticipantSnapshot(r.Context(), participantID)
+		if err != nil {
+			return err
+		}
 		if err := s.ReefData.RemoveParticipant(r.Context(), participantID); err != nil {
 			return err
 		}
 		target := uuid.NewSHA1(uuid.NameSpaceURL, []byte("coast-monitoring:participant:"+strconv.Itoa(participantID)))
-		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionDelete, "transect_participant", target, nil, nil)
+		return writeAudit(r, s.AuditLogs, actor, repository.AuditActionDelete, "transect_participant", target, before, nil)
 	})
 	if err != nil {
 		writeServiceError(w, err, "移除參與人員失敗")
@@ -516,6 +526,7 @@ func (h *AdminHandlers) CreateSite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "無效的建立內容")
 		return
 	}
+	input.CWAStationUpdatedBy = actor.ID.String()
 	var result service.ReefDataSite
 	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
 		if s.ReefData == nil || s.AuditLogs == nil {
@@ -551,6 +562,7 @@ func (h *AdminHandlers) UpdateSite(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "無效的修改內容")
 		return
 	}
+	input.CWAStationUpdatedBy = actor.ID.String()
 	var result service.ReefDataSite
 	err := h.Mutations.RunAdminMutation(r.Context(), func(s AdminMutationServices) error {
 		if s.ReefData == nil || s.AuditLogs == nil {
@@ -927,4 +939,3 @@ func (h *AdminHandlers) DeleteImpactType(w http.ResponseWriter, r *http.Request)
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
-

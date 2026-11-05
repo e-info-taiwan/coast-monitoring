@@ -19,14 +19,16 @@ type ReefCheckPointBleachingSummary struct {
 }
 
 type ReefCheckActivity struct {
-	ID        int        `json:"id"`
-	Name      string     `json:"name"`
-	StartDate string     `json:"start_date"`
-	EndDate   string     `json:"end_date"`
-	SiteIDs   []int      `json:"site_ids"`
-	Active    bool       `json:"is_active"`
-	ExpiresAt *time.Time `json:"expires_at,omitempty"`
-	Code      string     `json:"code,omitempty"` // returned only on creation/rotation
+	ActivityID    int        `json:"activity_id"`
+	EntryConfigID int        `json:"entry_config_id"`
+	ID            int        `json:"id"`
+	Name          string     `json:"name"`
+	StartDate     string     `json:"start_date"`
+	EndDate       string     `json:"end_date"`
+	SiteIDs       []int      `json:"site_ids"`
+	Active        bool       `json:"is_active"`
+	ExpiresAt     *time.Time `json:"expires_at,omitempty"`
+	Code          string     `json:"code,omitempty"` // returned only on creation/rotation
 }
 
 type ReefCheckActivityInput struct {

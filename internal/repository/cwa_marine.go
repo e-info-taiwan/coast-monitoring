@@ -49,9 +49,9 @@ func (r CWAMarineRepository) ListStations(ctx context.Context) ([]service.CWAMar
 	rows, err := r.db.Query(ctx, `
 		SELECT id, name_zh, COALESCE(name_en, ''), station_type, COALESCE(area_name, ''),
 		       COALESCE(county_name, ''), COALESCE(town_name, ''), latitude, longitude,
-		       COALESCE(address, ''), is_active
+		       COALESCE(address, ''), is_active, EXISTS(SELECT 1 FROM cwa_sea_temperature t WHERE t.station_id=cwa_marine_station.id AND t.sea_temp_c IS NOT NULL)
 		FROM cwa_marine_station
-		WHERE is_active = true
+
 		ORDER BY area_name, county_name, name_zh
 	`)
 	if err != nil {
@@ -59,13 +59,13 @@ func (r CWAMarineRepository) ListStations(ctx context.Context) ([]service.CWAMar
 	}
 	defer rows.Close()
 
-	var stations []service.CWAMarineStation
+	stations := []service.CWAMarineStation{}
 	for rows.Next() {
 		var s service.CWAMarineStation
 		var lat, lng sql.NullFloat64
 		if err := rows.Scan(
 			&s.ID, &s.NameZH, &s.NameEN, &s.StationType, &s.AreaName,
-			&s.CountyName, &s.TownName, &lat, &lng, &s.Address, &s.IsActive,
+			&s.CountyName, &s.TownName, &lat, &lng, &s.Address, &s.IsActive, &s.HasSeaTemperature,
 		); err != nil {
 			return nil, translateError(err)
 		}
@@ -194,17 +194,18 @@ func (r CWAMarineRepository) GetSeaTemperature(ctx context.Context, stationID st
 func (r CWAMarineRepository) AutoLinkSites(ctx context.Context) (int, error) {
 	tag, err := r.db.Exec(ctx, `
 		UPDATE site s
-		SET cwa_station_id = (
+		SET cwa_station_source='auto',cwa_station_updated_at=clock_timestamp(),cwa_station_id = (
 			SELECT st.id
 			FROM cwa_marine_station st
-			WHERE st.latitude IS NOT NULL AND st.longitude IS NOT NULL AND st.is_active = true
+			WHERE st.latitude IS NOT NULL AND st.longitude IS NOT NULL AND st.is_active = true AND EXISTS(SELECT 1 FROM cwa_sea_temperature t WHERE t.station_id=st.id AND t.sea_temp_c IS NOT NULL)
 			ORDER BY (
 				pow(s.latitude - st.latitude, 2) +
 				pow((s.longitude - st.longitude) * cos(radians(COALESCE(s.latitude, 23.5))), 2)
 			) ASC
 			LIMIT 1
 		)
-		WHERE s.cwa_station_id IS NULL AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL
+		WHERE s.cwa_station_id IS NULL AND s.cwa_station_source<>'manual' AND s.latitude IS NOT NULL AND s.longitude IS NOT NULL
+ AND EXISTS(SELECT 1 FROM cwa_marine_station st WHERE st.is_active AND st.latitude IS NOT NULL AND st.longitude IS NOT NULL AND EXISTS(SELECT 1 FROM cwa_sea_temperature t WHERE t.station_id=st.id AND t.sea_temp_c IS NOT NULL))
 	`)
 	if err != nil {
 		return 0, translateError(err)

@@ -16,6 +16,10 @@ type PublicContentInput struct {
 	Confirm bool        `json:"confirm"`
 }
 type ContentData struct {
+	IntroPopup      *IntroPopup       `json:"intro_popup,omitempty"`
+	Category        string            `json:"category,omitempty"`
+	EntryEnabled    bool              `json:"entry_enabled,omitempty"`
+	ExpiresAt       *time.Time        `json:"expires_at,omitempty"`
 	ArticleLimit    *int              `json:"article_limit,omitempty"`
 	Title           string            `json:"title"`
 	Summary         string            `json:"summary,omitempty"`
@@ -45,6 +49,13 @@ type ContentData struct {
 	YearFrom        *int              `json:"year_from,omitempty"`
 	YearTo          *int              `json:"year_to,omitempty"`
 	Visible         bool              `json:"is_visible"`
+}
+type IntroPopup struct {
+	Kicker      string   `json:"kicker"`
+	Title       string   `json:"title"`
+	Body        string   `json:"body"`
+	Steps       []string `json:"steps"`
+	ButtonLabel string   `json:"button_label"`
 }
 type ContentTimeline struct {
 	Date        string `json:"date"`
@@ -92,17 +103,37 @@ func (c *PublicContentInput) Validate() error {
 	}
 	switch c.Kind {
 	case "settings":
+		if c.SiteID != nil {
+			return bad("首頁設定為全站設定，不可指定樣點")
+		}
 		if c.Data.ArticleLimit == nil || *c.Data.ArticleLimit < 1 || *c.Data.ArticleLimit > 50 {
 			return bad("首頁文章數量需介於 1–50")
 		}
 	case "article":
+		// Old news clients may omit category; new reports must be explicit.
+		if c.Data.Category == "" {
+			c.Data.Category = "news"
+		}
+		if c.Data.Category != "news" && c.Data.Category != "observation_report" {
+			return bad("無效文章分類")
+		}
 		if c.Data.ExternalURL == "" {
 			return bad("文章需有外部網址")
 		}
-		if _, err := time.Parse("2006-01-02", c.Data.Date); err != nil {
+		if _, err := time.Parse("2006-01-02", c.Data.Date); c.Data.Date != "" && err != nil {
 			return bad("文章發布日期格式錯誤")
 		}
 	case "activity":
+		if c.Data.EntryEnabled && len(c.Data.SiteIDs) == 0 {
+			return bad("啟用填報需選擇樣點")
+		}
+		seen := map[int]bool{}
+		for _, id := range c.Data.SiteIDs {
+			if id <= 0 || seen[id] {
+				return bad("活動樣點無效或重複")
+			}
+			seen[id] = true
+		}
 		a, e := time.Parse(time.RFC3339, c.Data.StartAt)
 		b, e2 := time.Parse(time.RFC3339, c.Data.EndAt)
 		if e != nil || e2 != nil || b.Before(a) {

@@ -23,13 +23,13 @@ func NewReefDataRepository(db DBTX) ReefDataRepository { return ReefDataReposito
 
 const reefEventSelect = `SELECT jsonb_build_object(
  'entry_metadata',(SELECT to_jsonb(m) FROM reef_check_entry_metadata m WHERE m.event_id=e.id),
- 'activity_name',(SELECT a.name FROM reef_check_entry_metadata m JOIN reef_check_activity a ON a.id=m.activity_id WHERE m.event_id=e.id),
+ 'activity_name',(SELECT c.data->>'title' FROM public_content c WHERE c.id=e.activity_id),
  'missing_reason',e.missing_reason,'publication_status',e.publication_status,'id',e.id,'event_id',e.event_id,'survey_id',s.id,'survey_date',e.survey_date::text,
  'event_time',e.event_time,'depth_m',e.depth_m,'site_id',p.id,'site_name',p.name_zh,
  'site_english',COALESCE(p.name_en,''),'region',COALESCE(p.region,''),'county',COALESCE(p.county,''),
  'location',COALESCE(p.location,''),'latitude',p.latitude,'longitude',p.longitude,
  'start_date',s.start_date::text,'end_date',s.end_date::text,'label',COALESCE(s.label,''),
- 'cwa_station_id',e.cwa_station_id,
+ 'activity_id',e.activity_id,'sea_temp_source',e.sea_temp_source,'sea_temp_observed_at',e.sea_temp_observed_at,'sea_temp_fetched_at',e.sea_temp_fetched_at,'cwa_station_id',e.cwa_station_id,
  'cwa_station_name',cwa.name_zh,
  'water_temp_c',(SELECT t.water_temp_c FROM transect t WHERE t.event_id=e.event_id AND t.water_temp_c IS NOT NULL LIMIT 1),
  'methods',COALESCE((SELECT jsonb_agg(t.method ORDER BY t.method) FROM transect t WHERE t.event_id=e.event_id),'[]'::jsonb))
@@ -196,6 +196,17 @@ func cleanSlug(s string) string {
 }
 
 func (r ReefDataRepository) CreateEvent(ctx context.Context, input service.ReefDataCreateInput) (service.ReefDataDetail, error) {
+	if input.ActivityID != nil {
+		var allowed bool
+		err := r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM reef_check_activity a JOIN reef_check_activity_site s ON s.activity_id=a.id WHERE a.activity_content_id=$1 AND a.is_active AND s.site_id=$2 AND $3::date BETWEEN a.start_date AND a.end_date)`, *input.ActivityID, input.SiteID, input.SurveyDate).Scan(&allowed)
+		if err != nil {
+			return service.ReefDataDetail{}, err
+		}
+		if !allowed {
+			return service.ReefDataDetail{}, fmt.Errorf("%w: 活動未開放此樣點或日期填報", service.ErrValidation)
+		}
+	}
+
 	var siteNameEN, siteNameZH string
 	var siteStationID *string
 	err := r.db.QueryRow(ctx, `SELECT COALESCE(name_en, ''), name_zh, cwa_station_id FROM site WHERE id=$1`, input.SiteID).Scan(&siteNameEN, &siteNameZH, &siteStationID)
@@ -208,29 +219,11 @@ func (r ReefDataRepository) CreateEvent(ctx context.Context, input service.ReefD
 		cwaStationID = siteStationID
 	}
 
-	waterTemp := input.WaterTemp
-	if waterTemp == nil && cwaStationID != nil && *cwaStationID != "" {
-		var cwaTemp sql.NullFloat64
-		if input.EventTime != "" && input.EventTime != "na" {
-			targetTimeStr := input.SurveyDate + " " + input.EventTime + ":00+08"
-			_ = r.db.QueryRow(ctx, `
-				SELECT sea_temp_c FROM cwa_sea_temperature
-				WHERE station_id = $1 AND observed_date = $2::date AND sea_temp_c IS NOT NULL
-				ORDER BY ABS(EXTRACT(EPOCH FROM (observed_at - $3::timestamptz))) ASC
-				LIMIT 1
-			`, *cwaStationID, input.SurveyDate, targetTimeStr).Scan(&cwaTemp)
-		} else {
-			_ = r.db.QueryRow(ctx, `
-				SELECT sea_temp_c FROM cwa_sea_temperature
-				WHERE station_id = $1 AND observed_date = $2::date AND sea_temp_c IS NOT NULL
-				ORDER BY observed_at DESC
-				LIMIT 1
-			`, *cwaStationID, input.SurveyDate).Scan(&cwaTemp)
-		}
-		if cwaTemp.Valid {
-			waterTemp = &cwaTemp.Float64
-		}
+	temp, err := resolveEventTemperature(ctx, r.db, cwaStationID, input.SurveyDate, input.EventTime, input.WaterTemp, input.TemperatureSource)
+	if err != nil {
+		return service.ReefDataDetail{}, err
 	}
+	waterTemp := temp.Value
 
 	var duplicate bool
 	if err = r.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM event e JOIN survey s ON s.id=e.survey_id WHERE s.site_id=$1 AND e.survey_date=$2::date AND replace(e.event_time,'-',':')=replace($3,'-',':') AND e.depth_m=$4)`, input.SiteID, input.SurveyDate, input.EventTime, input.DepthM).Scan(&duplicate); err != nil {
@@ -268,12 +261,16 @@ func (r ReefDataRepository) CreateEvent(ctx context.Context, input service.ReefD
 
 	var eventID int
 	err = r.db.QueryRow(ctx, `
-		INSERT INTO event (survey_id, event_id, survey_date, event_time, depth_m, cwa_station_id)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO event (survey_id, event_id, survey_date, event_time, depth_m, cwa_station_id,activity_id)
+		VALUES ($1, $2, $3, $4, $5, $6,$7)
 		RETURNING id
-	`, surveyID, finalEventID, input.SurveyDate, input.EventTime, input.DepthM, cwaStationID).Scan(&eventID)
+	`, surveyID, finalEventID, input.SurveyDate, input.EventTime, input.DepthM, cwaStationID, input.ActivityID).Scan(&eventID)
 	if err != nil {
 		return service.ReefDataDetail{}, translateError(err)
+	}
+
+	if err = saveEventTemperature(ctx, r.db, eventID, temp); err != nil {
+		return service.ReefDataDetail{}, err
 	}
 
 	for _, method := range input.Methods {
@@ -409,7 +406,7 @@ func (r ReefDataRepository) DeleteEvent(ctx context.Context, id int) (service.Re
 func (r ReefDataRepository) Sites(ctx context.Context) ([]service.ReefDataSite, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT s.id, s.name_zh, COALESCE(s.name_en, ''), COALESCE(s.region, ''), COALESCE(s.county, ''),
-		       COALESCE(s.location, ''), s.latitude, s.longitude, s.is_active, s.cwa_station_id, cwa.name_zh
+		       COALESCE(s.location, ''), s.latitude, s.longitude, s.is_active, s.cwa_station_id, cwa.name_zh, s.cwa_station_source,s.cwa_station_updated_at,s.cwa_station_updated_by::text
 		FROM site s
 		LEFT JOIN cwa_marine_station cwa ON cwa.id = s.cwa_station_id
 		WHERE s.is_active ORDER BY s.name_zh
@@ -422,7 +419,7 @@ func (r ReefDataRepository) Sites(ctx context.Context) ([]service.ReefDataSite, 
 	for rows.Next() {
 		var s service.ReefDataSite
 		var stID, stName sql.NullString
-		if err := rows.Scan(&s.ID, &s.NameZH, &s.NameEN, &s.Region, &s.County, &s.Location, &s.Latitude, &s.Longitude, &s.IsActive, &stID, &stName); err != nil {
+		if err := rows.Scan(&s.ID, &s.NameZH, &s.NameEN, &s.Region, &s.County, &s.Location, &s.Latitude, &s.Longitude, &s.IsActive, &stID, &stName, &s.CWAStationSource, &s.CWAStationUpdatedAt, &s.CWAStationUpdatedBy); err != nil {
 			return nil, err
 		}
 		if stID.Valid {
@@ -515,6 +512,12 @@ func (r ReefDataRepository) AddParticipant(ctx context.Context, transectID int, 
 		ON CONFLICT (transect_id, diver_id, role) DO UPDATE SET user_id=EXCLUDED.user_id
 	`, transectID, diverID, p.UserID, role)
 	return translateError(err)
+}
+
+func (r ReefDataRepository) ParticipantSnapshot(ctx context.Context, id int) (json.RawMessage, error) {
+	var raw json.RawMessage
+	err := r.db.QueryRow(ctx, `SELECT to_jsonb(p) FROM transect_participant p WHERE id=$1 FOR UPDATE`, id).Scan(&raw)
+	return raw, translateError(err)
 }
 
 func (r ReefDataRepository) RemoveParticipant(ctx context.Context, participantID int) error {
@@ -650,7 +653,7 @@ func (r ReefDataRepository) DeleteDiver(ctx context.Context, id int) (service.Re
 func (r ReefDataRepository) ListSites(ctx context.Context) ([]service.ReefDataSite, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT s.id, s.name_zh, COALESCE(s.name_en, ''), COALESCE(s.region, ''), COALESCE(s.county, ''),
-		       COALESCE(s.location, ''), s.latitude, s.longitude, s.is_active, s.cwa_station_id, cwa.name_zh
+		       COALESCE(s.location, ''), s.latitude, s.longitude, s.is_active, s.cwa_station_id, cwa.name_zh, s.cwa_station_source,s.cwa_station_updated_at,s.cwa_station_updated_by::text
 		FROM site s
 		LEFT JOIN cwa_marine_station cwa ON cwa.id = s.cwa_station_id
 		ORDER BY s.id DESC
@@ -663,7 +666,7 @@ func (r ReefDataRepository) ListSites(ctx context.Context) ([]service.ReefDataSi
 	for rows.Next() {
 		var s service.ReefDataSite
 		var stID, stName sql.NullString
-		if err := rows.Scan(&s.ID, &s.NameZH, &s.NameEN, &s.Region, &s.County, &s.Location, &s.Latitude, &s.Longitude, &s.IsActive, &stID, &stName); err != nil {
+		if err := rows.Scan(&s.ID, &s.NameZH, &s.NameEN, &s.Region, &s.County, &s.Location, &s.Latitude, &s.Longitude, &s.IsActive, &stID, &stName, &s.CWAStationSource, &s.CWAStationUpdatedAt, &s.CWAStationUpdatedBy); err != nil {
 			return nil, err
 		}
 		if stID.Valid {
@@ -682,11 +685,11 @@ func (r ReefDataRepository) GetSite(ctx context.Context, id int) (service.ReefDa
 	var stID, stName sql.NullString
 	err := r.db.QueryRow(ctx, `
 		SELECT s.id, s.name_zh, COALESCE(s.name_en, ''), COALESCE(s.region, ''), COALESCE(s.county, ''),
-		       COALESCE(s.location, ''), s.latitude, s.longitude, s.is_active, s.cwa_station_id, cwa.name_zh
+		       COALESCE(s.location, ''), s.latitude, s.longitude, s.is_active, s.cwa_station_id, cwa.name_zh, s.cwa_station_source,s.cwa_station_updated_at,s.cwa_station_updated_by::text
 		FROM site s
 		LEFT JOIN cwa_marine_station cwa ON cwa.id = s.cwa_station_id
 		WHERE s.id = $1
-	`, id).Scan(&s.ID, &s.NameZH, &s.NameEN, &s.Region, &s.County, &s.Location, &s.Latitude, &s.Longitude, &s.IsActive, &stID, &stName)
+	`, id).Scan(&s.ID, &s.NameZH, &s.NameEN, &s.Region, &s.County, &s.Location, &s.Latitude, &s.Longitude, &s.IsActive, &stID, &stName, &s.CWAStationSource, &s.CWAStationUpdatedAt, &s.CWAStationUpdatedBy)
 	if err != nil {
 		return s, translateError(err)
 	}
@@ -710,10 +713,10 @@ func (r ReefDataRepository) CreateSite(ctx context.Context, input service.ReefDa
 	}
 	var id int
 	err := r.db.QueryRow(ctx, `
-		INSERT INTO site (region, county, location, name_zh, name_en, latitude, longitude, is_active, cwa_station_id)
-		VALUES (NULLIF($1, ''), NULLIF($2, ''), NULLIF($3, ''), $4, NULLIF($5, ''), $6, $7, $8, NULLIF($9, ''))
+		INSERT INTO site (region, county, location, name_zh, name_en, latitude, longitude, is_active, cwa_station_id,cwa_station_source,cwa_station_updated_at,cwa_station_updated_by)
+		VALUES (NULLIF($1, ''), NULLIF($2, ''), NULLIF($3, ''), $4, NULLIF($5, ''), $6, $7, $8, NULLIF($9, ''),CASE WHEN $9::text IS NULL THEN 'unknown' ELSE 'manual' END,CASE WHEN $9::text IS NOT NULL THEN now() END,NULLIF($10,'')::uuid)
 		RETURNING id
-	`, strings.TrimSpace(input.Region), strings.TrimSpace(input.County), strings.TrimSpace(input.Location), nameZH, strings.TrimSpace(input.NameEN), input.Latitude, input.Longitude, isActive, input.CWAStationID).Scan(&id)
+	`, strings.TrimSpace(input.Region), strings.TrimSpace(input.County), strings.TrimSpace(input.Location), nameZH, strings.TrimSpace(input.NameEN), input.Latitude, input.Longitude, isActive, input.CWAStationID, input.CWAStationUpdatedBy).Scan(&id)
 	if err != nil {
 		return service.ReefDataSite{}, translateError(err)
 	}
@@ -759,9 +762,12 @@ func (r ReefDataRepository) UpdateSite(ctx context.Context, id int, input servic
 			latitude = $7,
 			longitude = $8,
 			is_active = $9,
-			cwa_station_id = NULLIF($10, '')
+			cwa_station_id = NULLIF($10, ''),
+ cwa_station_source=CASE WHEN $11 THEN 'manual' ELSE cwa_station_source END,
+ cwa_station_updated_at=CASE WHEN $11 THEN clock_timestamp() ELSE cwa_station_updated_at END,
+ cwa_station_updated_by=CASE WHEN $11 THEN NULLIF($12,'')::uuid ELSE cwa_station_updated_by END
 		WHERE id = $1
-	`, id, strings.TrimSpace(input.Region), strings.TrimSpace(input.County), strings.TrimSpace(input.Location), nameZH, nameEN, latitude, longitude, isActive, cwaStationID)
+	`, id, strings.TrimSpace(input.Region), strings.TrimSpace(input.County), strings.TrimSpace(input.Location), nameZH, nameEN, latitude, longitude, isActive, cwaStationID, input.CWAStationID != nil, input.CWAStationUpdatedBy)
 	if err != nil {
 		return service.ReefDataSite{}, translateError(err)
 	}
@@ -1269,25 +1275,20 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 		normTime = "na"
 	}
 	timeForTemp := strings.ReplaceAll(normTime, "-", ":")
+	var manualTemp *float64
+	for _, t := range sub.Transects {
+		if t.WaterTempC != nil {
+			manualTemp = t.WaterTempC
+			break
+		}
+	}
+	temp, err := resolveEventTemperature(ctx, exec, cwaStationID, sub.Event.SurveyDate, timeForTemp, manualTemp, "")
+	if err != nil {
+		return service.ReefCheckSubmissionResult{}, err
+	}
 	var cwaTemp sql.NullFloat64
-	if cwaStationID != nil && *cwaStationID != "" {
-		if normTime != "na" {
-			targetTimeStr := sub.Event.SurveyDate + " " + timeForTemp + ":00+08"
-			_ = exec.QueryRow(ctx, `
-				SELECT sea_temp_c FROM cwa_sea_temperature
-				WHERE station_id = $1 AND observed_date = $2::date AND sea_temp_c IS NOT NULL
-				ORDER BY ABS(EXTRACT(EPOCH FROM (observed_at - $3::timestamptz))) ASC
-				LIMIT 1
-			`, *cwaStationID, sub.Event.SurveyDate, targetTimeStr).Scan(&cwaTemp)
-		}
-		if !cwaTemp.Valid {
-			_ = exec.QueryRow(ctx, `
-				SELECT sea_temp_c FROM cwa_sea_temperature
-				WHERE station_id = $1 AND observed_date = $2::date AND sea_temp_c IS NOT NULL
-				ORDER BY observed_at DESC
-				LIMIT 1
-			`, *cwaStationID, sub.Event.SurveyDate).Scan(&cwaTemp)
-		}
+	if temp.Value != nil {
+		cwaTemp = sql.NullFloat64{Float64: *temp.Value, Valid: true}
 	}
 
 	var surveyID int
@@ -1346,6 +1347,10 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 		}
 	}
 
+	if err = saveEventTemperature(ctx, exec, eventDBID, temp); err != nil {
+		return service.ReefCheckSubmissionResult{}, err
+	}
+
 	snapshot, err := json.Marshal(sub)
 	if err != nil {
 		return service.ReefCheckSubmissionResult{}, err
@@ -1354,8 +1359,11 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 		return service.ReefCheckSubmissionResult{}, err
 	}
 	if activity != nil {
+		if _, err = exec.Exec(ctx, `UPDATE event SET activity_id=$2 WHERE id=$1`, eventDBID, activity.ActivityID); err != nil {
+			return service.ReefCheckSubmissionResult{}, translateError(err)
+		}
 		m := sub.EntryMetadata
-		_, err = exec.Exec(ctx, `INSERT INTO reef_check_entry_metadata(event_id,activity_id,weather,air_temperature_c,latitude,longitude) VALUES($1,$2,NULLIF($3,''),$4,$5,$6)`, eventDBID, activity.ID, m.Weather, m.AirTemperature, m.Latitude, m.Longitude)
+		_, err = exec.Exec(ctx, `INSERT INTO reef_check_entry_metadata(event_id,entry_config_id,weather,air_temperature_c,latitude,longitude) VALUES($1,$2,NULLIF($3,''),$4,$5,$6)`, eventDBID, activity.ID, m.Weather, m.AirTemperature, m.Latitude, m.Longitude)
 		if err != nil {
 			return service.ReefCheckSubmissionResult{}, translateError(err)
 		}

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"coast-monitoring/internal/service"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // Uses a migrated disposable/local DB. The outer transaction rolls back all data.
@@ -17,7 +16,7 @@ func TestPointEntryPreservesPublicationAndHistoricalTotals(t *testing.T) {
 		t.Skip("set REEF_DATA_TEST_DATABASE_URL to a migrated local PostgreSQL database")
 	}
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dsn)
+	pool, err := integrationPool(ctx, dsn)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +31,7 @@ func TestPointEntryPreservesPublicationAndHistoricalTotals(t *testing.T) {
 		t.Fatal(err)
 	}
 	code := "RC-POINT-ENTRY-FIXTURE"
-	if err = tx.QueryRow(ctx, `INSERT INTO reef_check_activity(name,code_hash,start_date,end_date) VALUES('Fixture',$1,'2026-10-01','2026-10-31') RETURNING id`, activityHash(code)).Scan(&activity); err != nil {
+	if err = tx.QueryRow(ctx, `WITH parent AS (INSERT INTO public_content(kind,data) VALUES('activity','{"title":"Fixture"}') RETURNING id) INSERT INTO reef_check_activity(activity_content_id,name,code_hash,start_date,end_date) SELECT id,'Fixture',$1,'2026-10-01','2026-10-31' FROM parent RETURNING id`, activityHash(code)).Scan(&activity); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO reef_check_activity_site(activity_id,site_id) VALUES($1,$2)`, activity, site); err != nil {
