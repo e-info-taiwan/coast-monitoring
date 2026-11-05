@@ -452,7 +452,9 @@ const state = {
   demoError: false,
 }
 
-const reefData = createReefData({ apiFetch, onCount: () => renderSidebar() })
+const reefData = createReefData({ apiFetch, onCount: () => renderSidebar(),
+  onManageActivities: () => resourceNav.querySelector('[data-nav="public_content:activity"]')?.click(),
+})
 const publicContent = createPublicContent({
   apiFetch,
   notify: (options) => {

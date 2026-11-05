@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"github.com/jackc/pgx/v5"
 	"strings"
+	"time"
 )
 
 // Public queries deliberately do not select participants, comments or snapshots.
@@ -34,6 +35,24 @@ func (r ReefDataRepository) PublicSites(ctx context.Context, f service.PublicRee
 }
 
 func (r ReefDataRepository) PublicSeries(ctx context.Context, siteID int, f service.PublicReefFilter) ([]service.PublicReefSeries, error) {
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	// Scope the SQL deadline to this read transaction; do not limit admin imports.
+	if starter, ok := r.db.(txStarter); ok {
+		tx, err := starter.Begin(ctx)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			cleanup, stop := context.WithTimeout(context.Background(), 5*time.Second)
+			defer stop()
+			_ = tx.Rollback(cleanup)
+		}()
+		r.db = tx
+		if _, err = tx.Exec(ctx, `SET LOCAL statement_timeout='18s'`); err != nil {
+			return nil, err
+		}
+	}
 	// Each row retains event identity; no grouping across distinct observations.
 	if f.EventIDs == nil {
 		f.EventIDs = []string{}
@@ -44,11 +63,8 @@ func (r ReefDataRepository) PublicSeries(ctx context.Context, siteID int, f serv
 	}
 	effective := service.EffectiveChartSettings(siteID, settings)
 	if f.GroupID > 0 {
-		if f.Depth == nil {
-			return nil, service.ErrValidation
-		}
 		var from, to *int
-		if err := r.db.QueryRow(ctx, `SELECT g.year_from,g.year_to FROM shared_chart_group g JOIN shared_chart_member m ON m.group_id=g.id WHERE g.id=$1 AND g.publication_status='published' AND m.site_id=$2 AND m.depth_m=$3`, f.GroupID, siteID, f.Depth).Scan(&from, &to); err != nil {
+		if err := r.db.QueryRow(ctx, `SELECT g.year_from,g.year_to FROM shared_chart_group g WHERE g.id=$1 AND g.publication_status='published' AND EXISTS(SELECT 1 FROM shared_chart_member m WHERE m.group_id=g.id AND m.site_id=$2 AND ($3::numeric IS NULL OR m.depth_m=$3))`, f.GroupID, siteID, f.Depth).Scan(&from, &to); err != nil {
 			return nil, translateError(err)
 		}
 		if from != nil && *from > f.FromYear {
@@ -57,27 +73,37 @@ func (r ReefDataRepository) PublicSeries(ctx context.Context, siteID int, f serv
 		if to != nil && *to < f.ToYear {
 			f.ToYear = *to
 		}
+		includeLive := false
+		for _, chart := range f.Charts {
+			includeLive = includeLive || chart == "live_coral"
+		}
+		if !includeLive {
+			return []service.PublicReefSeries{}, nil
+		}
 		f.Charts = []string{"live_coral"}
 		effective = nil
 	}
-	rows, err := r.db.Query(ctx, `WITH summaries AS (
- SELECT transect_id,CASE WHEN code='live_coral' THEN 'live_coral' ELSE 'substrate' END AS chart,code AS key,code AS name,''::text AS size_class,'%'::text AS unit,total::float8,mean::float8,coverage_percent::float8 AS value,sd::float8,se::float8,n FROM substrate_summary
- UNION ALL SELECT b.transect_id,'taxa',x.id::text,x.name_zh,COALESCE(x.size_class,''),CASE WHEN x.taxon_group='rare' THEN '隻／子樣區' ELSE '隻／100 m²' END,b.total::float8,b.mean::float8,b.mean::float8,b.sd::float8,b.se::float8,b.n FROM belt_summary b JOIN taxon x ON x.id=b.taxon_id
- UNION ALL SELECT i.transect_id,'impact',x.id::text,x.name_zh,'',CASE WHEN i.source_unit='percent' THEN '%' WHEN i.source_unit='level' THEN '歷史分級' WHEN i.source_unit='count' THEN '原始件數' WHEN x.value_type='percent' THEN '%' WHEN x.has_raw_count OR x.value_type='count' THEN '原始件數' ELSE '歷史分級' END,i.total::float8,i.mean::float8,i.mean::float8,i.sd::float8,i.se::float8,i.n FROM impact_summary i JOIN impact_type x ON x.id=i.impact_type_id
- UNION ALL SELECT i.transect_id,'impact',x.id::text||':level',x.name_zh,'',CASE WHEN i.source_unit='level' THEN '歷史分級' ELSE '系統衍生分級' END,NULL::float8,i.level_mean::float8,i.level_mean::float8,i.level_sd::float8,i.level_se::float8,i.n FROM impact_summary i JOIN impact_type x ON x.id=i.impact_type_id WHERE i.source_unit IN ('count','level') OR (i.source_unit IS NULL AND x.has_raw_count)
- UNION ALL SELECT transect_id,'bleaching',code,code,'','白化點數',total::float8,mean::float8,mean::float8,sd::float8,se::float8,n FROM substrate_bleaching_summary
- ) SELECT p.id,p.name_zh,e.event_id,e.survey_date::text,e.event_time,e.depth_m::float8,a.chart,a.key,a.name,a.size_class,t.fish_size_mode,a.unit,a.total,a.mean,a.value,a.sd,a.se,a.n,e.updated_at::text,x.id,COALESCE(x.taxon_group::text,'')
- FROM summaries a JOIN transect t ON t.id=a.transect_id JOIN event e ON e.event_id=t.event_id JOIN survey s ON s.id=e.survey_id JOIN site p ON p.id=s.site_id LEFT JOIN taxon x ON a.chart='taxa' AND x.id::text=a.key
- WHERE p.id=$1 AND p.is_active AND e.publication_status='published' AND extract(year FROM e.survey_date) BETWEEN $2 AND $3 AND ($4::numeric IS NULL OR e.depth_m=$4) AND ($5='' OR e.event_id=$5)
- AND a.chart=ANY($6::text[]) AND (a.chart<>'taxa' OR cardinality($7::int[])=0 OR a.key=ANY(SELECT v::text FROM unnest($7::int[]) v))
- AND (cardinality($8::text[])=0 OR a.key=ANY($8::text[]))
+	rows, err := r.db.Query(ctx, `WITH selected AS MATERIALIZED (
+ SELECT p.id site_id,p.name_zh site_name,e.event_id,e.survey_date,e.event_time,e.depth_m,e.updated_at,t.id transect_id,t.fish_size_mode
+ FROM site p JOIN survey s ON s.site_id=p.id JOIN event e ON e.survey_id=s.id JOIN transect t ON t.event_id=e.event_id
+ WHERE p.id=$1 AND p.is_active AND e.publication_status='published'
+ AND e.survey_date>=make_date($2,1,1) AND e.survey_date<make_date($3+1,1,1)
+ AND ($4::numeric IS NULL OR e.depth_m=$4) AND ($5='' OR e.event_id=$5)
  AND (cardinality($9::text[])=0 OR e.event_id=ANY($9::text[]))
  AND ($10='' OR e.survey_date=NULLIF($10,'')::date)
- AND ($11='' OR x.taxon_group::text=$11)
- AND ($12='' OR a.size_class=$12)
- AND ($13='' OR t.fish_size_mode=$13)
  AND ($14='' OR t.method::text=$14)
- ORDER BY e.survey_date,e.event_time,e.depth_m,e.event_id,a.chart,a.key`, siteID, f.FromYear, f.ToYear, f.Depth, f.EventID, f.Charts, f.TaxonIDs, f.CategoryKeys, f.EventIDs, f.Date, f.TaxonGroup, f.SizeClass, f.FishSizeMode, f.Method)
+ AND ($16::bigint=0 OR EXISTS(SELECT 1 FROM shared_chart_member m WHERE m.group_id=$16 AND m.site_id=p.id AND m.depth_m=e.depth_m))
+ ) SELECT e.site_id,e.site_name,e.event_id,e.survey_date::text,
+ CASE WHEN e.event_time IN ('','na') THEN NULL ELSE replace(e.event_time,'-',':') END,e.depth_m::float8,
+ a.chart,a.key,a.name,a.size_class,CASE WHEN a.chart='taxa' AND a.taxon_group='fish' THEN e.fish_size_mode END,
+ a.unit,a.total,a.mean,a.value,a.sd,a.se,a.n,to_char(e.updated_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),a.taxon_id,a.taxon_group
+ FROM selected e CROSS JOIN LATERAL reef_transect_series(e.transect_id,$6::text[]) a
+ WHERE (cardinality($7::int[])=0 OR a.taxon_id=ANY($7::int[]))
+ AND (cardinality($8::text[])=0 OR a.key=ANY($8::text[]))
+ AND ($11='' OR a.taxon_group=$11) AND ($12='' OR a.size_class=$12)
+ AND ($13='' OR (a.chart='taxa' AND a.taxon_group='fish' AND e.fish_size_mode=$13))
+ AND ($15='' OR a.unit=$15)
+ ORDER BY e.survey_date,e.event_time,e.depth_m,e.event_id,a.chart,a.key,a.unit`, siteID, f.FromYear, f.ToYear, f.Depth, f.EventID, f.Charts, f.TaxonIDs, f.CategoryKeys, f.EventIDs, f.Date, f.TaxonGroup, f.SizeClass, f.FishSizeMode, f.Method, f.Unit, f.GroupID)
 	if err != nil {
 		return nil, err
 	}
