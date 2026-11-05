@@ -9,7 +9,7 @@ export const PUBLIC_CONTENT_PREFIX = "public_content:"
 export const PUBLIC_CONTENT_KINDS = [
   { kind: "settings", title: "首頁顯示設定", description: "控制公開網站首頁的顯示方式，例如最新消息筆數。" },
   { kind: "event", title: "調查發布", description: "核對 Reef Check 調查場次的原始資料後，再決定是否公開。", creatable: false },
-  { kind: "article", title: "文章連結", description: "首頁「最新消息」的外部文章連結與縮圖。" },
+  { kind: "article", title: "文章連結", description: "管理最新消息與樣點觀測報告；共用同一筆文章，修改會同步至關聯樣點。" },
   { kind: "activity", title: "活動行程", description: "公開招募與內部活動的時間、地點與報名資訊。" },
   { kind: "development", title: "海岸開發案", description: "開發案基本資料、邊界、事件時間軸與圖片授權。" },
   { kind: "profile", title: "樣點公開資訊／最新報告", description: "各樣點的公開介紹、圖片與最新報告連結。" },
@@ -82,6 +82,7 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
     loaded: false,
     error: "",
     status: "",
+    category: "",
     search: "",
     page: 0,
   }
@@ -112,7 +113,7 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
     s.error = ""
     if (panel) renderPanel()
     try {
-      const needsSites = ["profile", "annotation", "chart", "activity"].includes(kind)
+      const needsSites = ["profile", "annotation", "chart", "activity", "article"].includes(kind)
       const [items] = await Promise.all([apiFetch(listPath(kind)), needsSites ? ensureSites() : null])
       if (request !== requestID) return
       s.items = Array.isArray(items) ? items : items?.items || []
@@ -137,6 +138,7 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
       s.items = []
       s.loaded = false
       s.status = ""
+      s.category = ""
       s.search = ""
       s.page = 0
       void load()
@@ -157,18 +159,18 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
     if (s.kind === "audit") return [item.kind, item.id, JSON.stringify(item.details)].join(" ")
     if (s.kind === "event") return [item.site_name, item.site_english, item.event_id, item.survey_date, item.county].join(" ")
     const d = item.data || {}
-    return [d.title, d.summary, d.location, d.county, d.authority, siteName(item.site_id)].join(" ")
+    return [d.title, d.summary, d.location, d.county, d.authority, siteName(item.site_id), ...(item.related_site_ids || []).map(siteName)].join(" ")
   }
 
   function filtered() {
     const q = s.search.trim().toLowerCase()
-    return s.items.filter(item => (!s.status || rowStatus(item) === s.status) && (!q || searchText(item).toLowerCase().includes(q)))
+    return s.items.filter(item => (!s.status || rowStatus(item) === s.status) && (!s.category || item.data?.category === s.category) && (!q || searchText(item).toLowerCase().includes(q)))
   }
 
   function secondaryLine(item) {
     const d = item.data || {}
     switch (s.kind) {
-      case "article": return [d.date, d.external_url].filter(Boolean).join(" · ")
+      case "article": return [d.category === "observation_report" ? "觀測報告" : "最新消息", d.date, item.related_site_ids?.length ? `關聯樣點：${item.related_site_ids.map(siteName).join("、")}` : "", d.external_url].filter(Boolean).join(" · ")
       case "activity": return [d.start_at ? formatDateTime(d.start_at) : "", d.location].filter(Boolean).join(" · ")
       case "development": return [d.county, d.authority, d.status].filter(Boolean).join(" · ")
       case "profile":
@@ -225,6 +227,7 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
     const toolbar = `
       <div class="pc-toolbar">
         ${statusFilter}
+        ${s.kind === "article" ? `<div class="pc-segmented" role="group" aria-label="依文章分類篩選">${[["","全部文章"],["news","最新消息"],["observation_report","觀測報告"]].map(([value,label]) => `<button type="button" data-category="${value}" aria-pressed="${s.category === value}" class="${s.category === value ? "is-active" : ""}">${label} <span>${s.items.filter(x => !value || x.data?.category === value).length}</span></button>`).join("")}</div>` : ""}
         <label class="pc-search"><span class="sr-only">搜尋</span><input type="search" value="${esc(s.search)}" placeholder="${s.kind === "event" ? "搜尋樣點、場次編號或日期" : "搜尋標題、摘要或樣點"}" data-pc="search"></label>
       </div>`
 
@@ -277,7 +280,8 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
   function bindPanel() {
     panel.querySelectorAll('[data-pc="refresh"]').forEach(b => { b.onclick = () => load() })
     panel.querySelectorAll('[data-pc="new"]').forEach(b => { b.onclick = () => openEditor(null) })
-    panel.querySelector('[data-pc="clear"]')?.addEventListener("click", () => { s.status = ""; s.search = ""; s.page = 0; renderPanel() })
+    panel.querySelector('[data-pc="clear"]')?.addEventListener("click", () => { s.status = ""; s.category = ""; s.search = ""; s.page = 0; renderPanel() })
+    panel.querySelectorAll("[data-category]").forEach(b => { b.onclick = () => { s.category = b.dataset.category; s.page = 0; renderPanel() } })
     panel.querySelector('[data-pc="prev"]')?.addEventListener("click", () => { s.page--; renderPanel() })
     panel.querySelector('[data-pc="next"]')?.addEventListener("click", () => { s.page++; renderPanel() })
     panel.querySelectorAll("[data-status]").forEach(b => { b.onclick = () => { s.status = b.dataset.status; s.page = 0; renderPanel() } })
@@ -361,7 +365,7 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
   async function openEditor(item, { notice = "" } = {}) {
     const kind = s.kind
     const meta = kindMeta(kind)
-    if (["profile", "annotation", "chart", "activity"].includes(kind)) await ensureSites()
+    if (["profile", "annotation", "chart", "activity", "article"].includes(kind)) await ensureSites()
     let dirty = false
     drawer.open({
       eyebrow: meta.title,
@@ -532,7 +536,7 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
     },
     reset() {
       requestID++
-      Object.assign(s, { kind: "", items: [], sites: [], sitesLoaded: false, loading: false, loaded: false, error: "", status: "", search: "", page: 0 })
+      Object.assign(s, { kind: "", items: [], sites: [], sitesLoaded: false, loading: false, loaded: false, error: "", status: "", category: "", search: "", page: 0 })
       panel = null
     },
   }

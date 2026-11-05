@@ -3429,6 +3429,17 @@ body.no-scroll {
 /* Drawer form */
 .pc-hero { margin-top: -6px; }
 .pc-form { gap: 0; }
+.site-workspace .pc-form { gap: 16px; }
+.site-workspace .pc-form + .pc-form { margin-top: 24px; padding-top: 24px; border-top: 1px solid var(--border); }
+.site-workspace .sw-actions { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin-top: 12px; }
+.site-workspace .pc-grid > button { align-self: end; justify-self: start; margin-block: 8px; }
+.site-workspace [data-member] { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-block: 16px; }
+.site-workspace [data-members] { grid-column: 1 / -1; }
+.site-workspace .sw-choices { margin: 0; padding: 16px; border: 1px solid var(--border); border-radius: 10px; }
+.site-workspace .sw-auto { display: flex; align-items: center; gap: 8px; margin-block: 8px; font-size: 13px; }
+.site-workspace .sw-auto input { width: auto; }
+.site-workspace .sw-choices .pc-checks { max-height: 240px; overflow: auto; }
+.site-workspace .sw-report { display: grid; gap: 8px; }
 .pc-form-section {
   padding: 18px 0;
   border-top: 1px solid var(--border-soft);

@@ -73,6 +73,10 @@ func (r ReefDataRepository) SiteDisplay(ctx context.Context, siteID int, admin b
 	}
 	out.EffectiveSettings = service.EffectiveChartSettings(siteID, settings)
 	if admin {
+		out.ChartOptions, err = r.chartDataOptions(ctx, siteID)
+		if err != nil {
+			return out, err
+		}
 		out.DraftSettings = []service.ChartSetting{}
 		for _, s := range settings {
 			if s.Status == "draft" {
