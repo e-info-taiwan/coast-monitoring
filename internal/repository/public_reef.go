@@ -63,11 +63,8 @@ func (r ReefDataRepository) PublicSeries(ctx context.Context, siteID int, f serv
 	}
 	effective := service.EffectiveChartSettings(siteID, settings)
 	if f.GroupID > 0 {
-		if f.Depth == nil {
-			return nil, service.ErrValidation
-		}
 		var from, to *int
-		if err := r.db.QueryRow(ctx, `SELECT g.year_from,g.year_to FROM shared_chart_group g JOIN shared_chart_member m ON m.group_id=g.id WHERE g.id=$1 AND g.publication_status='published' AND m.site_id=$2 AND m.depth_m=$3`, f.GroupID, siteID, f.Depth).Scan(&from, &to); err != nil {
+		if err := r.db.QueryRow(ctx, `SELECT g.year_from,g.year_to FROM shared_chart_group g WHERE g.id=$1 AND g.publication_status='published' AND EXISTS(SELECT 1 FROM shared_chart_member m WHERE m.group_id=g.id AND m.site_id=$2 AND ($3::numeric IS NULL OR m.depth_m=$3))`, f.GroupID, siteID, f.Depth).Scan(&from, &to); err != nil {
 			return nil, translateError(err)
 		}
 		if from != nil && *from > f.FromYear {
@@ -95,6 +92,7 @@ func (r ReefDataRepository) PublicSeries(ctx context.Context, siteID int, f serv
  AND (cardinality($9::text[])=0 OR e.event_id=ANY($9::text[]))
  AND ($10='' OR e.survey_date=NULLIF($10,'')::date)
  AND ($14='' OR t.method::text=$14)
+ AND ($16::bigint=0 OR EXISTS(SELECT 1 FROM shared_chart_member m WHERE m.group_id=$16 AND m.site_id=p.id AND m.depth_m=e.depth_m))
  ) SELECT e.site_id,e.site_name,e.event_id,e.survey_date::text,
  CASE WHEN e.event_time IN ('','na') THEN NULL ELSE replace(e.event_time,'-',':') END,e.depth_m::float8,
  a.chart,a.key,a.name,a.size_class,CASE WHEN a.chart='taxa' AND a.taxon_group='fish' THEN e.fish_size_mode END,
@@ -105,7 +103,7 @@ func (r ReefDataRepository) PublicSeries(ctx context.Context, siteID int, f serv
  AND ($11='' OR a.taxon_group=$11) AND ($12='' OR a.size_class=$12)
  AND ($13='' OR (a.chart='taxa' AND a.taxon_group='fish' AND e.fish_size_mode=$13))
  AND ($15='' OR a.unit=$15)
- ORDER BY e.survey_date,e.event_time,e.depth_m,e.event_id,a.chart,a.key,a.unit`, siteID, f.FromYear, f.ToYear, f.Depth, f.EventID, f.Charts, f.TaxonIDs, f.CategoryKeys, f.EventIDs, f.Date, f.TaxonGroup, f.SizeClass, f.FishSizeMode, f.Method, f.Unit)
+ ORDER BY e.survey_date,e.event_time,e.depth_m,e.event_id,a.chart,a.key,a.unit`, siteID, f.FromYear, f.ToYear, f.Depth, f.EventID, f.Charts, f.TaxonIDs, f.CategoryKeys, f.EventIDs, f.Date, f.TaxonGroup, f.SizeClass, f.FishSizeMode, f.Method, f.Unit, f.GroupID)
 	if err != nil {
 		return nil, err
 	}

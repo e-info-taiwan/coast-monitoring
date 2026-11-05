@@ -119,6 +119,23 @@ func TestScopedPublicStatisticsContract(t *testing.T) {
 			t.Fatalf("non-intersection %s: %+v", q, got)
 		}
 	}
+	// A group without a requested depth still restricts observations to member depths.
+	var group int
+	scan(`INSERT INTO shared_chart_group(title,publication_status) VALUES('Stats group','published') RETURNING id`, &group)
+	exec(`INSERT INTO shared_chart_member(group_id,site_id,depth_m) VALUES($1,$2,5)`, group, site)
+	exec(`UPDATE event SET depth_m=10 WHERE event_id='stats-afternoon'`)
+	groupQuery := "group_id=" + strconv.Itoa(group)
+	grouped := query(groupQuery)
+	if len(grouped) != 1 || grouped[0].Chart != "live_coral" || grouped[0].Depth != 5 {
+		t.Fatalf("group member depth not applied: %+v", grouped)
+	}
+	if len(query(groupQuery+"&charts=taxa")) != 0 {
+		t.Fatal("group overrode requested chart filter")
+	}
+	if len(query(groupQuery+"&from_year=2025")) != 0 {
+		t.Fatal("group overrode requested year filter")
+	}
+	exec(`UPDATE event SET depth_m=5 WHERE event_id='stats-afternoon'`)
 	stamp := filtered[0].UpdatedAt
 	if query("charts=taxa")[0].UpdatedAt != stamp {
 		t.Fatal("request time used as update time")
