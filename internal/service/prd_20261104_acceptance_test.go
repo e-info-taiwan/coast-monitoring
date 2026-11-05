@@ -6,8 +6,8 @@ import (
 	"testing"
 )
 
-// These target-spec tests deliberately remain red while PRD 0.9.13 / Schema
-// 1.16 features are missing. Run explicitly; see docs/prd-test-cases-2026-11-04.md.
+// PRD 0.9.13 / Schema 1.16 acceptance contracts run in the default suite.
+// See docs/prd-test-cases-2026-11-04.md for the full acceptance matrix.
 func TestPRD20261104H01IntroPopupSurvivesContentParsing(t *testing.T) {
 	raw := `{"kind":"settings","data":{"title":"首頁設定","article_limit":10,"intro_popup":{"kicker":"珊瑚觀測","title":"認識海洋","body":"第一行\n第二行","steps":["選擇樣點","查看資料"],"button_label":"開始探索"}}}`
 	var input PublicContentInput

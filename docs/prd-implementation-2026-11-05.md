@@ -19,7 +19,7 @@
 | T01–T06 | 測站 manual／auto／unknown、操作者／時間、海溫能力與距離／可用性、同步狀態；新增 event 可明確覆寫本站預設，保存 automatic／manual 與觀測／取得時間。只讀同日資料，人工值不被自動值覆寫。SQL 與前端測站回歸通過。 |
 | D14–D15 | 新增 migration 000018；不按同名合併舊活動，保留報告網址、隱藏值、完整來源與遷移對帳表。全新 18 個遷移及帶舊資料升級測試通過。 |
 
-公開網站已保存於 [草稿 PR #1](https://github.com/e-info-taiwan/coast-monitoring-website/pull/1)，commit `f24300d621ff2378d7f1051d97c46f9bc9019e7c`。後端與後台修改位於本 repository。
+公開網站已保存於 [草稿 PR #1](https://github.com/e-info-taiwan/coast-monitoring-website/pull/1)，commit `f24300d621ff2378d7f1051d97c46f9bc9019e7c`。後端與後台已保存於 [草稿 PR #1](https://github.com/e-info-taiwan/coast-monitoring/pull/1)，功能 commit `7f3fbc72b0b0a88bcab536d14a4f17c905f4c4f8`。
 
 ## 實際執行結果
 
@@ -40,7 +40,7 @@ export REEF_HANDOFF_CSV_DIR=/absolute/path/to/01_reefcheck_observations/csv
 scripts/test-prd.sh
 ```
 
-`scripts/test-prd.sh` 需要 Node 22.18+ 或 26、Go 及 npm。若未指定 corpus，該案例會明確 SKIP。預設 `go test ./...` 仍可執行單元／HTTP 測試，DB 案例需設定獨立測試庫；不可填線上 DATABASE_URL。另提供 PR CI workflow 使用 PostgreSQL 16 service、執行正式 migration 命令及 Go／JS 測試；是否已於 GitHub 執行須以 PR checks 為準。
+`scripts/test-prd.sh` 需要 Node 22.18+ 或 26、Go 及 npm。若未指定 corpus，該案例會明確 SKIP。預設 `go test ./...` 仍可執行單元／HTTP 測試，DB 案例需設定獨立測試庫；不可填線上 DATABASE_URL。另提供 PR CI workflow 使用 PostgreSQL 16 service、執行正式 migration 命令及 Go／JS 測試；[GitHub 原生 PostgreSQL 16 CI](https://github.com/e-info-taiwan/coast-monitoring/actions/runs/41948705064) 已實際通過 migration、完整 Go 套件及 19 項 JS 測試；CI 未提供交付 corpus 與舊 v1.7 fixture，這兩項會 SKIP，本地另有交付 corpus 通過紀錄。
 
 ## 尚待交付／環境驗收
 
