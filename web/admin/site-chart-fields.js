@@ -9,7 +9,8 @@ export function stationDescription(s) {
 }
 
 export function chartDefaults(e, options = {}) {
-  return { is_visible: true, sort_order: e.sort_order ?? 0,
+  const order = ['substrate_depth','taxa_density','rare_history','live_coral_history','impact_history','bleaching_history'].indexOf(e.chart_key)
+  return { is_visible: true, sort_order: Math.max(0, order),
     year_from: options.years?.[0] ?? null, year_to: options.years?.at(-1) ?? null,
     default_depth_m: options.depths?.[0] ?? null }
 }

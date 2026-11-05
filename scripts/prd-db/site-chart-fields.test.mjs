@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { JSDOM } from 'jsdom'
-import { chartFields, bindChartFields, collectChartFields, stationDescription } from '../../web/admin/site-chart-fields.js'
+import { chartDefaults, chartFields, bindChartFields, collectChartFields, stationDescription } from '../../web/admin/site-chart-fields.js'
 
 test('chart editor shows database values, keeps automatic inheritance and distinguishes empty selections', () => {
   const e = {chart_key:'taxa_density',sort_order:1}
@@ -32,6 +32,7 @@ test('chart editor shows database values, keeps automatic inheritance and distin
   } finally { dom.window.close() }
 })
 test('explicit false, zero, empty and unavailable historic selections survive editing', () => {
+  assert.equal(chartDefaults({chart_key:'impact_history',sort_order:99}).sort_order,4, 'restoring defaults must not reuse a published custom order')
   const c={chart_key:'impact_history',is_visible:false,sort_order:0,category_keys:['99:level']}
   const dom=new JSDOM(`<form>${chartFields(c,{sort_order:4,chart_key:c.chart_key},{categories:[]})}</form>`)
   const d=collectChartFields(new dom.window.FormData(dom.window.document.querySelector('form')),c)
