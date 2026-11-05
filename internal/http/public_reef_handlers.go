@@ -5,10 +5,13 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type PublicReefService interface {
@@ -51,6 +54,10 @@ func (h *PublicHandlers) Sites(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, data)
 }
 func (h *PublicHandlers) Series(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	if !h.ready(w) {
 		return
 	}
@@ -66,7 +73,7 @@ func (h *PublicHandlers) Series(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := h.Reef.PublicSeries(r.Context(), id, f)
 	if err != nil {
-		writeServiceError(w, err, "圖表資料載入失敗")
+		writePublicQueryError(w, err, "圖表資料載入失敗")
 		return
 	}
 	if strings.HasSuffix(r.URL.Path, ".csv") {
@@ -76,6 +83,10 @@ func (h *PublicHandlers) Series(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, map[string]any{"site_id": id, "filters": f, "series": data, "availability": len(data) > 0})
 }
 func (h *PublicHandlers) Compare(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+	r = r.WithContext(ctx)
 	if !h.ready(w) {
 		return
 	}
@@ -105,7 +116,7 @@ func (h *PublicHandlers) Compare(w http.ResponseWriter, r *http.Request) {
 		}
 		data, e := h.Reef.PublicSeries(r.Context(), id, f)
 		if e != nil {
-			writeServiceError(w, e, "比較載入失敗")
+			writePublicQueryError(w, e, "比較載入失敗")
 			return
 		}
 		results = append(results, map[string]any{"site_id": id, "series": data, "availability": len(data) > 0})
@@ -135,7 +146,7 @@ func writeReefCSV(w http.ResponseWriter, data []service.PublicReefSeries) {
 		if a.Mode != nil {
 			mode = *a.Mode
 		}
-		cells := []string{strconv.Itoa(a.SiteID), a.SiteName, a.EventID, a.Date, a.Time, strconv.FormatFloat(a.Depth, 'f', -1, 64), a.Chart, a.Key, a.Name, a.Size, mode, num(a.Value), a.Unit, num(a.Total), num(a.Mean), num(a.SD), num(a.SE), strconv.Itoa(a.N), a.Status, a.MissingReason, a.UpdatedAt, num(a.DensityPer100M2), a.UnitLabel}
+		cells := []string{strconv.Itoa(a.SiteID), a.SiteName, a.EventID, a.Date, optionalString(a.Time), strconv.FormatFloat(a.Depth, 'f', -1, 64), a.Chart, a.Key, a.Name, optionalString(a.Size), mode, num(a.Value), a.Unit, num(a.Total), num(a.Mean), num(a.SD), num(a.SE), strconv.Itoa(a.N), a.Status, a.MissingReason, a.UpdatedAt, num(a.DensityPer100M2), a.UnitLabel}
 		taxonID := ""
 		if a.TaxonID != nil {
 			taxonID = strconv.Itoa(*a.TaxonID)
@@ -237,4 +248,19 @@ func (h *PublicHandlers) Audit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 200, data)
+}
+
+func optionalString(v *string) string {
+	if v == nil {
+		return ""
+	}
+	return *v
+}
+func writePublicQueryError(w http.ResponseWriter, err error, fallback string) {
+	var pgerr *pgconn.PgError
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) || (errors.As(err, &pgerr) && pgerr.Code == "57014") {
+		writeError(w, 504, "圖表資料查詢逾時")
+		return
+	}
+	writeServiceError(w, err, fallback)
 }

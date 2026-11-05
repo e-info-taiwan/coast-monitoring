@@ -10,7 +10,7 @@ const number = v => v === null || v === undefined ? "—" : Number(v).toLocaleSt
 const table = (headers, rows) => `<div class="rd-table-scroll"><table class="rd-table"><thead><tr>${headers.map(h => `<th scope="col">${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>`
 const options = (values, selected, label) => `<option value="">${label}</option>${values.map(([value, title]) => `<option value="${esc(value)}" ${String(value) === selected ? "selected" : ""}>${esc(title)}</option>`).join("")}`
 
-export function createReefData({ apiFetch, onCount }) {
+export function createReefData({ apiFetch, onCount, onManageActivities }) {
   const s = {
     events: [],
     codes: [],
@@ -139,7 +139,7 @@ export function createReefData({ apiFetch, onCount }) {
         </div>
         <div class="rd-header-actions">
           <button type="button" class="tiny-button rd-report-button" id="rd-export-filtered" data-empty="${!filtered.length}" ${s.exporting || !filtered.length ? "disabled" : ""}>下載篩選報告 ZIP（${filtered.length}）</button>
-          <a class="tiny-button" href="/admin/#public_content:activity">活動與填報代碼</a>
+          <a class="tiny-button" id="rd-manage-activities" href="/admin/#public_content:activity" title="開啟活動行程，建立活動、產生或重發志工填報代碼">管理活動與志工填報代碼</a>
           <button type="button" class="primary-button" id="rd-create-event">＋ 新增調查場次</button>
           <button type="button" class="tiny-button" id="rd-refresh">重新整理</button>
         </div>
@@ -204,6 +204,9 @@ export function createReefData({ apiFetch, onCount }) {
       downloadReport(`/admin/reef-check-data/reports.zip?${query}`, "ReefCheck-範本報告套組.zip", event.currentTarget)
     })
     panel.querySelector("#rd-create-event")?.addEventListener("click", showCreateEventModal)
+    panel.querySelector("#rd-manage-activities")?.addEventListener("click", event => {
+      if (onManageActivities) { event.preventDefault(); onManageActivities() }
+    })
     panel.querySelectorAll("[data-event]").forEach(b => { b.onclick = () => openEvent(b.dataset.event) })
   }
 

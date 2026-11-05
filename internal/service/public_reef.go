@@ -149,12 +149,12 @@ type PublicReefSeries struct {
 	SiteName        string   `json:"site_name"`
 	EventID         string   `json:"event_id"`
 	Date            string   `json:"survey_date"`
-	Time            string   `json:"event_time"`
+	Time            *string  `json:"event_time"`
 	Depth           float64  `json:"depth_m"`
 	Chart           string   `json:"chart"`
 	Key             string   `json:"key"`
 	Name            string   `json:"name"`
-	Size            string   `json:"size_class"`
+	Size            *string  `json:"size_class"`
 	Mode            *string  `json:"fish_size_mode"`
 	Unit            string   `json:"unit"`
 	UnitLabel       string   `json:"unit_label"`
@@ -193,6 +193,13 @@ func ValidPublicUnit(s string) bool {
 // Keep display text separate from stable machine-readable units.
 func (s *PublicReefSeries) NormalizeUnit() {
 	s.UnitLabel = s.Unit
+	labels := map[string]string{"percent": "%", "individuals_per_100m2": "隻／100 m²", "individuals_per_subsample": "隻／子樣區", "count": "原始件數", "historical_level": "歷史分級", "derived_level": "系統衍生分級", "bleached_points": "白化點數"}
+	if label, ok := labels[s.Unit]; ok {
+		s.UnitLabel = label
+	}
+	if s.Unit == "individuals_per_100m2" {
+		s.DensityPer100M2 = s.Mean
+	}
 	switch s.Unit {
 	case "%":
 		s.Unit = "percent"

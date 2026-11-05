@@ -88,6 +88,9 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
   }
   let panel = null
   let requestID = 0
+  // Plain codes are returned only on creation/rotation. Retain them in memory
+  // across saves in this session; never put them in localStorage or the URL.
+  const entryCodes = new Map()
 
   function listPath(kind) {
     if (kind === "audit") return "/admin/public-audit"
@@ -333,7 +336,7 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
       field("registration_url", "報名網址", d.registration_url, "url", { wide: true }), "時間以台灣時間（UTC+8）儲存。"))
     if(kind==="activity") {
       parts.push(section("調查填報",select("entry_enabled","允許志工填報",[["false","不啟用"],["true","啟用並產生活動代碼"]],String(d.entry_enabled||false))+field("expires_at","代碼失效時間（可空白）",toLocalInput(d.expires_at),"datetime-local")))
-      parts.push(`<section class="pc-form-section"><h3>允許填報樣點</h3><div class="pc-checks">${s.sites.map(site=>`<label><input name="site_ids" type="checkbox" value="${esc(site.id)}" ${(d.site_ids||[]).includes(site.id)?"checked":""}>${esc(site.name_zh)}</label>`).join("")}</div>${item?.entry_config_id?`<button type="button" data-entry-action="rotate">重發代碼</button><button type="button" data-entry-action="disable">停用填報</button>`:""}<p role="status" id="pc-entry-result">${item?.entry_code?`請保存新代碼：${esc(item.entry_code)}`:""}</p></section>`)
+      parts.push(`<section class="pc-form-section"><h3>允許填報樣點</h3><div class="pc-checks">${s.sites.map(site=>`<label><input name="site_ids" type="checkbox" value="${esc(site.id)}" ${(d.site_ids||[]).includes(site.id)?"checked":""}>${esc(site.name_zh)}</label>`).join("")}</div>${item?.entry_config_id?`<button type="button" data-entry-action="rotate">重發代碼</button><button type="button" data-entry-action="disable">停用填報</button>`:""}<p role="status" id="pc-entry-result"></p></section>`)
     }
     if (["profile", "annotation", "chart"].includes(kind)) {
       parts.push(section("樣點", select("site_id", kind === "chart" ? "樣點（共用圖表可留空）" : "樣點", siteOptions, String(item?.site_id || ""), { wide: true })))
@@ -365,6 +368,9 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
   async function openEditor(item, { notice = "" } = {}) {
     const kind = s.kind
     const meta = kindMeta(kind)
+    if (kind === "activity" && item?.entry_code) entryCodes.set(item.id, item.entry_code)
+    if (kind === "activity" && item?.entry_config_id && !item.data?.entry_enabled) entryCodes.delete(item.id)
+    const entryCode = kind === "activity" ? entryCodes.get(item?.id) : null
     if (["profile", "annotation", "chart", "activity", "article"].includes(kind)) await ensureSites()
     let dirty = false
     drawer.open({
@@ -374,6 +380,7 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
       html: `
         ${item ? `<div class="drawer-hero-meta pc-hero">${statusPill(item.publication_status)}</div>` : ""}
         ${notice ? `<p class="pc-inline-notice" role="status">${esc(notice)}</p>` : ""}
+        ${kind === "activity" && item?.entry_config_id ? `<section class="pc-entry-code" role="status"><h3>志工填報代碼</h3>${entryCode ? `<p>已產生代碼，請複製給志工。重新整理後將不再顯示。</p><div class="editor-actions"><output>${esc(entryCode)}</output><button type="button" class="ghost-button" data-copy-entry-code>複製代碼</button></div>` : `<p>${item.data?.entry_enabled ? "填報已啟用。系統不保存可回讀的原始代碼；若尚未保存，請使用下方「重發代碼」，舊碼會失效。" : "志工填報已停用。"}</p>`}<p data-code-copy-result></p></section>` : ""}
         <form id="pc-edit-form" class="editor-form pc-form" novalidate>
           ${editorFields(kind, item)}
           <p id="pc-form-error" class="pc-form-error" role="alert" hidden></p>
@@ -384,6 +391,11 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
         </form>`,
       guard: () => !dirty || window.confirm("尚未儲存的修改將被捨棄，確定關閉？"),
       bind(body) {
+        body.querySelector('[data-copy-entry-code]')?.addEventListener('click', async () => {
+          const result = body.querySelector('[data-code-copy-result]')
+          try { await navigator.clipboard.writeText(entryCode); result.textContent = '已複製代碼' }
+          catch { result.textContent = '無法自動複製，請選取上方代碼手動複製。' }
+        })
         const form = body.querySelector("#pc-edit-form")
         form.addEventListener("input", () => { dirty = true })
         form.addEventListener("change", () => { dirty = true })
@@ -399,6 +411,8 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
           if(!window.confirm("此操作會讓舊代碼失效，既有觀測仍保留活動歸屬。確定繼續？"))return
           button.disabled=true
           try { const result=await apiFetch(`/admin/reef-check-data/activities/${item.entry_config_id}`,{method:"PATCH",body:{action:button.dataset.entryAction}})
+            if(button.dataset.entryAction === 'disable') entryCodes.delete(item.id)
+            if(result.code) entryCodes.set(item.id,result.code)
             await load();const refreshed=s.items.find(x=>x.id===item.id);openEditor({...refreshed,entry_code:result.code},{notice:result.code?"已重發代碼，請保存。":"已停用填報。"})
           }catch(error){body.querySelector("#pc-entry-result").textContent=error.message;button.disabled=false}
         })
@@ -460,7 +474,8 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
     try {
       const body = { kind, data: payload.data, site_id: payload.siteID, publication_status: payload.status, version: current?.updated_at || "", confirm: payload.status === "archived" || Boolean(kind==="article"&&current?.related_site_ids?.length) }
       const saved = await apiFetch(`/admin/public-content/${kind}${current ? `/${current.id}` : ""}`, { method: current ? "PATCH" : "POST", body })
-      const message = current ? "已儲存變更。" : "已建立草稿；核對後可改為「已發布」。"
+      if (saved?.entry_code) entryCodes.set(saved.id,saved.entry_code)
+      const message = saved?.entry_code ? "活動已儲存並產生志工填報代碼，請複製下方代碼。" : current ? "已儲存變更。" : "已建立草稿；核對後可改為「已發布」。"
       notify({ tone: "ok", title: message, id: "pc-save" })
       await load()
       if (kind === s.kind) openEditor(saved || current, { notice: message })
@@ -535,6 +550,7 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
       return true
     },
     reset() {
+      entryCodes.clear()
       requestID++
       Object.assign(s, { kind: "", items: [], sites: [], sitesLoaded: false, loading: false, loaded: false, error: "", status: "", category: "", search: "", page: 0 })
       panel = null
