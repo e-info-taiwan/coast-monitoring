@@ -147,6 +147,7 @@ func NewRouter(deps Dependencies) http.Handler {
 		r.Get("/content/{kind}", deps.PublicHandlers.Contents)
 		r.Get("/reef-check/entry-sites", deps.AppHandlers.ListPublicReefCheckSites)
 		r.Post("/reef-check/activities/verify", deps.AppHandlers.VerifyReefActivity)
+		r.With(newSubmissionLimiter()).Post("/reef-check/entry-environment", deps.AppHandlers.ReefEntryEnvironment)
 		r.Get("/reef-check/sites", deps.PublicHandlers.Sites)
 		r.Get("/reef-check/sites/{id}/display", deps.PublicHandlers.SiteDisplay)
 		r.Get("/reef-check/sites/{id}/series", deps.PublicHandlers.Series)

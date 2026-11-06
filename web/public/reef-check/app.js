@@ -14,6 +14,7 @@ let records = readRecords(), state = fresh(), step = 0, sheet = 'line', segment 
 let timer, storageFailed = false, lastCell = null, saving = false;
 let currentUser = null, csrfToken = '', submitError = null;
 let activityBusy=false;
+let environmentPreview={key:'',status:'idle',data:null},environmentVersion=0,environmentDraft='';
 function fresh(meta = {}) {
   return {id:globalThis.crypto?.randomUUID?.() || `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`,methods:[],activityCode:'',activity:null,meta:{site:'',date:'',time:'',depth:'',temperature:'',visibilityMin:'',visibilityMax:'',leader:'',scientist:'',weather:'',airTemperature:'',latitude:'',longitude:'',...meta},recorders:{line:'',fish:'',invert:''},fishLengthMode:'',coralMorphology:'',line:{},down:{},bleached:{},linePhase:'entry',mud:false,bleaching:false,bleach:{},fish:{},invert:{},rare:{},impact:{},custom:{fish:[],invert:[],rare:[]},rareDetails:{},notApplicable:{fish:[],invert:[],rare:[],impact:[]},rkcNote:'',otherDamageNote:'',notes:'',missingReason:'',status:'draft',step:0,updated:''};
 }
@@ -70,6 +71,7 @@ function button(text,action,extra='',kind=''){return `<button type="button" clas
 function intro(n,title,description){return `<section class="page-intro"><p class="eyebrow">REEF CHECK 志工填報</p><div class="intro-row"><h1>${title}</h1><span class="badge">步驟 ${String(Math.min(n,4)).padStart(2,'0')} / 04</span></div><p>${description}</p></section>`;}
 function render(){
   lastCell=null;
+  if(environmentDraft!==state.id){environmentDraft=state.id;invalidateEnvironment();}
   const debugLink=$('#debug-mode-link');
   debugLink.hidden=window.location.protocol!=='file:'&&!DEBUG;
   debugLink.href=DEBUG?'?':'?debug=1';
@@ -82,6 +84,7 @@ function render(){
     .replace('垃圾顯示原始件數', '珊瑚損害與垃圾顯示原始件數');
   $('#workflow').inert=saving;$('.topbar').inert=saving;
   updateCounters();
+  if(step===1){updateCoordinateFields();void refreshEnvironment();}
 }
 function go(n){
   if(DEBUG&&n>0&&!state.methods.length){state.methods=['line'];sheet='line';}
@@ -92,7 +95,7 @@ function go(n){
     if(duplicate){modal('這支氣瓶已經有紀錄',`<p>樣點、日期、開始時間與深度都相同。請開啟原紀錄增加探查項目；若是另一支氣瓶，請先核對時間與深度。</p><div class="actions">${button('返回核對資訊','duplicate-back')}${button('開啟原紀錄','resume',`data-id="${esc(duplicate.id)}"`,'primary')}</div>`);return;}
   }
   if(!DEBUG&&n===3&&state.methods.includes('line')&&state.linePhase!=='complete'){step=2;sheet='line';render();toast('請先確認全部原始數字並完成白化標記。');return;}
-  step=n;if(step===2&&!sheetList().includes(sheet))sheet=sheetList()[0];
+  step=n;if(step===1)applySiteCoordinates(false);if(step===2&&!sheetList().includes(sheet))sheet=sheetList()[0];
   persist(false);render();$('#main').focus();window.scrollTo({top:0});
 }
 function miniTable(k){return `<table class="mini-sheet" aria-hidden="true"><thead><tr><th>${k==='line'?'m':'類群'}</th><th>1 段</th><th>2 段</th><th>3 段</th><th>4 段</th></tr></thead><tbody>${[0,1,2].map((r)=>`<tr><td>${k==='line'?r*.5:k==='fish'?['蝶魚','石鱸','笛鯛'][r]:['蝦','海膽','海參'][r]}</td>${[0,1,2,3].map(()=>'<td>—</td>').join('')}</tr>`).join('')}</tbody></table>`;}
@@ -117,6 +120,57 @@ function entrySettings(){return `${state.methods.includes('line')?`<fieldset cla
 function field(label,key,type='text',required=false,hint='',attrs=''){
   return `<label class="field">${label}${required?' <span class="required">必填</span>':''}<input name="${key}" data-meta="${key}" type="${type}" value="${esc(state.meta[key])}" ${required?'required':''} ${attrs}>${hint?`<small>${hint}</small>`:''}</label>`;
 }
+function timeParts(){const [hour='',minute='']=String(state.meta.time||'').split(':');return state.timeInput||{hour,minute};}
+function timeControl(){const p=timeParts();return `<fieldset class="time-control"><legend>這支氣瓶的開始時間（24 小時制） <span class="required">必填</span></legend><div class="time-parts"><label>時（00–23）<input name="start-hour" data-time-part="hour" aria-label="開始時間：時，00 至 23" type="text" inputmode="numeric" autocomplete="off" maxlength="2" pattern="[0-9]{1,2}" placeholder="09" value="${esc(p.hour)}" required></label><span aria-hidden="true">:</span><label>分（00–59）<input name="start-minute" data-time-part="minute" aria-label="開始時間：分，00 至 59" type="text" inputmode="numeric" autocomplete="off" maxlength="2" pattern="[0-9]{1,2}" placeholder="30" value="${esc(p.minute)}" required></label></div><small>下午 3 點 40 分請填 15：40；Line 與 Belt 使用同一支氣瓶的開始時間。</small></fieldset>`;}
+function setTimePart(part,value,finish=false){
+  const p={...timeParts()},max=part==='hour'?23:59;
+  p[part]=String(value).replace(/[^0-9]/g,'').slice(0,2);
+  if(finish&&p[part]!==''&&Number(p[part])<=max)p[part]=p[part].padStart(2,'0');
+  state.timeInput=p;
+  state.meta.time=/^\d{1,2}$/.test(p.hour)&&Number(p.hour)<=23&&/^\d{1,2}$/.test(p.minute)&&Number(p.minute)<=59?`${p.hour.padStart(2,'0')}:${p.minute.padStart(2,'0')}`:'';
+  return p[part];
+}
+function selectedSiteDetails(){return C.sites.find(s=>s[2]===state.meta.site||s[1]===state.meta.site)?.[4]||{};}
+function applySiteCoordinates(force=false){
+  const details=selectedSiteDetails(),m=state.meta;
+  if(!force&&(m.latitude!==''||m.longitude!==''))return false;
+  const lat=details.latitude,lon=details.longitude,valid=lat!=null&&lon!=null&&lat!==''&&lon!==''&&Number.isFinite(Number(lat))&&Number.isFinite(Number(lon))&&Math.abs(Number(lat))<=90&&Math.abs(Number(lon))<=180;
+  m.latitude=valid?String(lat):'';m.longitude=valid?String(lon):'';
+  state.coordinateOrigin=valid?{site:m.site,latitude:m.latitude,longitude:m.longitude}:null;
+  return valid;
+}
+function updateCoordinateFields(){
+  if(step!==1)return;
+  for(const key of ['latitude','longitude']){const el=$(`[data-meta="${key}"]`);if(el)el.value=state.meta[key];}
+  const hint=$('#coordinate-hint');if(hint)hint.textContent=state.coordinateOrigin?'已由樣點主檔帶入；若本次調查位置不同，可依現場紀錄修改。':selectedSiteDetails().latitude==null||selectedSiteDetails().longitude==null?'此樣點沒有完整座標，請依手板填寫；未記錄可兩格留白。':'目前使用自行填寫的座標；切換樣點時會重新帶入新樣點座標。';
+}
+function environmentRequest(){
+  if(DEBUG||window.location.protocol==='file:'||!state.activity||!state.activityCode||!siteId()||!/^\d{4}-\d{2}-\d{2}$/.test(state.meta.date)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(state.meta.time))return null;
+  return {activity_code:state.activityCode,site_id:siteId(),survey_date:state.meta.date,event_time:state.meta.time};
+}
+function invalidateEnvironment(){environmentVersion++;environmentPreview={key:'',status:'idle',data:null};updateEnvironmentPanel();}
+function environmentMarkup(){
+  const ref=environmentPreview;
+  if(ref.status==='loading')return '<b>氣象署參考海溫</b><p>正在查詢此樣點測站、調查日期與開始時間…</p>';
+  if(ref.status==='error')return `<b>氣象署參考海溫</b><p>暫時無法取得，可繼續填寫手板實測水溫，不影響存草稿。</p>${button('重新查詢','refresh-environment','','quiet small')}`;
+  const d=ref.data;
+  if(d){const name=d.station_name||d.station_id||'未設定測站';return `<b>氣象署參考海溫${d.sea_temp_c==null?'':` · ${esc(d.sea_temp_c)} °C`}</b><p>${esc(name)}${d.observed_at?` · 觀測時間：${esc(new Date(d.observed_at).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false}))}`:''}</p><small>${d.sea_temp_c==null?esc(d.message):'測站值不是本次潛水實測，不會填入上方實測欄。未填實測值時，後台會在送出時查詢並標記為自動來源；以實測值為優先。'}</small>`;}
+  return '<b>氣象署參考海溫</b><p>填好樣點、日期與 24 小時制開始時間後，自動查詢後台設定的測站。</p><small>本機／測試模式不查詢正式海溫。查無資料時保持空白，不改用其他日期。</small>';
+}
+function updateEnvironmentPanel(){if(step!==1)return;const el=$('#environment-reference');if(el)el.innerHTML=environmentMarkup();}
+async function refreshEnvironment(force=false){
+  const input=environmentRequest();if(!input){updateEnvironmentPanel();return;}
+  const key=JSON.stringify(input),draft=state.id;
+  if(!force&&environmentPreview.key===key){updateEnvironmentPanel();return;}
+  const version=++environmentVersion;environmentPreview={key,status:'loading',data:null};updateEnvironmentPanel();
+  try{
+    const response=await fetch('/api/public/reef-check/entry-environment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input),credentials:'include'});
+    if(!response.ok)throw new Error('environment unavailable');const data=await response.json();
+    if(version!==environmentVersion||state.id!==draft||JSON.stringify(environmentRequest())!==key)return;
+    environmentPreview={key,status:'ready',data};
+  }catch(_){if(version!==environmentVersion||state.id!==draft||JSON.stringify(environmentRequest())!==key)return;environmentPreview={key,status:'error',data:null};}
+  updateEnvironmentPanel();
+}
 function depthChoice(){
   if(state.depthChoice==='other')return 'other';
   const v=state.meta.depth;
@@ -132,7 +186,7 @@ function selectDepth(choice){
 }
 function metaView(){return intro(2,'先確認，這是哪一支氣瓶。','請抄錄手板上的資料。多種探查共用同一支氣瓶的開始時間，避免把一趟潛水拆成兩份。')+
   `<form id="metadata-form" ${DEBUG?'novalidate':''}><section class="panel"><div class="panel-heading"><div><h2>潛水與樣點</h2><p>本次包含：${methodList().map(k=>C.methods[k].name).join('、')}</p></div><span class="badge">01 / 基本資料</span></div><div class="fields"><label class="field wide">調查樣點 <span class="required">必填</span><select required name="site" data-meta="site"><option value="">選擇手板上的樣點</option>${[...new Set(allowedSites().map(s=>s[0]))].map(region=>`<optgroup label="${region}">${allowedSites().filter(s=>s[0]===region).map(s=>`<option value="${esc(s[2])}" ${state.meta.site===s[2]?'selected':''}>${esc(s[1])} · ${esc(s[2])}</option>`).join('')}</optgroup>`).join('')}</select><small>依現有樣點清單；找不到時請先存草稿，與活動窗口確認名稱。</small></label>
-  ${field('調查日期','date','date',true,'以手板上的實際日期為準。',state.activity?`min="${esc(state.activity.start_date)}" max="${esc(state.activity.end_date)}"`:'')}${field('這支氣瓶的開始時間','time','time',true,'Line 與 Belt 請用同一支氣瓶的開始時間。')}<div id="depth-control">${depthControl()}</div>${field('水溫（°C）','temperature','number',false,'每支氣瓶一個水溫；未記錄可留白。','min="0" max="45" step="0.1" placeholder="例如 27.5"')}<div class="visibility-range"><p>能見度範圍（m）</p><div class="range-fields">${field('最低能見度','visibilityMin','number',false,'','min="0" max="100" step="0.1" placeholder="例如 8"')}${field('最高能見度','visibilityMax','number',false,'','min="0" max="100" step="0.1" placeholder="例如 12"')}</div><small>只記一個數值時填任一格即可，系統會視為最低＝最高；未記錄可兩格留白。</small>${field('天氣','weather','text',false,'未記錄可留白。')}${field('氣溫（°C）','airTemperature','number',false,'未記錄可留白。','min="-20" max="60" step="0.1"')}${field('調查緯度','latitude','number',false,'與經度一起填，未記錄可兩格留白。','min="-90" max="90" step="any"')}${field('調查經度','longitude','number',false,'請使用十進位座標。','min="-180" max="180" step="any"')}</div></div><div class="event-preview" id="event-preview">${eventId()?`氣瓶識別：${esc(eventId())}`:'填好樣點、日期、時間與深度後，自動產生氣瓶識別。'}</div></section>
+  ${field('調查日期','date','date',true,'以手板上的實際日期為準。',state.activity?`min="${esc(state.activity.start_date)}" max="${esc(state.activity.end_date)}"`:'')}${timeControl()}<div id="depth-control">${depthControl()}</div>${field('手板實測水溫（°C）','temperature','number',false,'請填手板實測的一個數值；沒有記錄可留白。','min="0" max="45" step="0.1" placeholder="例如 27.5"')}<aside id="environment-reference" class="environment-reference wide" aria-live="polite">${environmentMarkup()}</aside><div class="visibility-range"><p>能見度範圍（m）</p><div class="range-fields">${field('最低能見度','visibilityMin','number',false,'','min="0" max="100" step="0.1" placeholder="例如 8"')}${field('最高能見度','visibilityMax','number',false,'','min="0" max="100" step="0.1" placeholder="例如 12"')}</div><small>只記一個數值時填任一格即可，系統會視為最低＝最高；未記錄可兩格留白。</small></div>${field('天氣','weather','text',false,'未記錄可留白。')}${field('氣溫（°C）','airTemperature','number',false,'未記錄可留白。','min="-20" max="60" step="0.1"')}${field('調查緯度','latitude','number',false,'與經度一起填，未記錄可兩格留白。','min="-90" max="90" step="any"')}${field('調查經度','longitude','number',false,'請使用十進位座標。','min="-180" max="180" step="any"')}<p class="wide coordinate-hint" id="coordinate-hint"></p></div><div class="event-preview" id="event-preview">${eventId()?`氣瓶識別：${esc(eventId())}`:'填好樣點、日期、時間與深度後，自動產生氣瓶識別。'}</div></section>
   <section class="panel"><div class="panel-heading"><div><h2>這份手板，是誰記錄的？</h2><p>每種探查可填不同記錄者；多人請以「、」分隔。</p></div><span class="badge">02 / 記錄人員</span></div><div class="fields">${methodList().map(k=>`<label class="field">${C.methods[k].short}記錄者 <span class="required">必填</span><input name="recorder-${k}" data-recorder="${k}" value="${esc(state.recorders[k])}" required placeholder="姓名，可填多人"></label>`).join('')}${field('隊長','leader')}${field('科學指導員','scientist')}</div></section>${entrySettings()}<p class="form-error" id="meta-error" role="alert"></p><div class="actions">${button('← 選擇探查','step','data-step="0"')}<button class="button primary" type="submit">開始填寫手板 <span class="arrow">→</span></button></div></form>`;}
 function metaErrors(){const m=state.meta,e=[];if(!C.sites.some(s=>s[2]===m.site||s[1]===m.site))e.push('請選擇樣點');if(!/^\d{4}-\d{2}-\d{2}$/.test(m.date))e.push('請填調查日期');if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(m.time))e.push('請填氣瓶開始時間');if(m.depth===''||!Number.isFinite(Number(m.depth))||Number(m.depth)<=0||Number(m.depth)>100)e.push('深度請填 0.1–100 m');for(const [k,n,max] of [['temperature','水溫',45],['visibilityMin','最低能見度',100],['visibilityMax','最高能見度',100]])if(m[k]!==''&&(!Number.isFinite(Number(m[k]))||Number(m[k])<0||Number(m[k])>max))e.push(`${n}請填 0–${max}`);if(m.visibilityMin!==''&&m.visibilityMax!==''&&Number(m.visibilityMin)>Number(m.visibilityMax))e.push('最低能見度不能大於最高能見度');methodList().forEach(k=>{if(!state.recorders[k].trim())e.push(`請填${C.methods[k].short}記錄者`);});return [...e,...extraMetaErrors()];}
 function strip(){return `<section class="survey-strip" aria-label="本支氣瓶"><div><small>樣點</small><b>${esc(siteName())}</b></div><div><small>日期</small><b>${esc(state.meta.date)}</b></div><div><small>氣瓶開始</small><b>${esc(state.meta.time)}</b></div><div><small>深度</small><b>${esc(state.meta.depth)} m</b></div>${button('修改資訊','step','data-step="1"','quiet small')}</section>`;}
@@ -485,6 +539,9 @@ function handleCell(el){
 }
 document.addEventListener('change',e=>{
   const el=e.target;
+  if(el.dataset.timePart){el.value=setTimePart(el.dataset.timePart,el.value,true);persist();void refreshEnvironment();return;}
+  if(el.dataset.meta==='site'){state.meta.site=el.value;applySiteCoordinates(true);persist();updateCoordinateFields();invalidateEnvironment();void refreshEnvironment();}
+  if(el.dataset.meta==='date')void refreshEnvironment();
   if(el.name==='depth-choice'){
     selectDepth(el.value);$('#depth-control').innerHTML=depthControl();
     $('#event-preview').textContent=eventId()?`氣瓶識別：${eventId()}`:'填好樣點、日期、時間與深度後，自動產生氣瓶識別。';
@@ -498,7 +555,7 @@ document.addEventListener('change',e=>{
   if(el.dataset.toggle){const k=el.dataset.toggle;if(!el.checked&&(k==='mud'?Object.keys(state.down).length:Object.keys(state.bleach).length)){el.checked=true;modal('關閉這張附表？',`<p>已填的資料會保留在草稿，但關閉期間不會放進完成記錄。重新勾選後可以繼續核對。</p><div class="actions">${button('保留附表','close')}${button('確認關閉','disable-extra',`data-extra="${k}"`,'primary')}</div>`);}else{state[k]=el.checked;persist();render();}}
   if(el.id==='acknowledge'){state.ack=el.checked;persist(false);}
 });
-document.addEventListener('input',e=>{const el=e.target;if(el.hasAttribute('data-activity-code')){state.activityCode=el.value;state.activity=null;persist();}if(el.dataset.rareDetail){state.rareDetails[el.dataset.rowId]={...(state.rareDetails[el.dataset.rowId]||{}),[el.dataset.rareDetail]:el.value};persist();}if(el.dataset.meta){state.meta[el.dataset.meta]=el.value;persist();$('#event-preview').textContent=eventId()?`氣瓶識別：${eventId()}`:'填好樣點、日期、時間與深度後，自動產生氣瓶識別。';}if(el.dataset.recorder){state.recorders[el.dataset.recorder]=el.value;persist();}if(el.dataset.state){state[el.dataset.state]=el.value;persist();if(step===3){$('#review-issues').innerHTML=issueMarkup(issues());$('#acknowledge').checked=false;}}if(el.dataset.cell){const k=el.dataset.cell,key=el.dataset.key,old=state[k][key]||'',v=k==='line'||k==='down'?el.value.trim():normalizeNumber(el.value);state[k][key]=v;if(k==='line'&&validCode(v)&&normalizeCode(v)!==normalizeCode(old)&&state.down[key])delete state.down[key];if(k==='line'&&normalizeCode(old)!==normalizeCode(v))delete state.bleached[key];if(k==='line'||k==='down')state.linePhase='entry';if(k==='line'&&/^SI[（(]SI[）)]$/i.test(el.value.trim()))state.down[key]='SI';persist();updateCounters();}});
+document.addEventListener('input',e=>{const el=e.target;if(el.dataset.timePart){el.value=setTimePart(el.dataset.timePart,el.value);el.setAttribute('aria-invalid',String(el.value!==''&&Number(el.value)>(el.dataset.timePart==='hour'?23:59)));persist();invalidateEnvironment();$('#event-preview').textContent=eventId()?`氣瓶識別：${eventId()}`:'請填完整的 24 小時制開始時間。';return;}if(el.hasAttribute('data-activity-code')){state.activityCode=el.value;state.activity=null;persist();}if(el.dataset.rareDetail){state.rareDetails[el.dataset.rowId]={...(state.rareDetails[el.dataset.rowId]||{}),[el.dataset.rareDetail]:el.value};persist();}if(el.dataset.meta){state.meta[el.dataset.meta]=el.value;if(['latitude','longitude'].includes(el.dataset.meta)){state.coordinateOrigin=null;updateCoordinateFields();}if(['site','date'].includes(el.dataset.meta))invalidateEnvironment();persist();$('#event-preview').textContent=eventId()?`氣瓶識別：${eventId()}`:'填好樣點、日期、時間與深度後，自動產生氣瓶識別。';}if(el.dataset.recorder){state.recorders[el.dataset.recorder]=el.value;persist();}if(el.dataset.state){state[el.dataset.state]=el.value;persist();if(step===3){$('#review-issues').innerHTML=issueMarkup(issues());$('#acknowledge').checked=false;}}if(el.dataset.cell){const k=el.dataset.cell,key=el.dataset.key,old=state[k][key]||'',v=k==='line'||k==='down'?el.value.trim():normalizeNumber(el.value);state[k][key]=v;if(k==='line'&&validCode(v)&&normalizeCode(v)!==normalizeCode(old)&&state.down[key])delete state.down[key];if(k==='line'&&normalizeCode(old)!==normalizeCode(v))delete state.bleached[key];if(k==='line'||k==='down')state.linePhase='entry';if(k==='line'&&/^SI[（(]SI[）)]$/i.test(el.value.trim()))state.down[key]='SI';persist();updateCounters();}});
 document.addEventListener('focusin',e=>{const el=e.target;if(el.dataset.cell){lastCell=el;el.dataset.previous=state[el.dataset.cell][el.dataset.key]||'';setFieldFocus(`<b>${esc(el.getAttribute('aria-label'))}</b> · ${el.dataset.cell==='down'?'對照上層 SI 的同一位置。':el.dataset.cell==='line'?'可輸入代碼或數字；Tab 沿此欄往下。':'填 0 表示未發現，NA 表示未記錄。'}`);}});
 document.addEventListener('keydown',e=>{
   const el=e.target;if(!el.dataset.cell||!['Tab','Enter','ArrowUp','ArrowDown'].includes(e.key))return;
@@ -516,6 +573,7 @@ document.addEventListener('submit',e=>{if(e.target.id==='metadata-form'){e.preve
 document.addEventListener('click',e=>{
   const el=e.target.closest('[data-action]');if(!el)return;const a=el.dataset.action;e.preventDefault();
   if(saving)return;
+  if(a==='refresh-environment'){void refreshEnvironment(true);return;}
   if(a==='debug-line-phase'){
     if(!DEBUG||!['entry','number-review','bleaching','complete'].includes(el.dataset.phase))return;
     state.linePhase=el.dataset.phase;sheet='line';if(!state.methods.includes('line'))state.methods.push('line');
@@ -596,8 +654,9 @@ async function initApp(){
           s.region||'其他樣點',
           s.name_zh,
           s.name_en||s.name_zh,
-          s.id
+          s.id,{latitude:s.latitude,longitude:s.longitude,cwa_station_id:s.cwa_station_id,cwa_station_name:s.cwa_station_name}
         ]);
+        if(state.meta.site&&applySiteCoordinates(false))persist(false);
         if(step===1)render();
       }
     }
