@@ -37,4 +37,5 @@ jobs:
         run: |
           python3 -m venv "$RUNNER_TEMP/reef-browser"
           "$RUNNER_TEMP/reef-browser/bin/pip" install 'playwright==1.55.0'
+          go build -o "$RUNNER_TEMP/reef-browser/server" ./cmd/server
           "$RUNNER_TEMP/reef-browser/bin/python" scripts/prd-db/admin-browser.py

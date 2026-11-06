@@ -96,6 +96,9 @@ def test_ui():
         page.reload()
         page.get_by_text("瀏覽器驗收活動", exact=True).first.wait_for()
         page.locator("tr").filter(has_text="瀏覽器驗收活動").get_by_role("button").first.click()
+        save.click()
+        expect(page.locator(".pc-inline-notice")).to_contain_text("已儲存變更")
+        verify(second, 200)
         page.get_by_role("button", name="重發代碼").click()
         expect(output).to_be_in_viewport()
         verify(output.inner_text(), 200)
@@ -106,7 +109,7 @@ def test_ui():
 
 if __name__ == "__main__":
     seed()
-    with subprocess.Popen(["go", "run", "./cmd/server"], env={**os.environ, "DATABASE_URL": DB, "SESSION_SECRET": secrets.token_hex(32), "ADMIN_ALLOWED_ORIGINS": BASE, "SECURE_COOKIES": "false", "ENABLE_CWA_CRON": "false"}) as server:
+    with subprocess.Popen([os.path.join(os.environ["RUNNER_TEMP"], "reef-browser", "server")], env={**os.environ, "HTTP_ADDR": "127.0.0.1:8080", "DATABASE_URL": DB, "SESSION_SECRET": secrets.token_hex(32), "ADMIN_ALLOWED_ORIGINS": BASE, "SECURE_COOKIES": "false", "ENABLE_CWA_CRON": "false"}) as server:
         try:
             for _ in range(120):
                 try:
@@ -114,6 +117,8 @@ if __name__ == "__main__":
                     break
                 except urllib.error.URLError:
                     time.sleep(0.5)
+            else:
+                raise RuntimeError("CI server failed to start")
             test_ui()
         finally:
             server.terminate()
