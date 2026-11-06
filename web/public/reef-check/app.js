@@ -14,6 +14,7 @@ let records = readRecords(), state = fresh(), step = 0, sheet = 'line', segment 
 let timer, storageFailed = false, lastCell = null, saving = false;
 let currentUser = null, csrfToken = '', submitError = null;
 let activityBusy=false;
+const removedLocalIDs=new Set();
 let environmentPreview={key:'',status:'idle',data:null},environmentVersion=0,environmentDraft='';
 function fresh(meta = {}) {
   return {id:globalThis.crypto?.randomUUID?.() || `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`,methods:[],activityCode:'',activity:null,meta:{site:'',date:'',time:'',depth:'',temperature:'',visibilityMin:'',visibilityMax:'',leader:'',scientist:'',weather:'',airTemperature:'',latitude:'',longitude:'',...meta},recorders:{line:'',fish:'',invert:''},fishLengthMode:'',coralMorphology:'',line:{},down:{},bleached:{},linePhase:'entry',mud:false,bleaching:false,bleach:{},fish:{},invert:{},rare:{},impact:{},custom:{fish:[],invert:[],rare:[]},rareDetails:{},notApplicable:{fish:[],invert:[],rare:[],impact:[]},rkcNote:'',otherDamageNote:'',notes:'',missingReason:'',status:'draft',step:0,updated:''};
@@ -36,6 +37,7 @@ function migrateRecord(record){
 }
 function readRecords(){try{const data=JSON.parse(localStorage.getItem(KEY)||'[]');return Array.isArray(data)?data.filter(x=>x?.id&&Array.isArray(x.methods)&&x.meta&&x.line&&x.custom).map(migrateRecord):[];}catch{return [];}}
 function persist(change=true){
+  if(removedLocalIDs.has(state.id))return;
   if(change){state.status='draft';state.ack=false;delete state.simulatedSave;delete state.dbSave;}
   state.step=step;state.updated=new Date().toISOString();
   const i=records.findIndex(x=>x.id===state.id);
@@ -517,7 +519,30 @@ function payload(draft=false){
 function asNumber(v){return v!==undefined&&v!==''&&v!=='NA'&&Number.isFinite(Number(v))?Number(v):null;}
 function download(draft){const blob=new Blob([JSON.stringify(payload(draft),null,2)],{type:'application/json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=`${(eventId()||'reefcheck').replace(/[^\w.\-]/g,'_')}-${draft?'draft':'record'}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('已啟動下載，請查看瀏覽器下載項目。');}
 function modal(title,body){$('#modal-content').innerHTML=`<div class="modal-title"><h2>${title}</h2><button data-action="close" aria-label="關閉對話框">×</button></div>${body}`;if(!$('#modal').open)$('#modal').showModal();}
-function openDrafts(){modal('我的紀錄',`<p>只顯示此瀏覽器儲存的紀錄。不同瀏覽器或裝置不會自動同步。</p>${records.length?records.slice().reverse().map(r=>`<div class="draft-item"><div><b>${esc(C.sites.find(s=>s[2]===r.meta.site||s[1]===r.meta.site)?.[1]||'尚未選擇樣點')}</b><small>${esc(r.meta.date||'日期未填')} · ${esc(r.meta.time||'時間未填')} · ${esc(r.meta.depth||'—')} m</small><small>${r.methods.map(k=>C.methods[k].short).join('、')} · ${r.status==='draft'?'草稿':r.status==='needs_review'?'已存・待確認':r.uploaded||r.dbSave?'已存入資料庫':'已完成・本機'}</small></div>${button('開啟','resume',`data-id="${esc(r.id)}"`,'small')}</div>`).join(''):'<p>還沒有儲存的紀錄。</p>'}<div class="actions">${button('新增一支氣瓶','new','','primary')}</div>`);}
+function localRecordSummary(r){return `<b>${esc(C.sites.find(s=>s[2]===r.meta.site||s[1]===r.meta.site)?.[1]||'尚未選擇樣點')}</b><small>${esc(r.meta.date||'日期未填')} · ${esc(r.meta.time||'時間未填')} · ${esc(r.meta.depth||'—')} m</small>`;}
+function confirmLocalRecordDeletion(id){
+  const record=records.find(r=>r.id===id);if(!record)return;
+  const sent=Boolean(record.dbSave||record.uploaded);
+  modal('刪除這筆本機紀錄？',`<div class="delete-record-summary">${localRecordSummary(record)}</div><p>${sent?'這筆資料已送出。此次只刪除此瀏覽器的副本，不會刪除資料庫中的觀測資料。':'這筆紀錄可能只存在此瀏覽器；刪除後無法復原。若需要保留，請先取消並下載備份。'}</p><p id="delete-local-error" class="form-error" role="alert"></p><div class="actions">${button('取消','drafts','autofocus','quiet')}${button('確認刪除本機紀錄','confirm-delete-local-record',`data-id="${esc(id)}"`,'danger')}</div>`);
+  document.querySelector('#modal-content [data-action="drafts"]')?.focus();
+}
+function resetDeletedLocalRecord(){state=fresh();step=0;sheet='line';layer='surface';linePage=0;reviewGroup=0;reviewMode='raw';}
+function deleteLocalRecord(id){
+  if(!records.some(r=>r.id===id))return;
+  try{
+    // Re-read storage so deleting one record does not overwrite another tab's
+    // newly saved records. Preserve unrelated entries, even unknown formats.
+    const stored=JSON.parse(localStorage.getItem(KEY)||'[]');
+    if(!Array.isArray(stored))throw new Error('invalid local records');
+    localStorage.setItem(KEY,JSON.stringify(stored.filter(r=>r?.id!==id)));
+  }catch(_){const el=$('#delete-local-error');if(el)el.textContent='刪除失敗，無法更新瀏覽器儲存空間。原本的紀錄未刪除，請稍後再試。';return;}
+  removedLocalIDs.add(id);records=readRecords();
+  if(state.id===id){resetDeletedLocalRecord();storageFailed=false;}
+  render();openDrafts();
+  $('#save-status').textContent=storageFailed?'目前草稿尚未儲存，請下載備份':records.length?'本機紀錄已更新':'此瀏覽器沒有本機紀錄';
+  if(!storageFailed)$('#save-status').classList.remove('storage-warning');toast('已刪除此瀏覽器的本機紀錄；資料庫資料未變更。');
+}
+function openDrafts(){modal('本機草稿與紀錄',`<p>只顯示此瀏覽器儲存的紀錄，不同瀏覽器或裝置不會自動同步。「刪除本機」只移除此瀏覽器的副本，不會刪除已送到資料庫的觀測資料。</p>${records.length?records.slice().reverse().map(r=>`<div class="draft-item"><div>${localRecordSummary(r)}<small>${r.methods.map(k=>C.methods[k].short).join('、')} · ${r.status==='draft'?'草稿':r.status==='needs_review'?'已存・待確認':r.uploaded||r.dbSave?'已存入資料庫':'已完成・本機'}</small></div><div class="draft-actions">${button('開啟','resume',`data-id="${esc(r.id)}"`,'small')}${button('刪除本機','delete-local-record',`data-id="${esc(r.id)}" aria-label="刪除此筆本機紀錄"`,'small danger')}</div></div>`).join(''):'<p>還沒有儲存的紀錄。</p>'}<div class="actions">${button('新增一支氣瓶','new','','primary')}</div>`);}
 function help(){modal('填寫說明',`<ol><li><b>先選探查，再填氣瓶資訊。</b>同一支氣瓶選多種探查，日期、時間、深度與水溫共用；能見度有範圍時填最低與最高，只有一個值時填任一格即可。</li><li><b>底質每次填 5 格：</b>一個子樣區有 40 格。先照手板輸入原始數字，第 5 格填完後不會自動跳轉；請先核對，再按「確認這 5 格，下一組」。系統會先檢查空白與無效代碼。</li><li><b>數字確認後才轉代碼：</b>可用 1–9、0、a–c 及 91–98；0 會記為 OT，a–c 會保留為 HC-a–HC-c。最後確認可在「原始數字／轉換代碼」切換。</li><li><b>有上下手板：</b>勾選「泥下底質」，切換上／下，依同位置配對。SI(SI) 會記為 SI。</li><li><b>數字確認後逐格標記白化：</b>HC／SC 格會出現圓點；空心代表無白化，看到白化時點成實心。</li><li><b>Belt 照列填四段。</b>0 表示看過但沒看到；NA 或 - 表示未記錄；舊版手板沒有整列時勾「本手板未列」，不要補成 0。</li><li><b>珊瑚損害與垃圾一律填原始件數。</b>系統依每一段自動換算：0 件＝0 級、1 件＝1 級、2–4 件＝2 級、5 件以上＝3 級。</li><li><b>其他生物優先填實際名稱。</b>只有歷史手板真的只寫 Other 時，才使用「原表只寫 Other」。</li><li><b>檢查確認後存入系統資料庫。</b>若連線中斷仍可本機儲存與下載草稿；NA 需附原因。</li></ol>`);}
 function setFieldFocus(html){
   const panel=$('#field-focus');if(!panel)return;
@@ -574,6 +599,8 @@ document.addEventListener('click',e=>{
   const el=e.target.closest('[data-action]');if(!el)return;const a=el.dataset.action;e.preventDefault();
   if(saving)return;
   if(a==='refresh-environment'){void refreshEnvironment(true);return;}
+  if(a==='delete-local-record'){confirmLocalRecordDeletion(el.dataset.id);return;}
+  if(a==='confirm-delete-local-record'){deleteLocalRecord(el.dataset.id);return;}
   if(a==='debug-line-phase'){
     if(!DEBUG||!['entry','number-review','bleaching','complete'].includes(el.dataset.phase))return;
     state.linePhase=el.dataset.phase;sheet='line';if(!state.methods.includes('line'))state.methods.push('line');
@@ -628,7 +655,7 @@ document.addEventListener('click',e=>{
   else if(a==='new'||a==='new-same'){const m=a==='new-same'?{site:state.meta.site,date:state.meta.date,leader:state.meta.leader,scientist:state.meta.scientist}:{};if(state.methods.length)persist(false);state=fresh(m);step=0;sheet='line';layer='surface';linePage=0;reviewGroup=0;$('#modal').close();render();window.scrollTo({top:0});}
 });
 // Keep v1 drafts intact. Never overwrite another tab's newly created record.
-window.addEventListener('storage',e=>{if(e.key===KEY){records=readRecords();toast('另一個分頁更新了紀錄；繼續填寫前請確認使用的是同一份草稿。');}});
+window.addEventListener('storage',e=>{if(e.key===KEY){const wasSaved=records.some(r=>r.id===state.id);records=readRecords();if(wasSaved&&!records.some(r=>r.id===state.id)){removedLocalIDs.add(state.id);if(!saving){resetDeletedLocalRecord();render();}toast('這筆本機紀錄已在其他分頁移除；不會重新存回，資料庫不受影響。');}else{toast('另一個分頁更新了紀錄；繼續填寫前請確認使用的是同一份草稿。');}}});
 render();
 initApp();
 
