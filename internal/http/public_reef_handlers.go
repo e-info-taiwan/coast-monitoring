@@ -208,6 +208,7 @@ func (h *PublicHandlers) Contents(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, 200, data)
 }
 func (h *PublicHandlers) SaveContent(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
 	actor, ok := requireReefDataAdmin(w, r, h != nil && h.Content != nil)
 	if !ok {
 		return

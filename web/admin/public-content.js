@@ -335,8 +335,8 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
       select("status", "活動狀態", ACTIVITY_STATUS, d.status) +
       field("registration_url", "報名網址", d.registration_url, "url", { wide: true }), "時間以台灣時間（UTC+8）儲存。"))
     if(kind==="activity") {
-      parts.push(section("調查填報",select("entry_enabled","允許志工填報",[["false","不啟用"],["true","啟用並產生活動代碼"]],String(d.entry_enabled||false))+field("expires_at","代碼失效時間（可空白）",toLocalInput(d.expires_at),"datetime-local")))
-      parts.push(`<section class="pc-form-section"><h3>允許填報樣點</h3><div class="pc-checks">${s.sites.map(site=>`<label><input name="site_ids" type="checkbox" value="${esc(site.id)}" ${(d.site_ids||[]).includes(site.id)?"checked":""}>${esc(site.name_zh)}</label>`).join("")}</div>${item?.entry_config_id?`<button type="button" data-entry-action="rotate">重發代碼</button><button type="button" data-entry-action="disable">停用填報</button>`:""}<p role="status" id="pc-entry-result"></p></section>`)
+      parts.push(section("調查填報",select("entry_enabled","允許志工填報",[["false","不啟用"],["true", d.entry_enabled ? "已啟用（沿用現有代碼）" : "啟用並產生活動代碼"]],String(d.entry_enabled||false))+field("expires_at","代碼失效時間（可空白）",toLocalInput(d.expires_at),"datetime-local")))
+      parts.push(`<section class="pc-form-section"><h3>允許填報樣點</h3><div class="pc-checks">${s.sites.map(site=>`<label><input name="site_ids" type="checkbox" value="${esc(site.id)}" ${(d.site_ids||[]).includes(site.id)?"checked":""}>${esc(site.name_zh)}</label>`).join("")}</div></section>`)
     }
     if (["profile", "annotation", "chart"].includes(kind)) {
       parts.push(section("樣點", select("site_id", kind === "chart" ? "樣點（共用圖表可留空）" : "樣點", siteOptions, String(item?.site_id || ""), { wide: true })))
@@ -380,7 +380,14 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
       html: `
         ${item ? `<div class="drawer-hero-meta pc-hero">${statusPill(item.publication_status)}</div>` : ""}
         ${notice ? `<p class="pc-inline-notice" role="status">${esc(notice)}</p>` : ""}
-        ${kind === "activity" && item?.entry_config_id ? `<section class="pc-entry-code" role="status"><h3>志工填報代碼</h3>${entryCode ? `<p>已產生代碼，請複製給志工。重新整理後將不再顯示。</p><div class="editor-actions"><output>${esc(entryCode)}</output><button type="button" class="ghost-button" data-copy-entry-code>複製代碼</button></div>` : `<p>${item.data?.entry_enabled ? "填報已啟用。系統不保存可回讀的原始代碼；若尚未保存，請使用下方「重發代碼」，舊碼會失效。" : "志工填報已停用。"}</p>`}<p data-code-copy-result></p></section>` : ""}
+        ${kind === "activity" && item?.entry_config_id ? `<section class="pc-entry-code" aria-label="志工填報代碼" tabindex="-1">
+          <h3>志工填報代碼</h3>
+          ${entryCode ? `<p>請複製代碼給志工，重新整理後需重發才能取得新碼。</p>
+            <div class="editor-actions"><output>${esc(entryCode)}</output><button type="button" class="ghost-button" data-copy-entry-code>複製代碼</button></div>` :
+            `<p>${item.data?.entry_enabled ? "填報已啟用。若沒有保存先前的代碼，可在這裡重發。" : "填報已停用，重新啟用並儲存後會顯示新代碼。"}</p>`}
+          ${item.data?.entry_enabled ? `<div class="editor-actions"><button type="button" data-entry-action="rotate">重發代碼</button><button type="button" data-entry-action="disable">停用填報</button></div>` : ""}
+          <p role="status" id="pc-entry-result" data-code-copy-result></p>
+        </section>` : ""}
         <form id="pc-edit-form" class="editor-form pc-form" novalidate>
           ${editorFields(kind, item)}
           <p id="pc-form-error" class="pc-form-error" role="alert" hidden></p>
@@ -391,6 +398,7 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
         </form>`,
       guard: () => !dirty || window.confirm("尚未儲存的修改將被捨棄，確定關閉？"),
       bind(body) {
+        if (notice && entryCode) body.querySelector(".pc-entry-code")?.focus()
         body.querySelector('[data-copy-entry-code]')?.addEventListener('click', async () => {
           const result = body.querySelector('[data-code-copy-result]')
           try { await navigator.clipboard.writeText(entryCode); result.textContent = '已複製代碼' }
@@ -450,6 +458,9 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
       d.timeline = [...form.querySelectorAll(".timeline-row")].map(el => ({ title: val(el, "t_title"), date: val(el, "t_date"), date_precision: val(el, "t_precision"), description: val(el, "t_description"), status: val(el, "t_status"), source_url: val(el, "t_source"), sort_order: Number(val(el, "t_sort")), is_published: val(el, "t_published") === "true" }))
       d.media = [...form.querySelectorAll(".media-row")].map(el => ({ url: val(el, "m_url"), alt: val(el, "m_alt"), is_valid: val(el, "m_valid") === "true", license_confirmed: val(el, "m_licensed") === "true", is_published: val(el, "m_published") === "true" }))
     }
+    if (kind === "activity" && d.entry_enabled && !f.getAll("site_ids").length) {
+      throw new Error("請至少勾選一個允許填報的樣點，再儲存活動。")
+    }
     if (kind === "settings") d.intro_popup={kicker:f.get("popup_kicker")||"",title:f.get("popup_title")||"",body:f.get("popup_body")||"",steps:String(f.get("popup_steps")||"").split("\n").filter(x=>x.trim()),button_label:f.get("popup_button_label")||""}
     if (kind === "chart" || kind === "activity") d.site_ids = f.getAll("site_ids").map(Number)
     return { data: d, siteID: f.get("site_id") ? Number(f.get("site_id")) : null, status: f.get("publication_status") || "draft" }
@@ -458,13 +469,18 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
   async function save(form, kind, current) {
     const errorEl = form.querySelector("#pc-form-error")
     const submit = form.querySelector('[type="submit"]')
+    function showError(message) {
+      errorEl.textContent = message
+      errorEl.hidden = false
+      errorEl.tabIndex = -1
+      errorEl.focus()
+    }
     errorEl.hidden = true
     let payload
     try {
       payload = collect(form, kind)
     } catch (error) {
-      errorEl.textContent = error.message
-      errorEl.hidden = false
+      showError(error.message)
       return false
     }
     if (payload.status === "archived" && current?.publication_status !== "archived" && !window.confirm("確定封存此內容？封存後不再出現在公開網站。")) return false
@@ -477,12 +493,13 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
       if (saved?.entry_code) entryCodes.set(saved.id,saved.entry_code)
       const message = saved?.entry_code ? "活動已儲存並產生志工填報代碼，請複製下方代碼。" : current ? "已儲存變更。" : "已建立草稿；核對後可改為「已發布」。"
       notify({ tone: "ok", title: message, id: "pc-save" })
-      await load()
-      if (kind === s.kind) openEditor(saved || current, { notice: message })
+      if (kind === s.kind) {
+        await openEditor(saved || current, { notice: message })
+        await load()
+      }
       return true
     } catch (error) {
-      errorEl.textContent = error.message || "儲存失敗"
-      errorEl.hidden = false
+      showError(error.message || "儲存失敗")
       submit.disabled = false
       submit.textContent = current ? "儲存變更" : "建立草稿"
       return false
@@ -521,7 +538,13 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
           event.preventDefault()
           const next = new FormData(form).get("publication_status")
           const errorEl = form.querySelector("#pc-form-error")
-          errorEl.hidden = true
+          function showError(message) {
+      errorEl.textContent = message
+      errorEl.hidden = false
+      errorEl.tabIndex = -1
+      errorEl.focus()
+    }
+    errorEl.hidden = true
           if (next === status) { errorEl.textContent = "發布狀態沒有變更。"; errorEl.hidden = false; return }
           if (!window.confirm(`確定將調查 #${item.id} 改為「${STATUS[next]?.label || next}」？請先核對原始資料。`)) return
           const submit = form.querySelector('[type="submit"]')

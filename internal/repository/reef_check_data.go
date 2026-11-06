@@ -32,6 +32,11 @@ const reefEventSelect = `SELECT jsonb_build_object(
  'activity_id',e.activity_id,'sea_temp_source',e.sea_temp_source,'sea_temp_observed_at',e.sea_temp_observed_at,'sea_temp_fetched_at',e.sea_temp_fetched_at,'cwa_station_id',e.cwa_station_id,
  'cwa_station_name',cwa.name_zh,
  'water_temp_c',(SELECT t.water_temp_c FROM transect t WHERE t.event_id=e.event_id AND t.water_temp_c IS NOT NULL LIMIT 1),
+ 'divers',(SELECT jsonb_agg(to_jsonb(participant)) FROM (
+   SELECT DISTINCT t.method,concat_ws(' · ',nullif(d.name_zh,''),nullif(d.name_en,''),nullif(d.reef_check_code,''),'(#'||d.id||')') AS label
+   FROM transect t JOIN transect_participant tp ON tp.transect_id=t.id JOIN diver d ON d.id=tp.diver_id
+   WHERE t.event_id=e.event_id
+ ) participant),
  'methods',COALESCE((SELECT jsonb_agg(t.method ORDER BY t.method) FROM transect t WHERE t.event_id=e.event_id),'[]'::jsonb))
  FROM event e JOIN survey s ON s.id=e.survey_id JOIN site p ON p.id=s.site_id
  LEFT JOIN cwa_marine_station cwa ON cwa.id=e.cwa_station_id `

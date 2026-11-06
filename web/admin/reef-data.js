@@ -28,6 +28,7 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
     year: "",
     site: "",
     method: "",
+    diver: "",
     search: "",
     page: 0,
     editing: false,
@@ -125,8 +126,12 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
   function renderList() {
     const years = [...new Set(s.events.map(e => e.survey_date.slice(0, 4)))].sort().reverse().map(y => [y, y])
     const sites = [...new Map(s.events.map(e => [e.site_id, [e.site_id, `${e.site_name} · ${e.site_english}`]])).values()].sort((a, b) => a[1].localeCompare(b[1], "zh-TW"))
+    const diverNames = [...new Set(s.events.flatMap(event => (event.divers || []).map(person => person.label)))].sort((a, b) => a.localeCompare(b, "zh-TW"))
+    const diverQuery = s.diver.trim().toLowerCase()
+    const matchesDiver = event => !diverQuery || (event.divers || []).some(person =>
+      (!s.method || person.method === s.method) && person.label.toLowerCase().includes(diverQuery))
     const query = s.search.trim().toLowerCase()
-    const filtered = s.events.filter(e => (s.publication_status==="all" || e.publication_status===s.publication_status) && (!s.activity_id || String(e.activity_id)===s.activity_id) && (!s.event_ids || s.event_ids.split(",").map(x=>x.trim()).includes(e.event_id)) && (!s.survey_date || e.survey_date===s.survey_date) && (!s.depth_m || e.depth_m===Number(s.depth_m)) && (!s.year || e.survey_date.startsWith(s.year)) && (!s.site || String(e.site_id) === s.site) && (!s.method || e.methods.includes(s.method)) && (!query || [e.event_id, e.site_name, e.site_english, e.county, e.region, e.label].join(" ").toLowerCase().includes(query)))
+    const filtered = s.events.filter(e => matchesDiver(e) && (s.publication_status==="all" || e.publication_status===s.publication_status) && (!s.activity_id || String(e.activity_id)===s.activity_id) && (!s.event_ids || s.event_ids.split(",").map(x=>x.trim()).includes(e.event_id)) && (!s.survey_date || e.survey_date===s.survey_date) && (!s.depth_m || e.depth_m===Number(s.depth_m)) && (!s.year || e.survey_date.startsWith(s.year)) && (!s.site || String(e.site_id) === s.site) && (!s.method || e.methods.includes(s.method)) && (!query || [e.event_id, e.site_name, e.site_english, e.county, e.region, e.label].join(" ").toLowerCase().includes(query)))
     const pages = Math.max(1, Math.ceil(filtered.length / 30))
     s.page = Math.min(s.page, pages - 1)
     const rows = filtered.slice(s.page * 30, (s.page + 1) * 30)
@@ -158,6 +163,8 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
         <label>深度 m<input name="depth_m" type="number" min="0" step="any" value="${esc(s.depth_m)}"></label>
         <label>年份<select name="year">${options(years, s.year, "全部年份")}</select></label>
         <label>樣點<select name="site">${options(sites, s.site, "全部樣點")}</select></label>
+        <label>潛水員<input type="search" name="diver" list="rd-diver-choices" value="${esc(s.diver)}" placeholder="姓名或證號"></label>
+        <datalist id="rd-diver-choices">${diverNames.map(label => `<option value="${esc(label)}"></option>`).join("")}</datalist>
         <label>調查方法<select name="method">${options(Object.entries(methods), s.method, "全部方法")}</select></label>
         <label>搜尋<input type="search" name="search" value="${esc(s.search)}" placeholder="樣點、縣市或場次編號"></label>
         <button class="primary-button">篩選</button>
@@ -181,12 +188,12 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
     panel.querySelector("#rd-filters").onsubmit = event => {
       event.preventDefault()
       const f = new FormData(event.currentTarget)
-      for (const key of ["year", "site", "method", "search", "publication_status","activity_id","event_ids","survey_date","depth_m"]) s[key] = String(f.get(key) || "")
+      for (const key of ["year", "site", "method", "diver", "search", "publication_status","activity_id","event_ids","survey_date","depth_m"]) s[key] = String(f.get(key) || "")
       s.page = 0
       renderList()
     }
     panel.querySelector("#rd-clear").onclick = () => {
-      s.year = s.site = s.method = s.search = s.activity_id = s.event_ids = s.survey_date = s.depth_m = "";s.publication_status="published"
+      s.year = s.site = s.method = s.diver = s.search = s.activity_id = s.event_ids = s.survey_date = s.depth_m = "";s.publication_status="published"
       s.page = 0
       renderList()
     }
@@ -200,7 +207,7 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
       if (panel === current) render(current)
     }
     panel.querySelector("#rd-export-filtered")?.addEventListener("click", event => {
-      const query = new URLSearchParams({ year: s.year, site: s.site, method: s.method, search: s.search,publication_status:s.publication_status,activity_id:s.activity_id,event_ids:s.event_ids,survey_date:s.survey_date,depth_m:s.depth_m })
+      const query = new URLSearchParams({ year: s.year, site: s.site, method: s.method, diver: s.diver, search: s.search,publication_status:s.publication_status,activity_id:s.activity_id,event_ids:s.event_ids,survey_date:s.survey_date,depth_m:s.depth_m })
       downloadReport(`/admin/reef-check-data/reports.zip?${query}`, "ReefCheck-範本報告套組.zip", event.currentTarget)
     })
     panel.querySelector("#rd-create-event")?.addEventListener("click", showCreateEventModal)

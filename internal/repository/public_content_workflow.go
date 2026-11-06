@@ -125,7 +125,8 @@ func (r ReefDataRepository) SaveContent(ctx context.Context, id int, in service.
 func (r ReefDataRepository) syncEntryConfig(ctx context.Context, c *service.PublicContent, d service.ContentData, actor string) error {
 	var id int
 	var before []byte
-	err := r.db.QueryRow(ctx, `SELECT id,(to_jsonb(a)-'code_hash')||jsonb_build_object('site_ids',ARRAY(SELECT site_id FROM reef_check_activity_site WHERE activity_id=a.id ORDER BY site_id)) FROM reef_check_activity a WHERE activity_content_id=$1 FOR UPDATE`, c.ID).Scan(&id, &before)
+	var wasActive bool
+	err := r.db.QueryRow(ctx, `SELECT id,is_active,(to_jsonb(a)-'code_hash')||jsonb_build_object('site_ids',ARRAY(SELECT site_id FROM reef_check_activity_site WHERE activity_id=a.id ORDER BY site_id)) FROM reef_check_activity a WHERE activity_content_id=$1 FOR UPDATE`, c.ID).Scan(&id, &wasActive, &before)
 	if err != nil && err != pgx.ErrNoRows {
 		return err
 	}
@@ -148,7 +149,17 @@ func (r ReefDataRepository) syncEntryConfig(ctx context.Context, c *service.Publ
 		c.EntryCode = code
 		action = "create"
 	} else {
-		_, err = r.db.Exec(ctx, `UPDATE reef_check_activity SET name=$2,start_date=$3,end_date=$4,is_active=$5,expires_at=$6,updated_at=clock_timestamp() WHERE id=$1`, id, d.Title, start.In(taipei).Format("2006-01-02"), end.In(taipei).Format("2006-01-02"), d.EntryEnabled, d.ExpiresAt)
+		var replacementHash *string
+		if d.EntryEnabled && !wasActive {
+			code, err := newActivityCode()
+			if err != nil {
+				return err
+			}
+			hash := activityHash(code)
+			replacementHash = &hash
+			c.EntryCode = code
+		}
+		_, err = r.db.Exec(ctx, `UPDATE reef_check_activity SET name=$2,start_date=$3,end_date=$4,is_active=$5,expires_at=$6,code_hash=COALESCE($7,code_hash),updated_at=clock_timestamp() WHERE id=$1`, id, d.Title, start.In(taipei).Format("2006-01-02"), end.In(taipei).Format("2006-01-02"), d.EntryEnabled, d.ExpiresAt, replacementHash)
 		if err != nil {
 			return err
 		}

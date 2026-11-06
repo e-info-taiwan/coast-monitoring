@@ -77,6 +77,7 @@ func (h *AdminHandlers) ExportReefReports(w http.ResponseWriter, r *http.Request
 		writeServiceError(w, err, "無法載入報告場次")
 		return
 	}
+	diver := strings.ToLower(strings.TrimSpace(q.Get("diver")))
 	var selected []service.ReefDataEvent
 	for _, e := range events {
 		if status != "all" && e.PublicationStatus != status {
@@ -113,6 +114,18 @@ func (h *AdminHandlers) ExportReefReports(w http.ResponseWriter, r *http.Request
 		hasMethod := method == ""
 		for _, m := range e.Methods {
 			hasMethod = hasMethod || m == method
+		}
+		if diver != "" {
+			matched := false
+			for _, person := range e.Divers {
+				if (method == "" || person.Method == method) && strings.Contains(strings.ToLower(person.Label), diver) {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
 		}
 		if !hasMethod {
 			continue
