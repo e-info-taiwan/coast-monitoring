@@ -17,7 +17,7 @@ test('newly generated activity code remains visible above form after list refres
  try {
   app.render(panel,'activity');await new Promise(resolve=>setTimeout(resolve,0))
   panel.querySelector('[data-pc="new"]').click();await new Promise(resolve=>setTimeout(resolve,0))
-  let form=body.querySelector('form');form.elements.title.value='測試活動';form.elements.entry_enabled.value='true'
+  let form=body.querySelector('form');form.elements.title.value='測試活動';form.elements.entry_enabled.value='true';form.querySelector('[name=site_ids]').checked=true
   form.elements.start_at.value='2026-11-06T09:00';form.elements.end_at.value='2026-11-06T12:00'
   await form.onsubmit({preventDefault(){}});await new Promise(resolve=>setTimeout(resolve,0))
   assert.equal(body.querySelector('.pc-entry-code output').textContent,'TEST-CODE-77')

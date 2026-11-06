@@ -13,7 +13,13 @@ import (
 )
 
 // ReefData types describe the imported v1.7 domain, independent of the legacy UUID surveys.
+type ReefEventDiver struct {
+	Label  string `json:"label"`
+	Method string `json:"method"`
+}
+
 type ReefDataEvent struct {
+	Divers                []ReefEventDiver        `json:"divers,omitempty"`
 	ActivityID            *int                    `json:"activity_id"`
 	TemperatureSource     *string                 `json:"sea_temp_source"`
 	TemperatureObservedAt *time.Time              `json:"sea_temp_observed_at"`
