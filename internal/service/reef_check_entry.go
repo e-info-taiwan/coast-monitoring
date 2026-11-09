@@ -13,6 +13,7 @@ type ReefCheckEntryMetadata struct {
 	Longitude      *float64 `json:"longitude"`
 }
 type ReefCheckPointBleachingSummary struct {
+	ReefBleachingRate
 	Segment int  `json:"segment"`
 	HC      *int `json:"derived_hc_bleached_point_count"`
 	SC      *int `json:"derived_sc_bleached_point_count"`

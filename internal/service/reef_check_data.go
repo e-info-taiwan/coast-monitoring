@@ -69,15 +69,21 @@ type ReefDataPoint struct {
 	IsBleached *bool   `json:"is_bleached"`
 }
 
-type ReefDataBleaching struct {
+type ReefBleachingRate struct {
+	HCPoints  *int     `json:"hc_points"`
+	SCPoints  *int     `json:"sc_points"`
 	HCPercent *float64 `json:"hc_percent"`
 	SCPercent *float64 `json:"sc_percent"`
-	HCStatus  string   `json:"hc_record_status"`
-	SCStatus  string   `json:"sc_record_status"`
-	ID        int64    `json:"id"`
-	Segment   int      `json:"segment"`
-	HC        int      `json:"hc_bleached_count"`
-	SC        int      `json:"sc_bleached_count"`
+}
+
+type ReefDataBleaching struct {
+	ReefBleachingRate
+	HCStatus string `json:"hc_record_status"`
+	SCStatus string `json:"sc_record_status"`
+	ID       int64  `json:"id"`
+	Segment  int    `json:"segment"`
+	HC       int    `json:"hc_bleached_count"`
+	SC       int    `json:"sc_bleached_count"`
 }
 
 type ReefDataBelt struct {
@@ -556,6 +562,7 @@ type ReefCheckConfig struct {
 }
 
 type ReefDataTransect struct {
+	PointMarks        bool            `json:"point_marks"`
 	FishSizeMode      *string         `json:"fish_size_mode"`
 	ClassifyHardCoral bool            `json:"classify_hard_coral"`
 	Summaries         json.RawMessage `json:"summaries"`

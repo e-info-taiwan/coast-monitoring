@@ -492,13 +492,40 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
 
     return `
       ${html || '<p>未記錄逐點底質。</p>'}
-      <section class="rd-section">
-        <h3>底質白化</h3>
-        ${(t.derived_bleaching || []).length ? table(["子樣區", "HC 逐格白化點數（自動）", "SC 逐格白化點數（自動）"], t.derived_bleaching.map(r => `<tr><th>S${r.segment}</th><td>${number(r.derived_hc_bleached_point_count)}</td><td>${number(r.derived_sc_bleached_point_count)}</td></tr>`).join('')) : ''}
-        ${t.bleaching.length ? table(["段落", "HC 白化點數", "HC 白化率", "SC 白化點數", "SC 白化率"], t.bleaching.map(r => `<tr><th scope="row">S${r.segment}</th><td>${numericInput("hc", r, r.hc_bleached_count, `S${r.segment} HC 白化點數`, 40)}</td><td>${percent(r.hc_percent)}</td><td>${numericInput("sc", r, r.sc_bleached_count, `S${r.segment} SC 白化點數`, 40)}</td><td>${percent(r.sc_percent)}</td></tr>`).join("")) : '<p>未記錄白化點數。</p>'}
-        <p class="meta-line">白化率依已儲存的表層 HC／SC 點數計算；分母為零時顯示無法計算。</p>
-      </section>
+      ${bleachingSection(t)}
     `
+  }
+
+  function bleachingSection(t) {
+    const pointMarks = t.point_marks
+    const records = pointMarks ? t.derived_bleaching || [] : t.bleaching
+    const bySegment = new Map(records.map(row => [row.segment, row]))
+    function cells(row, kind) {
+      const label = kind.toUpperCase()
+      const count = pointMarks ? row[`derived_${kind}_bleached_point_count`]
+        : row[`${kind}_record_status`] === "not_recorded" ? null : row[`${kind}_bleached_count`]
+      const total = row[`${kind}_points`]
+      const rate = row[`${kind}_percent`]
+      const unknown = pointMarks ? (total == null ? "無有效底質點" : "白化標記未齊") : "未記錄白化點數"
+      const displayCount = pointMarks ? (count == null ? unknown : number(count))
+        : numericInput(kind, row, count, `S${row.segment} ${label} 白化點數`, 40)
+      let displayRate
+      if (count == null) displayRate = unknown
+      else if (total == null) displayRate = "無有效底質點"
+      else if (total === 0) displayRate = `無表層 ${label} 點`
+      else displayRate = `${percent(rate)}（${number(count)}／${number(total)}）`
+      return `<td>${displayCount}</td><td>${displayRate}</td>`
+    }
+
+    const rows = [1, 2, 3, 4].map(segment => {
+      const row = bySegment.get(segment)
+      return `<tr><th scope="row">S${segment}</th>${row ? cells(row, "hc") + cells(row, "sc") : '<td colspan="4">本段未記錄</td>'}</tr>`
+    })
+    return `<section class="rd-section" aria-label="底質白化">
+      <h3>底質白化</h3>
+      <p class="meta-line">${pointMarks ? "依逐格白化標記自動統計。" : "依各段填報的白化總點數計算。"}白化率為該段白化點數除以同類表層珊瑚點數；硬珊瑚（HC）含 a、b、c 分型。</p>
+      ${table(["段落", "HC 白化點數", "HC 白化率", "SC 白化點數", "SC 白化率"], rows.join(""))}
+    </section>`
   }
 
   function percent(v) {
