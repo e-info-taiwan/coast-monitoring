@@ -72,8 +72,10 @@ def check_substrate_board(page):
     expect(rows.first.locator("td").nth(7)).to_have_text("—")
     expect(surface.get_by_label("表層第 3 段 61 m 底質：OT · 其他", exact=True)).to_have_text("10")
     expect(rows.last.locator("td").last).to_have_text("10")
+    session = page.request.get(BASE + "/api/session").json()
+    headers = {"X-CSRF-Token": session["csrfToken"]}
     for path in ("reef-check-data/codes", "substrate-types"):
-        response = page.request.get(BASE + "/api/admin/" + path)
+        response = page.request.get(BASE + "/api/admin/" + path, headers=headers)
         assert response.ok, (path, response.status)
         numbers = {row["code"]: row["numeric_code"] for row in response.json()}
         assert numbers["OT"] == 10 and numbers["NA"] == -1, path
