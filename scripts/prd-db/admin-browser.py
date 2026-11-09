@@ -28,7 +28,7 @@ def seed():
         INSERT INTO transect(event_id,method) VALUES('browser-member','line') RETURNING id AS transect_id \\gset
         INSERT INTO transect(event_id,method) VALUES('browser-member','belt_invert'),('browser-other','line');
         INSERT INTO substrate_point(transect_id,segment,position_m,substrate_layer,substrate_code) VALUES
-          (:transect_id,4,94.5,'surface','OT'),(:transect_id,1,10,'surface','NA'),
+          (:transect_id,3,61,'surface','OT'),(:transect_id,4,94.5,'surface','OT'),(:transect_id,1,10,'surface','NA'),
           (:transect_id,1,0,'surface','RC'),(:transect_id,1,0,'down','HC');
         INSERT INTO substrate_point(transect_id,segment,position_m,substrate_layer,substrate_code) VALUES
           (:transect_id,2,25,'surface','HC-a'),(:transect_id,2,25.5,'surface','HC');
@@ -70,7 +70,13 @@ def check_substrate_board(page):
     expect(rows.first.locator("td").nth(1)).to_have_text("6")
     expect(rows.first.locator("td").nth(3)).to_have_text("NA")
     expect(rows.first.locator("td").nth(7)).to_have_text("—")
-    expect(rows.last.locator("td").last).to_have_text("0")
+    expect(surface.get_by_label("表層第 3 段 61 m 底質：OT · 其他", exact=True)).to_have_text("10")
+    expect(rows.last.locator("td").last).to_have_text("10")
+    for path in ("reef-check-data/codes", "substrate-types"):
+        response = page.request.get(BASE + "/api/admin/" + path)
+        assert response.ok, (path, response.status)
+        numbers = {row["code"]: row["numeric_code"] for row in response.json()}
+        assert numbers["OT"] == 10 and numbers["NA"] == -1, path
     expect(down.locator("tbody td").nth(1)).to_have_text("1")
 
     bleaching = page.get_by_role("region", name="底質白化", exact=True)
@@ -87,7 +93,7 @@ def check_substrate_board(page):
     page.set_viewport_size({"width": 1280, "height": 800})
 
     page.get_by_role("button", name="編輯這條穿越線").click()
-    expect(surface.get_by_role("combobox")).to_have_count(5)
+    expect(surface.get_by_role("combobox")).to_have_count(6)
     page.get_by_label("表層第 4 段 94.5 m 底質", exact=True).select_option("RB")
     page.get_by_role("button", name="儲存修改").click()
     expect(rows.last.locator("td").last).to_have_text("7")
