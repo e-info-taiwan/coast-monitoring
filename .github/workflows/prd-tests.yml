@@ -30,8 +30,8 @@ jobs:
         with:
           node-version: 26
       - run: go run ./cmd/migrate
-      - run: go test ./... -count=1 -timeout=120s
       - run: npm ci --prefix scripts/prd-db --ignore-scripts --no-audit --no-fund
+      - run: go test ./... -count=1 -timeout=120s
       - run: node --test scripts/prd-db/*.test.mjs web/admin/tests/*.test.mjs web/site/map-clusters.test.mjs web/public/reef-check/tests/*.cjs
       - name: Chrome admin acceptance against PostgreSQL
         run: |
