@@ -1,5 +1,4 @@
-
-
+import { substrateDisplay } from './substrate-display.mjs'
 const methods = { line: "底質 Line", belt_fish: "魚類 Belt", belt_invert: "無脊椎・罕見生物・環境影響" }
 const roles = { member: "成員", team_leader: "隊長", team_scientist: "科學指導員" }
 const groups = { fish: "魚類", invert: "無脊椎", rare: "罕見生物" }
@@ -427,13 +426,6 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
     const layerName = layer === "surface" ? "表層" : "下層"
     const cells = new Map(points.map(p => [`${p.segment}:${p.position_m}`, p]))
     const codes = new Map(s.codes.map(c => [c.code, c]))
-    const letterTokens = { "HC-a": "a", "HC-b": "b", "HC-c": "c", "SI(HC-a)": "9a", "SI(HC-b)": "9b", "SI(HC-c)": "9c" }
-
-    function token(code) {
-      if (code === "NA") return "NA"
-      return letterTokens[code] ?? codes.get(code)?.numeric_code ?? code
-    }
-
     function reading(point) {
       const code = point.substrate_code
       const label = `${layerName}第 ${point.segment} 段 ${point.position_m} m 底質`
@@ -441,12 +433,13 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
         const available = s.codes.filter(c => c.is_active || c.code === code).map(c => c.code)
         if (!codes.has(code)) available.push(code)
         return `<select data-kind="point" data-id="${esc(point.id)}" aria-label="${esc(label)}">${available.map(c => {
-          const mark = token(c)
+          const mark = substrateDisplay(c === code ? point : { substrate_code: c }).token
           return `<option value="${esc(c)}" ${c === code ? "selected" : ""}>${esc(mark === c ? c : mark + " " + c)}</option>`
         }).join("")}</select>`
       }
-      const desc = [code, codes.get(code)?.name_zh].filter(Boolean).join(" · ")
-      return `<span title="${esc(desc)}" aria-label="${esc(label + "：" + desc)}">${esc(token(code))}</span>`
+      const display = substrateDisplay(point)
+      const desc = [code, codes.get(code)?.name_zh, display.note].filter(Boolean).join(" · ")
+      return `<span title="${esc(desc)}" aria-label="${esc(label + "：" + desc)}">${esc(display.token)}</span>`
     }
 
     const rows = Array.from({ length: 20 }, (_, row) => {
