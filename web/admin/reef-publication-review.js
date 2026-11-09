@@ -1,6 +1,7 @@
+import { substrateDisplay } from './substrate-display.mjs'
+
 const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))
 const starts = [0,25,50,75]
-const numeric = {HC:'1',SC:'2',RKC:'3',NIA:'4',SP:'5',RC:'6',RB:'7',SD:'8',SI:'9',OT:'0','HC-a':'a','HC-b':'b','HC-c':'c'}
 const value = v => v === null || v === undefined || v === '' ? '<span class="pr-missing">未填</span>' : esc(v)
 function table(title, heads, rows) {
  return `<div class="pr-scroll" tabindex="0" role="region" aria-label="${esc(title)}"><table class="pr-table"><caption>${esc(title)}</caption><thead><tr>${heads.map(h=>`<th scope="col">${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`
@@ -8,7 +9,7 @@ function table(title, heads, rows) {
 function board(t, layer) {
  const points = (t.points || []).filter(p=>p.substrate_layer===layer)
  const cells = new Map(points.map(p=>[`${p.segment}:${p.position_m}`,p]))
- return `<div class="pr-scroll" tabindex="0" role="region" aria-label="${layer==='surface'?'表面':'泥下'}底質手板"><table class="pr-table pr-board"><caption>${layer==='surface'?'表面':'泥下'}底質 · 數字與代碼</caption><thead><tr>${starts.map((s,i)=>`<th colspan="4" scope="colgroup">子樣區 ${i+1}<small>${s}–${s+19.5} m</small></th>`).join('')}</tr><tr>${starts.map(s=>`<th colspan="2">左欄 · ${s}–${s+9.5} m</th><th colspan="2">右欄 · ${s+10}–${s+19.5} m</th>`).join('')}</tr><tr>${starts.map(()=>'<th>m</th><th>數字／代碼</th><th>m</th><th>數字／代碼</th>').join('')}</tr></thead><tbody>${Array.from({length:20},(_,r)=>`<tr>${starts.map((s,i)=>[0,1].map(c=>{const pos=s+c*10+r/2,p=cells.get(`${i+1}:${pos}`);return `<th scope="row">${pos}</th><td>${p ? `${value(p.substrate_code==='NA'?'NA（未記錄）':numeric[p.substrate_code] ?? p.substrate_code)}<small>${esc(p.substrate_code)}${p.is_bleached===true?' · 白化':p.is_bleached===false?' · 無白化':''}</small>` : value(null)}</td>`}).join('')).join('')}</tr>`).join('')}</tbody></table></div>`
+ return `<div class="pr-scroll" tabindex="0" role="region" aria-label="${layer==='surface'?'表面':'泥下'}底質手板"><table class="pr-table pr-board"><caption>${layer==='surface'?'表面':'泥下'}底質 · 數字與代碼</caption><thead><tr>${starts.map((s,i)=>`<th colspan="4" scope="colgroup">子樣區 ${i+1}<small>${s}–${s+19.5} m</small></th>`).join('')}</tr><tr>${starts.map(s=>`<th colspan="2">左欄 · ${s}–${s+9.5} m</th><th colspan="2">右欄 · ${s+10}–${s+19.5} m</th>`).join('')}</tr><tr>${starts.map(()=>'<th>m</th><th>數字／代碼</th><th>m</th><th>數字／代碼</th>').join('')}</tr></thead><tbody>${Array.from({length:20},(_,r)=>`<tr>${starts.map((s,i)=>[0,1].map(c=>{const pos=s+c*10+r/2,p=cells.get(`${i+1}:${pos}`);return `<th scope="row">${pos}</th><td>${p ? `${value(p.substrate_code==='NA'?'NA（未記錄）':substrateDisplay(p).token)}<small>${esc(p.substrate_code)}${p.is_bleached===true?' · 白化':p.is_bleached===false?' · 無白化':''}</small>` : value(null)}</td>`}).join('')).join('')}</tr>`).join('')}</tbody></table></div>`
 }
 export function renderPublicationReview(detail) {
  const e=detail.event || {}

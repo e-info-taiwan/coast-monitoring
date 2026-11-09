@@ -2,6 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {readFile} from 'node:fs/promises'
 import vm from 'node:vm'
+import { substrateDisplay } from '../substrate-display.mjs'
 
 const source = await readFile(new URL('../reef-data.js', import.meta.url), 'utf8')
 const tick = () => new Promise(resolve => setImmediate(resolve))
@@ -38,12 +39,12 @@ async function setup({stations = [{id: '1106', name_zh: '龍洞', area_name: '�
   let overlay
   const panel = new Element()
   const context = vm.createContext({
-    URLSearchParams, console,
+    URLSearchParams, console, substrateDisplay,
     window: {addEventListener() {}},
     document: {createElement: () => new Element(), body: {appendChild(el) { overlay = el }}},
     FormData: class { constructor(form) { this.data = form.data } get(k) { return this.data[k] ?? null } getAll(k) { return this.data[k] || [] } },
   })
-  vm.runInContext(source.replace('export function createReefData', 'function createReefData'), context)
+  vm.runInContext(source.replace(/^import .*substrate-display\.mjs.*$/m, '').replace('export function createReefData', 'function createReefData'), context)
   const app = context.createReefData({onCount() {}, apiFetch: async (path, options) => {
     calls.push({path, options})
     if (path.endsWith('/stations')) { if (stations instanceof Error) throw stations; return stations }
