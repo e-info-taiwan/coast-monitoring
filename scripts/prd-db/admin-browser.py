@@ -27,6 +27,9 @@ def seed():
         VALUES(:survey_id,'browser-member','2026-11-06','09:00',5,'published'),(:survey_id,'browser-other','2026-11-06','14:00',5,'published');
         INSERT INTO transect(event_id,method) VALUES('browser-member','line') RETURNING id AS transect_id \\gset
         INSERT INTO transect(event_id,method) VALUES('browser-member','belt_invert'),('browser-other','line');
+        INSERT INTO substrate_point(transect_id,segment,position_m,substrate_layer,substrate_code) VALUES
+          (:transect_id,4,94.5,'surface','OT'),(:transect_id,1,10,'surface','NA'),
+          (:transect_id,1,0,'surface','RC'),(:transect_id,1,0,'down','HC');
         INSERT INTO diver(name_zh,reef_check_code,is_active) VALUES('驗收潛水員','RC-DIVER-TEST',false) RETURNING id AS diver_id \\gset
         INSERT INTO transect_participant(transect_id,diver_id,role) VALUES(:transect_id,:diver_id,'member'),(:transect_id,:diver_id,'team_leader');
     """, text=True, check=True)
@@ -40,6 +43,45 @@ def verify(code, expected_status):
     except urllib.error.HTTPError as error:
         status = error.code
     assert status == expected_status, (status, expected_status)
+
+
+def check_substrate_board(page):
+    page.get_by_role("button", name="查看 browser-member", exact=True).click()
+    page.get_by_role("button", name="底質 Line", exact=True).click()
+    surface = page.get_by_role("table", name="表層逐點底質")
+    down = page.get_by_role("table", name="下層逐點底質")
+    rows = surface.locator("tbody tr")
+    expect(rows).to_have_count(20)
+    for row_index, row in enumerate(rows.all()):
+        positions = row.locator(".rd-distance").all_text_contents()
+        assert [float(p) for p in positions] == [
+            start + offset + row_index / 2 for start in (0, 25, 50, 75) for offset in (0, 10)
+        ]
+    expect(rows.first.locator("td").nth(1)).to_have_text("6")
+    expect(rows.first.locator("td").nth(3)).to_have_text("NA")
+    expect(rows.first.locator("td").nth(5)).to_have_text("—")
+    expect(rows.last.locator("td").last).to_have_text("0")
+    expect(down.locator("tbody td").nth(1)).to_have_text("1")
+
+    page.set_viewport_size({"width": 390, "height": 844})
+    region = page.get_by_role("region", name="表層底質手板")
+    assert region.evaluate("el => el.clientWidth <= innerWidth && el.scrollWidth > el.clientWidth")
+    region.evaluate("el => el.scrollLeft = el.scrollWidth")
+    assert region.evaluate("el => el.scrollLeft > 0")
+    page.set_viewport_size({"width": 1280, "height": 800})
+
+    page.get_by_role("button", name="編輯這條穿越線").click()
+    expect(surface.get_by_role("combobox")).to_have_count(3)
+    page.get_by_label("表層第 4 段 94.5 m 底質", exact=True).select_option("RB")
+    page.get_by_role("button", name="儲存修改").click()
+    expect(rows.last.locator("td").last).to_have_text("7")
+    page.get_by_role("button", name="返回場次列表", exact=False).click()
+    page.get_by_role("button", name="查看 browser-member", exact=True).click()
+    page.get_by_role("button", name="底質 Line", exact=True).click()
+    expect(rows.last.locator("td").last).to_have_text("7")
+    expect(down.locator("tbody td").nth(1)).to_have_text("1")
+    page.get_by_role("button", name="返回場次列表", exact=False).click()
+    print("Chrome passed: four-segment handboard, layer isolation, mobile scrolling and persisted point edit.")
 
 
 def test_ui():
@@ -63,6 +105,7 @@ def test_ui():
         filters.get_by_role("button", name="清除").click()
         expect(page.get_by_role("button", name="查看 browser-other", exact=True)).to_be_visible()
 
+        check_substrate_board(page)
         page.get_by_role("link", name="管理活動與志工填報代碼").click()
         page.locator('[data-pc="new"]').first.click()
         form = page.locator("#pc-edit-form")
