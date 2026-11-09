@@ -22,7 +22,7 @@ func TestPRDSubmissionContract(t *testing.T) {
 		valid  bool
 	}{
 		{"zero means OT", func(s *ReefCheckSurveySubmission) { s.SubstratePoints[0].SubstrateCode = "0" }, true},
-		{"historical 10 requires import convention", func(s *ReefCheckSurveySubmission) { s.SubstratePoints[0].SubstrateCode = "10" }, false},
+		{"ten means OT", func(s *ReefCheckSurveySubmission) { s.SubstratePoints[0].SubstrateCode = "10" }, true},
 		{"blank cannot become NA", func(s *ReefCheckSurveySubmission) { s.SubstratePoints[0].SubstrateCode = "" }, false},
 		{"duplicate position", func(s *ReefCheckSurveySubmission) { s.SubstratePoints[1] = s.SubstratePoints[0] }, false},
 		{"missing position", func(s *ReefCheckSurveySubmission) { s.SubstratePoints = s.SubstratePoints[:159] }, false},

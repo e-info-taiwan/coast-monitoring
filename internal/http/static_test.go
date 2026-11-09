@@ -174,7 +174,7 @@ func TestVolunteerFormUsesV18EntryRules(t *testing.T) {
 	app := string(appBody)
 	catalog := string(catalogBody)
 	for _, want := range []string{
-		"if(t==='0')return 'OT'",
+		"if(t==='0'||t==='10')return 'OT';",
 		"HC-${t.toLowerCase()}",
 		"fish_length_mode:k==='fish'&&state.fishLengthMode?state.fishLengthMode:undefined",
 		"r.group==='trash'||r.group==='coral_damage'",
@@ -191,8 +191,5 @@ func TestVolunteerFormUsesV18EntryRules(t *testing.T) {
 		if !strings.Contains(catalog, want) {
 			t.Fatalf("volunteer catalog missing v1.8 rule %q", want)
 		}
-	}
-	if strings.Contains(app, "/^(?:[1-9]|10)$/") {
-		t.Fatal("volunteer app still accepts legacy numeric 10 as new OT input")
 	}
 }

@@ -10,7 +10,7 @@ import (
 // imports must identify their source convention before interpreting numeric codes.
 func NormalizeEntrySubstrate(code string) string {
 	code = strings.ToUpper(strings.TrimSpace(code))
-	aliases := map[string]string{"0": "OT", "1": "HC", "2": "SC", "3": "RKC", "4": "NIA", "5": "SP", "6": "RC", "7": "RB", "8": "SD", "9": "SI", "A": "HC-a", "B": "HC-b", "C": "HC-c", "HC-A": "HC-a", "HC-B": "HC-b", "HC-C": "HC-c", "-": "NA", "SI(SI)": "SI"}
+	aliases := map[string]string{"0": "OT", "10": "OT", "1": "HC", "2": "SC", "3": "RKC", "4": "NIA", "5": "SP", "6": "RC", "7": "RB", "8": "SD", "9": "SI", "A": "HC-a", "B": "HC-b", "C": "HC-c", "HC-A": "HC-a", "HC-B": "HC-b", "HC-C": "HC-c", "-": "NA", "SI(SI)": "SI"}
 	if c, ok := aliases[code]; ok {
 		return c
 	}

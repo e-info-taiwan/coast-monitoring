@@ -93,9 +93,9 @@ func TestReefCheckSubmissionValidatesNewEntryContract(t *testing.T) {
 		t.Fatalf("per-point bleaching accepted for non-coral substrate: %v", err)
 	}
 	badNumericAlias := base()
-	badNumericAlias.SubstratePoints[0].SubstrateCode = "10"
+	badNumericAlias.SubstratePoints[0].SubstrateCode = "11"
 	if err := badNumericAlias.Validate(); !errors.Is(err, ErrValidation) {
-		t.Fatalf("new-entry numeric alias 10 accepted: %v", err)
+		t.Fatalf("invalid new-entry numeric alias 11 accepted: %v", err)
 	}
 
 	pendingFishMode := base()
