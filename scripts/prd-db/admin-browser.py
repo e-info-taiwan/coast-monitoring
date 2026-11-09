@@ -69,7 +69,7 @@ def check_substrate_board(page):
         ]
     expect(rows.first.locator("td").nth(1)).to_have_text("6")
     expect(rows.first.locator("td").nth(3)).to_have_text("NA")
-    expect(rows.first.locator("td").nth(5)).to_have_text("—")
+    expect(rows.first.locator("td").nth(7)).to_have_text("—")
     expect(rows.last.locator("td").last).to_have_text("0")
     expect(down.locator("tbody td").nth(1)).to_have_text("1")
 
