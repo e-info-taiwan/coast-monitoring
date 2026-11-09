@@ -340,8 +340,7 @@ func metadata(d *eventData) (weather string, air, lat, lon any) {
 	return
 }
 func inputToken(code string) any {
-	codes := map[string]string{"HC": "1", "SC": "2", "RKC": "3", "NIA": "4", "SP": "5", "RC": "6", "RB": "7", "SD": "8", "SI": "9", "OT": "0", "HC-a": "a", "HC-b": "b", "HC-c": "c", "SI(HC)": "91", "SI(SC)": "92", "SI(RKC)": "93", "SI(NIA)": "94", "SI(SP)": "95", "SI(RC)": "96", "SI(RB)": "97", "SI(SD)": "98", "SI(HC-a)": "9a", "SI(HC-b)": "9b", "SI(HC-c)": "9c"}
-	if v, ok := codes[code]; ok {
+	if v, ok := pointTokens[code]; ok {
 		if n, e := strconv.Atoi(v); e == nil {
 			return n
 		}
@@ -453,6 +452,7 @@ func lineTemplate(d *eventData) ([]byte, error) {
 		}
 		s.set(column(col)+strconv.Itoa(offset+15), inputToken(p.Code))
 	}
+	s.set("Q11", inputToken("OT"))
 	for i, morph := range []string{"a", "b", "c"} {
 		row := 23 + i
 		s.set("Q"+strconv.Itoa(row), "9"+morph)
@@ -1029,7 +1029,7 @@ func sortedEvents(details []service.ReefDataDetail) []*eventData {
 	return out
 }
 
-var pointTokens = map[string]string{"HC": "1", "SC": "2", "RKC": "3", "NIA": "4", "SP": "5", "RC": "6", "RB": "7", "SD": "8", "SI": "9", "OT": "0", "HC-a": "a", "HC-b": "b", "HC-c": "c", "SI(HC)": "91", "SI(SC)": "92", "SI(RKC)": "93", "SI(NIA)": "94", "SI(SP)": "95", "SI(RC)": "96", "SI(RB)": "97", "SI(SD)": "98", "SI(HC-a)": "9a", "SI(HC-b)": "9b", "SI(HC-c)": "9c"}
+var pointTokens = map[string]string{"HC": "1", "SC": "2", "RKC": "3", "NIA": "4", "SP": "5", "RC": "6", "RB": "7", "SD": "8", "SI": "9", "OT": "10", "HC-a": "a", "HC-b": "b", "HC-c": "c", "SI(HC)": "91", "SI(SC)": "92", "SI(RKC)": "93", "SI(NIA)": "94", "SI(SP)": "95", "SI(RC)": "96", "SI(RB)": "97", "SI(SD)": "98", "SI(HC-a)": "9a", "SI(HC-b)": "9b", "SI(HC-c)": "9c"}
 
 func segmentRanges(seg int) (string, string) {
 	return fmt.Sprintf("%s15:%s34", column(seg*4+2), column(seg*4+2)), fmt.Sprintf("%s15:%s34", column(seg*4+4), column(seg*4+4))

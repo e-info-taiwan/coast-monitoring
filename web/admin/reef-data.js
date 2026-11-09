@@ -422,30 +422,65 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
  return `<input class="rd-number" type="text" inputmode="decimal" data-kind="${kind}" data-id="${row.id}" aria-label="${esc(label)}" value="${na?"NA":esc(value)}" min="0" ${max != null ? `max="${max}"` : ""} step="${integer ? "1" : "any"}" required>`
   }
 
+  function substrateBoard(points, layer) {
+    const starts = [0, 25, 50, 75]
+    const layerName = layer === "surface" ? "表層" : "下層"
+    const cells = new Map(points.map(p => [`${p.segment}:${p.position_m}`, p]))
+    const codes = new Map(s.codes.map(c => [c.code, c]))
+    const letterTokens = { "HC-a": "a", "HC-b": "b", "HC-c": "c", "SI(HC-a)": "9a", "SI(HC-b)": "9b", "SI(HC-c)": "9c" }
+
+    function token(code) {
+      if (code === "NA") return "NA"
+      return letterTokens[code] ?? codes.get(code)?.numeric_code ?? code
+    }
+
+    function reading(point) {
+      const code = point.substrate_code
+      const label = `${layerName}第 ${point.segment} 段 ${point.position_m} m 底質`
+      if (s.editing) {
+        const available = s.codes.filter(c => c.is_active || c.code === code).map(c => c.code)
+        if (!codes.has(code)) available.push(code)
+        return `<select data-kind="point" data-id="${esc(point.id)}" aria-label="${esc(label)}">${available.map(c => {
+          const mark = token(c)
+          return `<option value="${esc(c)}" ${c === code ? "selected" : ""}>${esc(mark === c ? c : mark + " " + c)}</option>`
+        }).join("")}</select>`
+      }
+      const desc = [code, codes.get(code)?.name_zh].filter(Boolean).join(" · ")
+      return `<span title="${esc(desc)}" aria-label="${esc(label + "：" + desc)}">${esc(token(code))}</span>`
+    }
+
+    const rows = Array.from({ length: 20 }, (_, row) => {
+      const pairs = starts.flatMap((start, i) => [start, start + 10].map(columnStart => {
+        const position = columnStart + row * 0.5
+        const key = `${i + 1}:${position}`
+        const point = cells.get(key)
+        cells.delete(key)
+        return `<td class="rd-distance">${position}</td><td>${point ? reading(point) : '<span class="rd-missing" aria-label="無點位資料">—</span>'}</td>`
+      }))
+      return `<tr>${pairs.join("")}</tr>`
+    })
+    // Historical observations outside the printed positions must remain accessible for editing.
+    const extra = [...cells.values()]
+    return `<div class="rd-table-scroll" role="region" tabindex="0" aria-label="${layerName}底質手板">
+      <table class="rd-board" aria-label="${layerName}逐點底質">
+        ${starts.map(() => '<colgroup span="4"></colgroup>').join("")}
+        <thead><tr>${starts.map((start, i) => `<th colspan="4" scope="colgroup">第 ${i + 1} 段<small>${start}–${start + 19.5} m</small></th>`).join("")}</tr>
+        <tr>${starts.map(() => '<th scope="col">m</th><th scope="col">底質</th>'.repeat(2)).join("")}</tr></thead>
+        <tbody>${rows.join("")}</tbody>
+      </table></div>
+      ${extra.length ? table(["表外點位", "距離（m）", "底質"], extra.map(p => `<tr><td>第 ${esc(p.segment)} 段</td><td>${esc(p.position_m)}</td><td>${reading(p)}</td></tr>`).join("")) : ""}`
+  }
+
   function line(t) {
     const layers = [...new Set(t.points.map(p => p.substrate_layer))]
     const html = layers.map(layer => {
       const selected=t.points.filter(p=>p.substrate_layer===layer)
       const summary={recorded:selected.length,valid:selected.filter(p=>p.substrate_code!=="NA").length,unknown:selected.filter(p=>p.substrate_code==="NA").length,rows:layer==="surface"?(t.summaries?.substrate||[]):[]}
-      const points = t.points.filter(p => p.substrate_layer === layer)
       return `
         <section class="rd-section">
           <h3>逐點底質 · ${layer === "surface" ? "表層（含泥沙複合代碼）" : "下層"}</h3>
           <p class="meta-line">${summary.recorded} 個位置 · ${summary.valid} 個有效觀測 · ${summary.unknown} 個 NA（未記錄／未知）。NA 不列入覆蓋率分母；OT 為其他。</p>
-          <div class="rd-line-grid">
-            ${[1, 2, 3, 4].map(segment => `
-              <details ${segment === 1 ? "open" : ""}>
-                <summary>第 ${segment} 段 · ${(segment - 1) * 25}–${(segment - 1) * 25 + 19.5}m</summary>
-                <div class="rd-points">
-                  ${points.filter(p => p.segment === segment).map(p => `
-                    <label>${p.position_m}m
-                      ${s.editing ? `<select data-kind="point" data-id="${p.id}" aria-label="${esc(layer)} ${p.position_m}m 底質">${s.codes.filter(c => c.is_active || c.code === p.substrate_code).map(c => `<option value="${esc(c.code)}" ${c.code === p.substrate_code ? "selected" : ""}>${c.numeric_code} ${esc(c.code)}</option>`).join("")}</select>` : `<strong class="${p.substrate_code === "NA" ? "rd-unknown" : ""}">${esc(p.substrate_code)}</strong>`}
-                    </label>
-                  `).join("") || '<p>未記錄</p>'}
-                </div>
-              </details>
-            `).join("")}
-          </div>
+          ${substrateBoard(selected, layer)}
           <details class="rd-summary">
             <summary>底質統計（已儲存資料）</summary>
             ${summary.rows.length ? table(["底質", "合計點數", "覆蓋率", "平均段覆蓋率", "SD", "SE", "有效段數"], summary.rows.map(r => `<tr><th scope="row">${esc(r.code)}</th><td>${number(r.total)}</td><td>${percent(r.coverage_percent)}</td><td>${percent(r.mean)}</td><td>${number(r.sd)}</td><td>${number(r.se)}</td><td>${r.n}/4</td></tr>`).join("")) : '<p>此層不提供覆蓋率統計；正式統計僅使用表層 canonical 位置。</p>'}
@@ -457,13 +492,40 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
 
     return `
       ${html || '<p>未記錄逐點底質。</p>'}
-      <section class="rd-section">
-        <h3>底質白化</h3>
-        ${(t.derived_bleaching || []).length ? table(["子樣區", "HC 逐格白化點數（自動）", "SC 逐格白化點數（自動）"], t.derived_bleaching.map(r => `<tr><th>S${r.segment}</th><td>${number(r.derived_hc_bleached_point_count)}</td><td>${number(r.derived_sc_bleached_point_count)}</td></tr>`).join('')) : ''}
-        ${t.bleaching.length ? table(["段落", "HC 白化點數", "HC 白化率", "SC 白化點數", "SC 白化率"], t.bleaching.map(r => `<tr><th scope="row">S${r.segment}</th><td>${numericInput("hc", r, r.hc_bleached_count, `S${r.segment} HC 白化點數`, 40)}</td><td>${percent(r.hc_percent)}</td><td>${numericInput("sc", r, r.sc_bleached_count, `S${r.segment} SC 白化點數`, 40)}</td><td>${percent(r.sc_percent)}</td></tr>`).join("")) : '<p>未記錄白化點數。</p>'}
-        <p class="meta-line">白化率依已儲存的表層 HC／SC 點數計算；分母為零時顯示無法計算。</p>
-      </section>
+      ${bleachingSection(t)}
     `
+  }
+
+  function bleachingSection(t) {
+    const pointMarks = t.point_marks
+    const records = pointMarks ? t.derived_bleaching || [] : t.bleaching
+    const bySegment = new Map(records.map(row => [row.segment, row]))
+    function cells(row, kind) {
+      const label = kind.toUpperCase()
+      const count = pointMarks ? row[`derived_${kind}_bleached_point_count`]
+        : row[`${kind}_record_status`] === "not_recorded" ? null : row[`${kind}_bleached_count`]
+      const total = row[`${kind}_points`]
+      const rate = row[`${kind}_percent`]
+      const unknown = pointMarks ? (total == null ? "無有效底質點" : "白化標記未齊") : "未記錄白化點數"
+      const displayCount = pointMarks ? (count == null ? unknown : number(count))
+        : numericInput(kind, row, count, `S${row.segment} ${label} 白化點數`, 40)
+      let displayRate
+      if (count == null) displayRate = unknown
+      else if (total == null) displayRate = "無有效底質點"
+      else if (total === 0) displayRate = `無表層 ${label} 點`
+      else displayRate = `${percent(rate)}（${number(count)}／${number(total)}）`
+      return `<td>${displayCount}</td><td>${displayRate}</td>`
+    }
+
+    const rows = [1, 2, 3, 4].map(segment => {
+      const row = bySegment.get(segment)
+      return `<tr><th scope="row">S${segment}</th>${row ? cells(row, "hc") + cells(row, "sc") : '<td colspan="4">本段未記錄</td>'}</tr>`
+    })
+    return `<section class="rd-section" aria-label="底質白化">
+      <h3>底質白化</h3>
+      <p class="meta-line">${pointMarks ? "依逐格白化標記自動統計。" : "依各段填報的白化總點數計算。"}白化率為該段白化點數除以同類表層珊瑚點數；硬珊瑚（HC）含 a、b、c 分型。</p>
+      ${table(["段落", "HC 白化點數", "HC 白化率", "SC 白化點數", "SC 白化率"], rows.join(""))}
+    </section>`
   }
 
   function percent(v) {

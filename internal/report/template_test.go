@@ -21,6 +21,9 @@ func templateFixture() service.ReefDataDetail {
 			if i < n {
 				code = "HC-c"
 			}
+			if seg == 2 && i == 22 { // 61 m, right column of the third segment
+				code = "OT"
+			}
 			line.Points = append(line.Points, service.ReefDataPoint{Segment: seg + 1, Position: float64(seg*25) + float64(i)/2, Layer: "surface", Code: code})
 		}
 	}
@@ -69,6 +72,9 @@ func TestReferenceTemplateWorkbooks(t *testing.T) {
 			}
 			if kind == "line" {
 				data := cells(t, files["xl/worksheets/sheet1.xml"])
+				if data["L17"].Number != "10" || data["Q11"].Number != "10" || data["F56"].Number != "1" {
+					t.Fatal("OT handboard value, legend or segment count wrong", data["L17"], data["Q11"], data["F56"])
+				}
 				if data["C1"].Text != "測試海岸" || data["C2"].Number != "5" {
 					t.Fatal("line metadata wrong")
 				}

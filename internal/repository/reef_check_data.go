@@ -127,19 +127,40 @@ func (r ReefDataRepository) Transect(ctx context.Context, id int, lock bool) (se
 		}
 	}
 	var raw []byte
-	err := r.db.QueryRow(ctx, `SELECT jsonb_build_object(
+	err := r.db.QueryRow(ctx, `WITH source AS (
+ SELECT t.*, COALESCE(e.submission_snapshot @> '{"format":"reefcheck-web-v4","bleaching_mode":"point_marks"}',false) AS point_marks
+ FROM transect t JOIN event e ON e.event_id=t.event_id WHERE t.id=$1
+ ), denominators AS (
+ SELECT segment, count(*) FILTER (WHERE substrate_code IN ('HC','HC-a','HC-b','HC-c')) AS hc_points,
+ count(*) FILTER (WHERE substrate_code='SC') AS sc_points
+ FROM substrate_point WHERE transect_id=$1 AND substrate_layer='surface' AND substrate_code<>'NA' GROUP BY segment
+ ) SELECT jsonb_build_object(
  'id',t.id,'event_id',t.event_id,'method',t.method,'fish_length_mode',t.fish_size_mode,'start_time',t.start_time,
  'water_temp_c',t.water_temp_c,'visibility_min_m',t.visibility_min_m,'visibility_max_m',t.visibility_max_m,
  'comments',t.comments,'rkc_bleaching_note',t.rkc_bleaching_note,
  'other_damage_note',t.other_damage_note,'coral_morphology',t.coral_morphology,
- 'derived_bleaching',COALESCE((SELECT jsonb_agg(to_jsonb(b) ORDER BY b.segment) FROM substrate_bleaching_point_summary b WHERE b.transect_id=t.id),'[]'::jsonb),
+ 'point_marks',t.point_marks,
+ 'derived_bleaching',COALESCE((SELECT jsonb_agg(to_jsonb(b)||jsonb_build_object(
+   'hc_points',d.hc_points,'sc_points',d.sc_points,
+   'hc_percent',100.0*b.derived_hc_bleached_point_count/NULLIF(d.hc_points,0),
+   'sc_percent',100.0*b.derived_sc_bleached_point_count/NULLIF(d.sc_points,0),
+   'derived_hc_bleached_point_count',CASE WHEN d.segment IS NOT NULL THEN b.derived_hc_bleached_point_count END,
+   'derived_sc_bleached_point_count',CASE WHEN d.segment IS NOT NULL THEN b.derived_sc_bleached_point_count END) ORDER BY b.segment)
+   FROM substrate_bleaching_point_summary b LEFT JOIN denominators d USING(segment)
+   WHERE t.point_marks AND b.transect_id=t.id),'[]'::jsonb),
  'fish_size_mode',t.fish_size_mode,'classify_hard_coral',t.classify_hard_coral,'points',COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.substrate_layer,p.position_m,p.id) FROM substrate_point p WHERE p.transect_id=t.id),'[]'::jsonb),
  'summaries',jsonb_build_object('substrate',COALESCE((SELECT jsonb_agg(to_jsonb(s)) FROM substrate_summary s WHERE s.transect_id=t.id),'[]'::jsonb),'belt',COALESCE((SELECT jsonb_agg(to_jsonb(s)) FROM belt_summary s WHERE s.transect_id=t.id),'[]'::jsonb),'impact',COALESCE((SELECT jsonb_agg(to_jsonb(s)) FROM impact_summary s WHERE s.transect_id=t.id),'[]'::jsonb)),
- 'bleaching',COALESCE((SELECT jsonb_agg(to_jsonb(b)||jsonb_build_object('hc_percent',CASE WHEN b.hc_record_status='recorded' THEN 100.0*b.hc_bleached_count/NULLIF((SELECT s.category_points FROM substrate_segment_summary s WHERE s.transect_id=t.id AND s.segment=b.segment AND s.code='HC'),0) END,'sc_percent',CASE WHEN b.sc_record_status='recorded' THEN 100.0*b.sc_bleached_count/NULLIF((SELECT s.category_points FROM substrate_segment_summary s WHERE s.transect_id=t.id AND s.segment=b.segment AND s.code='SC'),0) END) ORDER BY b.segment,b.id) FROM substrate_bleaching b WHERE b.transect_id=t.id),'[]'::jsonb),
+ 'bleaching',COALESCE((SELECT jsonb_agg(to_jsonb(b)||jsonb_build_object(
+   'hc_points',d.hc_points,'sc_points',d.sc_points,
+   'hc_record_status',CASE WHEN b.hc_bleached_count IS NULL THEN 'not_recorded' ELSE b.hc_record_status END,
+   'sc_record_status',CASE WHEN b.sc_bleached_count IS NULL THEN 'not_recorded' ELSE b.sc_record_status END,
+   'hc_percent',CASE WHEN b.hc_record_status='recorded' THEN 100.0*b.hc_bleached_count/NULLIF(d.hc_points,0) END,
+   'sc_percent',CASE WHEN b.sc_record_status='recorded' THEN 100.0*b.sc_bleached_count/NULLIF(d.sc_points,0) END) ORDER BY b.segment,b.id)
+   FROM substrate_bleaching b LEFT JOIN denominators d USING(segment) WHERE b.transect_id=t.id),'[]'::jsonb),
  'belt',COALESCE((SELECT jsonb_agg(to_jsonb(b)||jsonb_build_object('taxon_group',x.taxon_group,'name_zh',x.name_zh,'name_en',COALESCE(x.name_en,''),'size_class',COALESCE(x.size_class,''),'is_aggregate',x.is_aggregate) ORDER BY x.sort_order,x.id,b.segment,b.id) FROM belt_observation b JOIN taxon x ON x.id=b.taxon_id WHERE b.transect_id=t.id),'[]'::jsonb),
  'impacts',COALESCE((SELECT jsonb_agg(to_jsonb(i)||jsonb_build_object('impact_group',x.impact_group,'name_zh',x.name_zh,'name_en',COALESCE(x.name_en,''),'value_type',COALESCE(i.source_unit,x.value_type::text),'has_raw_count',CASE WHEN i.source_unit IS NULL THEN x.has_raw_count ELSE i.source_unit='count' END) ORDER BY x.sort_order,x.id,i.segment,i.id) FROM impact_observation_with_level i JOIN impact_type x ON x.id=i.impact_type_id WHERE i.transect_id=t.id),'[]'::jsonb),
   'participants',COALESCE((SELECT jsonb_agg(to_jsonb(p)||jsonb_build_object('name_zh',COALESCE(d.name_zh,''),'name_en',COALESCE(d.name_en,''),'reef_check_code',COALESCE(d.reef_check_code,''),'user_id',COALESCE(p.user_id,d.user_id),'user_email',COALESCE(u.email,''),'user_name',COALESCE(u.name,'')) ORDER BY p.role,p.id) FROM transect_participant p JOIN diver d ON d.id=p.diver_id LEFT JOIN users u ON u.id=COALESCE(p.user_id,d.user_id) WHERE p.transect_id=t.id),'[]'::jsonb))
-  FROM transect t WHERE t.id=$1 AND t.event_id IS NOT NULL`, id).Scan(&raw)
+  FROM source t`, id).Scan(&raw)
 	if err != nil {
 		return t, translateError(err)
 	}
