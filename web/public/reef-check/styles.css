@@ -137,3 +137,12 @@
 .review-detail>h3{margin:18px 18px 0;font-size:21px;color:var(--teal)}
 .bleaching-summary tr[data-summary-kind="bleached"] th{font-weight:500;background:#f5f9f8}
 .review-mode-tabs button{white-space:normal;padding:10px 8px;min-height:52px}
+.table-scroll.belt-scroll{position:relative;isolation:isolate;max-height:70vh;max-height:70dvh;overflow:auto;margin:0 18px 18px;padding:0 0 12px;border:1px solid #91bdb9;border-radius:6px;scroll-padding-top:80px;-webkit-overflow-scrolling:touch}
+.belt-scroll .belt-table{min-width:640px;border:0}
+.belt-scroll .belt-table thead th{position:sticky;top:0;z-index:3;box-shadow:0 2px 0 #659f9b}
+.belt-scroll .belt-table thead th:first-child{left:0;z-index:4}
+.belt-scroll .belt-table .row-label{position:sticky;left:0;z-index:2}
+.review-submit-actions,.review-submit-actions .right{flex-wrap:wrap}
+.review-submit-actions .right{justify-content:flex-end}
+#review-issues{scroll-margin-top:100px}
+@media(max-width:580px){.table-scroll.belt-scroll{margin:0 10px 16px}.review-submit-actions>.right{width:100%;display:grid;grid-template-columns:1fr}.review-submit-actions .right .button{width:100%;min-height:48px}}

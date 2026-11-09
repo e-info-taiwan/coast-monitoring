@@ -1242,11 +1242,24 @@ func (r ReefDataRepository) Config(ctx context.Context) (service.ReefCheckConfig
 	if err != nil {
 		return service.ReefCheckConfig{}, err
 	}
+	var boardJSON []byte
+	if err := r.db.QueryRow(ctx, `SELECT jsonb_build_object(
+ 'format','reefcheck-web-v4',
+ 'taxa',(SELECT jsonb_agg(to_jsonb(x)||jsonb_build_object('entry_row_id',b.row_id) ORDER BY x.sort_order,x.id) FROM reef_entry_required_taxon b JOIN taxon x ON x.id=b.taxon_id WHERE b.template_format='reefcheck-web-v4'),
+ 'impacts',(SELECT jsonb_agg(to_jsonb(x)||jsonb_build_object('entry_row_id',b.row_id) ORDER BY x.sort_order,x.id) FROM reef_entry_required_impact b JOIN impact_type x ON x.id=b.impact_type_id WHERE b.template_format='reefcheck-web-v4')
+)`).Scan(&boardJSON); err != nil {
+		return service.ReefCheckConfig{}, err
+	}
+	var entryBoard service.ReefCheckEntryBoard
+	if err := json.Unmarshal(boardJSON, &entryBoard); err != nil {
+		return service.ReefCheckConfig{}, err
+	}
 	return service.ReefCheckConfig{
-		Sites:   sites,
-		Codes:   codes,
-		Taxa:    taxa,
-		Impacts: impacts,
+		Sites:      sites,
+		Codes:      codes,
+		Taxa:       taxa,
+		Impacts:    impacts,
+		EntryBoard: &entryBoard,
 	}, nil
 }
 

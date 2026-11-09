@@ -13,6 +13,28 @@ function defaultSegment(){return window.innerWidth<=1366?1:0;}
 let records = readRecords(), state = fresh(), step = 0, sheet = 'line', segment = defaultSegment(), reviewSegment = defaultSegment(), layer = 'surface', linePage = 0, reviewGroup = 0, reviewMode = 'raw';
 let timer, storageFailed = false, lastCell = null, saving = false;
 let currentUser = null, csrfToken = '', submitError = null;
+let submitFailureKind='',entryBoardStatus=DEBUG||window.location.protocol==='file:'?'local':'loading';
+function entryBoardIssue(){return entryBoardStatus==='ready'||entryBoardStatus==='local'?'':entryBoardStatus==='loading'?'正在載入手板設定，請稍候再繼續。':'無法取得相符的手板設定，請重新載入；不要先補 0 或送出。';}
+function entryBoardNotice(){const issue=entryBoardIssue();return issue?`<aside class="callout warning" role="status"><div><b>${esc(issue)}</b>${entryBoardStatus==='error'?button('重新載入手板設定','refresh-entry-board','','small'):''}</div></aside>`:'';}
+function applyEntryBoard(board){
+  if(board?.format!=='reefcheck-web-v4'||!Array.isArray(board.taxa)||!Array.isArray(board.impacts))throw Error('Unsupported entry board');
+  const expected={fish:14,invert:14,rare:3};
+  for(const [k,n] of Object.entries(expected)){
+    const rows=board.taxa.filter(r=>r.taxon_group===k);
+    if(rows.length!==n||rows.some(r=>!r.is_active||r.is_aggregate||!r.name_en||!/^\d+$/.test(r.entry_row_id))||new Set(rows.map(r=>r.entry_row_id)).size!==n)throw Error('Incomplete entry board');
+  }
+  if(board.impacts.length!==9||board.impacts.some(r=>!r.is_active||!r.name_en||!/^\d+$/.test(r.entry_row_id))||new Set(board.impacts.map(r=>r.entry_row_id)).size!==9)throw Error('Incomplete impact board');
+  for(const k of Object.keys(expected))C[k]=board.taxa.filter(r=>r.taxon_group===k).map(r=>[r.name_en,r.name_zh||r.name_en,r.size_class||'',r.entry_row_id]);
+  C.impact=board.impacts.map(r=>[r.name_en,r.name_zh||r.name_en,r.has_raw_count?'count':r.value_type,r.impact_group,r.entry_row_id]);
+  entryBoardStatus='ready';
+}
+async function refreshEntryBoard(){
+  if(DEBUG||window.location.protocol==='file:')return;
+  entryBoardStatus='loading';
+  try{const response=await fetch('/api/public/reef-check/config',{credentials:'include'});if(!response.ok)throw Error('Board unavailable');applyEntryBoard((await response.json()).entry_board);}
+  catch{entryBoardStatus='error';}
+  render();
+}
 let activityBusy=false;
 const removedLocalIDs=new Set();
 let environmentPreview={key:'',status:'idle',data:null},environmentVersion=0,environmentDraft='';
@@ -39,12 +61,13 @@ function migrateRecord(record){
   for(const k of ['weather','airTemperature','latitude','longitude'])if(record.meta[k]===undefined)record.meta[k]='';
   record.notApplicable={fish:[],invert:[],rare:[],impact:[],...(record.notApplicable||{})};
   for(const k of ['fish','invert','rare','impact'])if(!Array.isArray(record.notApplicable[k]))record.notApplicable[k]=[];
+  for(const k of ['fish','invert']){if(record.notApplicable[k].length)record.ack=false;record.notApplicable[k]=[];}
   return record;
 }
 function readRecords(){try{const data=JSON.parse(localStorage.getItem(KEY)||'[]');return Array.isArray(data)?data.filter(x=>x?.id&&Array.isArray(x.methods)&&x.meta&&x.line&&x.custom).map(migrateRecord):[];}catch{return [];}}
 function persist(change=true){
   if(removedLocalIDs.has(state.id))return;
-  if(change){state.status='draft';state.ack=false;delete state.simulatedSave;delete state.dbSave;}
+  if(change){state.status='draft';state.ack=false;submitError=null;submitFailureKind='';delete state.simulatedSave;delete state.dbSave;}
   state.step=step;state.updated=new Date().toISOString();
   const i=records.findIndex(x=>x.id===state.id);
   if(i<0)records.push(structuredClone(state));else records[i]=structuredClone(state);
@@ -90,6 +113,7 @@ function render(){
   $('#main').innerHTML=(DEBUG?'<aside class="debug-banner" role="status"><b>測試模式</b><span>可略過必填欄位瀏覽流程；不會送出或寫入資料庫。</span></aside>':'')+page
     .replace('垃圾分級由件數自動換算', '珊瑚損害與垃圾均由件數自動分級')
     .replace('垃圾顯示原始件數', '珊瑚損害與垃圾顯示原始件數');
+  if(step<4&&entryBoardIssue())$('#main').insertAdjacentHTML('afterbegin',entryBoardNotice());
   $('#workflow').inert=saving;$('.topbar').inert=saving;
   updateCounters();
   if(step===1){updateCoordinateFields();void refreshEnvironment();}
@@ -249,18 +273,23 @@ function substrateLegend(down=false){
 }
 function normalizeNumber(v){const t=String(v).trim();return /^(na|-)$/i.test(t)?'NA':t;}
 function validNumber(v,type='count'){const t=normalizeNumber(v);return t==='NA'||t!==''&&/^\d+(?:\.\d+)?$/.test(t)&&Number.isFinite(Number(t))&&Number(t)>=0&&(type==='percent'?Number(t)<=100:Number.isSafeInteger(Number(t)))&&(type!=='level'||Number(t)<=3);}
-function rowsFor(k){const base=k==='fish'?fishRows():C[k].map((r,i)=>({id:String(i),name:r[0],zh:r[1],size:k==='impact'?'':r[2],type:k==='impact'?r[2]:'count',group:k==='impact'?r[3]:k}));return [...base,...(state.custom[k]||[]).map(r=>({...r,size:'',type:'count',group:k}))];}
+function rowsFor(k){const base=k==='fish'?fishRows():C[k].map((r,i)=>({id:String(r[k==='impact'?4:3]??i),name:r[0],zh:r[1],size:k==='impact'?'':r[2],type:k==='impact'?r[2]:'count',group:k==='impact'?r[3]:k}));return [...base,...(state.custom[k]||[]).map(r=>({...r,size:'',type:'count',group:k}))];}
 function fishRows(){
-  const rows=C.fish.map((r,i)=>({id:String(i),name:r[0],zh:r[1],size:r[2],type:'count',group:'fish'}));
+  const rows=C.fish.map((r,i)=>({id:String(r[3]??i),name:r[0],zh:r[1],size:r[2],type:'count',group:'fish'}));
   if(state.fishLengthMode==='combined')return [...rows.filter(r=>r.name!=='Grouper'),{id:'grouper-combined',name:'Grouper',zh:'石斑魚',size:'',type:'count',group:'fish'}];
   return rows.filter(r=>r.name!=='Grouper'||r.size);
 }
-function rowApplicable(k,id){return !(state.notApplicable[k]||[]).includes(id);}
+function rowCanBeExcluded(k){return k==='rare'||k==='impact';}
+function rowApplicable(k,id){return !rowCanBeExcluded(k)||!(state.notApplicable[k]||[]).includes(id);}
 function applicableRows(k){return rowsFor(k).filter(r=>rowApplicable(k,r.id));}
 function excludedRows(k){return rowsFor(k).filter(r=>!rowApplicable(k,r.id));}
+function zeroFillSheets(k){return sheetList().filter(s=>['fish','invert','rare'].includes(s)&&(!k||s===k));}
+function beltCellIsBlank(k,key){return state[k][key]==null||String(state[k][key]).trim()==='';}
+function zeroFillCount(k){return applicableRows(k).reduce((n,r)=>n+starts.filter((_,s)=>beltCellIsBlank(k,`${r.id}:${s+1}`)).length,0);}
 function trashLevel(value){const n=Number(value);return !Number.isFinite(n)||n<0?null:n===0?0:n===1?1:n<=4?2:3;}
 function extraMetaErrors(){
   const e=[],m=state.meta;
+  if(entryBoardIssue())e.push(entryBoardIssue());
   if(!state.activity)e.push('請先驗證活動代碼');
   else if(!state.activity.demo){if(!allowedSites().some(s=>s[2]===m.site))e.push('樣點不在本活動範圍');if(m.date<state.activity.start_date||m.date>state.activity.end_date)e.push('日期不在本活動範圍');}
   if(state.methods.includes('fish')&&!['split','combined'].includes(state.fishLengthMode))e.push('請選擇魚類體長模式');
@@ -280,6 +309,9 @@ function bleachingSummary(){
 }
 function extraEntryIssues(){
   const list=[];
+  if(state.methods.includes('invert'))for(const k of ['rare','impact'])for(const r of excludedRows(k)){
+    if(!state.custom[k]?.some(c=>c.id===r.id))list.push({text:`${sheetName(k)}：${r.zh} 是本版必要項目；請恢復此列，未記錄請填 NA 並說明原因。`,sheet:k});
+  }
   if(state.methods.includes('line')){
     if(state.linePhase!=='complete')list.push({text:'請先完成原始數字核對與白化標記。',sheet:'line'});
     const unmarked=points.find(p=>isBleachableCode(canonical(p))&&pointHealthStatus(p)===null);
@@ -358,9 +390,9 @@ function lineBoard(){
   return lineEntryBoard();
 }
 function bleachTable(){return `<div class="table-scroll"><table class="slate belt-table"><caption>分段白化點數（不是百分比）</caption><thead><tr><th>底質類型</th>${starts.map((_,s)=>`<th>第 ${s+1} 段</th>`).join('')}</tr></thead><tbody>${['HC','SC'].map((code,ci)=>`<tr><th class="row-label">${code} 白化點數</th>${starts.map((_,s)=>`<td><input data-cell="bleach" data-key="${code}:${s+1}" data-order="${ci*4+s}" aria-label="${code} 第 ${s+1} 段白化點數" value="${esc(state.bleach[`${code}:${s+1}`]||'')}" placeholder="·" inputmode="numeric"></td>`).join('')}</tr>`).join('')}</tbody></table></div>`;}
-function beltBoard(k){if(k==='fish'&&!state.fishLengthMode)return `<div class="empty-bleaching"><h3>先選擇魚類體長模式</h3><p>依手板決定分體長或不分體長，才能顯示正確列。</p>${button('返回選擇體長模式','step','data-step="1"','primary')}</div>`;const rows=rowsFor(k),excluded=excludedRows(k).length;return `<div class="board-tools"><span>${k==='impact'?'珊瑚損害與垃圾請填原始件數，系統會換算 0–3 級；百分比填 0–100；未記錄填 NA。':'沒看到請填 0；未記錄填 NA；若這版手板沒有整列，請勾「本手板未列」。'}</span><div class="tool-actions">${k==='impact'?'':button('已確認：空白格皆為 0','zero','data-sheet="'+k+'"','small')}${k==='impact'?button('查看系統分級','impact-help','','small quiet'):''}</div></div>
+function beltBoard(k){if(k==='fish'&&!state.fishLengthMode)return `<div class="empty-bleaching"><h3>先選擇魚類體長模式</h3><p>依手板決定分體長或不分體長，才能顯示正確列。</p>${button('返回選擇體長模式','step','data-step="1"','primary')}</div>`;const rows=rowsFor(k),excluded=excludedRows(k).length;return `<div class="board-tools"><span>${k==='impact'?'珊瑚損害與垃圾請填原始件數，系統會換算 0–3 級；百分比填 0–100；未記錄填 NA。':rowCanBeExcluded(k)?'確實調查但沒發現請填 0；未記錄填 NA；手板沒有的整列可勾「本手板未列」。':'確實調查但沒發現請填 0；未記錄填 NA。送出前可一次確認是否將空格補零。'}</span><div class="tool-actions">${k==='impact'?button('查看系統分級','impact-help','','small quiet'):''}</div></div>
   ${excluded?`<div class="excluded-summary">已標記 ${excluded} 列「本手板未列」；這些列不會產生觀測資料。</div>`:''}
-  <div class="table-scroll"><table class="slate belt-table"><caption>${k==='impact'?'垃圾分級由件數自動換算：0 件＝0、1 件＝1、2–4 件＝2、5 件以上＝3。':k==='rare'?'罕見生物獨立記錄；其他生物請新增具名列。':'依原手板類群與體長分列；合計會自動計算。'}<span class="mobile-note">表格可左右捲動；類群名稱固定在左側。</span></caption><colgroup><col class="row-name"><col><col><col><col><col class="sum-col"></colgroup><thead><tr><th scope="col">${k==='impact'?'項目／單位':'類群／體長'}</th>${starts.map((s,i)=>`<th scope="col">第 ${i+1} 段<small>${s}–${s+20} m</small></th>`).join('')}<th scope="col">${k==='impact'?'合計／換算':'合計'}<small>自動計算</small></th></tr></thead><tbody>${rows.map((r,ri)=>{const applicable=rowApplicable(k,r.id);return `<tr class="${applicable?'':'row-not-applicable'}"><th class="row-label" scope="row">${esc(r.zh)} ${r.size?`<span class="mini-badge">${esc(r.size)}</span>`:''}<small>${esc(r.name)}${k==='impact'?' · '+(r.type==='count'?'原始件數':r.type==='percent'?'%':'分級'):''}</small><label class="row-applicability"><input type="checkbox" data-row-applicability data-sheet="${k}" data-row-id="${r.id}" ${applicable?'':'checked'}> 本手板未列</label></th>${starts.map((_,s)=>{const key=`${r.id}:${s+1}`,v=state[k][key]||'';return `<td><input type="text" inputmode="${r.type==='percent'?'decimal':'numeric'}" autocomplete="off" data-cell="${k}" data-key="${key}" data-type="${r.type}" data-order="${ri*4+s}" aria-label="${esc(r.zh+' '+r.size)} 第 ${s+1} 段${k==='impact'?(r.type==='count'?'原始件數':'百分比'):'數量'}" value="${esc(v)}" placeholder="${applicable?'·':'—'}" ${applicable?'':'disabled'} class="${v&&!validNumber(v,r.type)?'invalid':''}"></td>`;}).join('')}<td class="row-total" data-total-sheet="${k}" data-row-id="${r.id}">—</td></tr>`;}).join('')}</tbody></table></div>
+  <div class="table-scroll belt-scroll" tabindex="0" role="region" aria-label="${sheetName(k)}手板，可上下左右捲動，表頭固定"><table class="slate belt-table"><caption>${k==='impact'?'垃圾分級由件數自動換算：0 件＝0、1 件＝1、2–4 件＝2、5 件以上＝3。':k==='rare'?'罕見生物獨立記錄；其他生物請新增具名列。':'依原手板類群與體長分列；合計會自動計算。'}<span class="mobile-note">表格可上下左右捲動；表頭及類群名稱固定。</span></caption><colgroup><col class="row-name"><col><col><col><col><col class="sum-col"></colgroup><thead><tr><th scope="col">${k==='impact'?'項目／單位':'類群／體長'}</th>${starts.map((s,i)=>`<th scope="col">第 ${i+1} 段<small>${s}–${s+20} m</small></th>`).join('')}<th scope="col">${k==='impact'?'合計／換算':'合計'}<small>自動計算</small></th></tr></thead><tbody>${rows.map((r,ri)=>{const applicable=rowApplicable(k,r.id);return `<tr class="${applicable?'':'row-not-applicable'}"><th class="row-label" scope="row">${esc(r.zh)} ${r.size?`<span class="mini-badge">${esc(r.size)}</span>`:''}<small>${esc(r.name)}${k==='impact'?' · '+(r.type==='count'?'原始件數':r.type==='percent'?'%':'分級'):''}</small>${rowCanBeExcluded(k)?`<label class="row-applicability"><input type="checkbox" data-row-applicability data-sheet="${k}" data-row-id="${r.id}" ${applicable?'':'checked'}> 本手板未列</label>`:''}</th>${starts.map((_,s)=>{const key=`${r.id}:${s+1}`,v=state[k][key]||'';return `<td><input type="text" inputmode="${r.type==='percent'?'decimal':'numeric'}" autocomplete="off" data-cell="${k}" data-key="${key}" data-type="${r.type}" data-order="${ri*4+s}" aria-label="${esc(r.zh+' '+r.size)} 第 ${s+1} 段${k==='impact'?(r.type==='count'?'原始件數':'百分比'):'數量'}" value="${esc(v)}" placeholder="${applicable?'·':'—'}" ${applicable?'':'disabled'} class="${v&&!validNumber(v,r.type)?'invalid':''}"></td>`;}).join('')}<td class="row-total" data-total-sheet="${k}" data-row-id="${r.id}">—</td></tr>`;}).join('')}</tbody></table></div>
   ${k!=='impact'?`<div class="custom-row"><input id="custom-name" aria-label="其他${sheetName(k)}名稱" placeholder="其他${sheetName(k)}：填寫實際名稱" maxlength="80">${button('＋ 新增其他類群','add-custom','data-sheet="'+k+'"','small')}${!rows.some(r=>r.name==='Other')?button('原表只寫 Other','add-unspecified-other','data-sheet="'+k+'"','small quiet'):''}<small>新資料請填實際名稱；只有歷史手板未註明名稱時，才使用 Other。</small></div>${state.custom[k].map(r=>`<div class="custom-row"><span>${r.name==='Other'?'歷史資料：':'其他：'}${esc(r.zh)}</span>${button('修改名稱／移除','edit-custom',`data-sheet="${k}" data-id="${r.id}"`,'small quiet')}</div>`).join('')}`:''}`;}
 function rowSummary(k,r,vals){
   if(!vals.every(v=>validNumber(v,r.type)&&normalizeNumber(v)!=='NA'))return '—';
@@ -400,8 +432,8 @@ function unknownCount(){let n=sheetList().reduce((n,k)=>n+sheetStats(k).na,0);if
 function reviewView(){const list=issues(),total=sheetList().reduce((n,k)=>n+sheetStats(k).total,0),filled=sheetList().reduce((n,k)=>n+sheetStats(k).valid,0);return intro(4,'檢查紀錄','確認氣瓶資訊、段次與每張手板。若原始紀錄缺值，可標記 NA 並說明，交由窗口確認。')+strip()+investigationNotes()+
   `<div class="review-grid"><div class="stat"><b>${methodList().length}</b><small>種探查 · ${sheetList().length} 個手板區段</small></div><div class="stat"><b>${filled}<small>/ ${total} 格通過檢查</small></b></div><div class="stat"><b>${unknownCount()}</b><small>格 NA · 未記錄</small></div></div><section class="panel"><h2>這支氣瓶的記錄</h2>${sheetList().map(k=>{const st=sheetStats(k),excluded=k==='line'?0:excludedRows(k).length;return `<div class="review-row"><div><b>${sheetName(k)} <span class="badge">${st.valid}/${st.total} 格</span></b><p>${k==='line'?'4 段 × 40 點'+(state.mud?' · 含泥下底質':''):applicableRows(k).length+' 個適用項目 × 4 段'}${excluded?' · '+excluded+' 列本手板未列':''} · 記錄者：${esc(state.recorders[k==='rare'||k==='impact'?'invert':k])}${st.na?' · '+st.na+' 格 NA':''}</p></div>${button('回手板檢查','sheet',`data-sheet="${k}"`,'small')}</div>`;}).join('')}<div class="event-preview">氣瓶識別：${esc(eventId())}</div>${finalReviewTables()}</section>
   ${unknownCount()?`<label class="field panel">未記錄原因 <span class="required">必填</span><textarea data-state="missingReason" placeholder="請寫明手板哪一段、哪些位置為何未記錄。">${esc(state.missingReason)}</textarea><small>NA 保留為未知；不當成 0，也不列入底質有效觀測分母。</small></label>`:''}
-  <section id="review-issues">${issueMarkup(list)}</section><label class="check-ack"><input id="acknowledge" type="checkbox" ${state.ack?'checked':''}><span>我已對照原始手板，確認樣點、日期、氣瓶時間、深度、各段數值與逐格白化標記。<br><small>送出後資料會先存為草稿，待活動窗口審核。</small></span></label><div class="actions">${button('← 返回手板','step','data-step="2"')}<div class="right">${button('下載草稿','export-draft','','quiet')}${button(DEBUG?'預覽完成頁':unknownCount()?'送出儲存・標示待確認':'送出儲存','complete','','primary')}</div></div><p id="complete-error" class="form-error" role="alert"></p>`;}
-function issueMarkup(list){return list.length?`<div class="callout warning"><div><b>有 ${list.length} 項需要補充</b><ul class="issue-list">${list.map((x,i)=>`<li><button class="issue-link" data-action="issue" data-index="${i}">${esc(x.text)}</button></li>`).join('')}</ul></div></div>`:`<div class="review-ok">✓ 所選手板的必填格與範圍檢查通過${unknownCount()?'；NA 已附原因，仍需窗口確認':''}。</div>`;}
+  <section id="review-issues">${issueMarkup(list)}</section><label class="check-ack"><input id="acknowledge" type="checkbox" ${state.ack?'checked':''}><span>我已對照原始手板，確認樣點、日期、氣瓶時間、深度、各段數值與逐格白化標記。<br><small>送出後資料會先存為草稿，待活動窗口審核。</small></span></label><div class="actions review-submit-actions">${button('← 返回手板','step','data-step="2"')}<div class="right">${button('下載草稿','export-draft','','quiet')}${zeroFillSheets().length?button('是否將空格都填入零？','zero'):''}${button(DEBUG?'預覽完成頁':unknownCount()?'送出儲存・標示待確認':'送出儲存','complete','','primary')}</div></div><p id="complete-error" class="form-error" role="alert">${submitFailureKind==='validation'&&submitError?esc('伺服器檢查未通過：'+submitError+'。請核對上述手板；這不是網路問題。'):''}</p>`;}
+function issueMarkup(list){const serverError=submitFailureKind==='validation'&&submitError;return (serverError?`<div class="callout warning" role="alert"><div><b>伺服器檢查未通過，尚未儲存</b><p>${esc(submitError)}</p><p>請返回對應手板核對；這不是網路問題，原有數值已保留。</p></div></div>`:'')+(list.length?`<div class="callout warning"><div><b>有 ${list.length} 項需要補充</b><ul class="issue-list">${list.map((x,i)=>`<li><button class="issue-link" data-action="issue" data-index="${i}">${esc(x.text)}</button></li>`).join('')}</ul></div></div>`:serverError?'':`<div class="review-ok">✓ 所選手板的必填格與範圍檢查通過${unknownCount()?'；NA 已附原因，仍需窗口確認':''}。</div>`);}
 function canonical(p){const up=normalizeCode(state.line[p.key]||'');if(up!=='SI'||!state.mud)return up||null;const d=normalizeCode(state.down[p.key]||'');if(d==='SI')return 'SI';if(d==='NA')return 'NA';return validCode(d,true)?`SI(${d})`:null;}
 function reviewValue(value,valid=true){const empty=value===null||value===undefined||value==='';return `<span class="review-value ${empty||!valid?'review-invalid':value==='NA'?'review-na':''}">${esc(empty?'未填':value)}</span>`;}
 function isBleachableCode(code){return code==='SC'||code==='HC'||/^HC-[abc]$/.test(code||'');}
@@ -410,7 +442,7 @@ function bleachMarkerAria(p,status){return `${p.p} m ${status==='bleached'?'已�
 function bleachMarker(p,code){if(!isBleachableCode(code))return '';const status=pointHealthStatus(p),active=status==='bleached';return `<button type="button" class="bleach-marker ${active?'active':''}" data-action="toggle-bleach-point" data-key="${p.key}" data-health-status="${status||''}" aria-pressed="${active}" aria-label="${bleachMarkerAria(p,status)}"><span aria-hidden="true"></span><small>${active?'已標記白化':'點選標記白化'}</small></button>`;}
 function reviewLineCell(p){const code=canonical(p),shown=reviewMode==='raw'?(state.line[p.key]||null):code;return `<div class="review-cell"><span><small>${reviewMode==='raw'?'原始數字':'轉換代碼'}</small>${reviewValue(shown,reviewMode==='raw'?validCode(shown??''):validCode(code??''))}</span>${bleachMarker(p,code)}</div>`;}
 function reviewLineTable(){const group=pointGroups[reviewGroup]||pointGroups[0];return `<div class="final-zoom-list">${group.map(p=>`<div class="final-zoom-row"><b>${p.p} m</b>${reviewLineCell(p)}</div>`).join('')}</div>`;}
-function reviewBeltTable(k){return `<div class="table-scroll" tabindex="0" role="region" aria-label="${sheetName(k)}對照手板，可左右捲動"><table class="slate belt-table"><caption>${sheetName(k)}手板 · 記錄值（唯讀）${k==='impact'?'<small>垃圾顯示原始件數；右欄顯示各段自動分級。</small>':''}</caption><colgroup><col class="row-name"><col><col><col><col><col class="sum-col"></colgroup><thead><tr><th scope="col">${k==='impact'?'項目／單位':'類群／體長'}</th>${starts.map((start,s)=>`<th scope="col">第 ${s+1} 段<small>${start}–${start+20} m</small></th>`).join('')}<th scope="col">${k==='impact'?'合計／換算':'合計'}<small>自動計算</small></th></tr></thead><tbody>${rowsFor(k).map(r=>{const applicable=rowApplicable(k,r.id),vals=starts.map((_,s)=>state[k][`${r.id}:${s+1}`]??''),total=applicable?rowSummary(k,r,vals):'未列';return `<tr class="${applicable?'':'row-not-applicable'}"><th class="row-label" scope="row">${esc(r.zh)} ${r.size?`<span class="mini-badge">${esc(r.size)}</span>`:''}<small>${esc(r.name)}${k==='impact'?' · '+(r.type==='count'?'原始件數':r.type==='percent'?'%':'分級'):''}</small></th>${applicable?vals.map(v=>`<td>${reviewValue(v,validNumber(v,r.type))}</td>`).join(''):`<td colspan="4"><span class="review-value">本手板未列</span></td>`}<td class="row-total">${total}</td></tr>`;}).join('')}</tbody></table></div>`;}
+function reviewBeltTable(k){return `<div class="table-scroll belt-scroll" tabindex="0" role="region" aria-label="${sheetName(k)}對照手板，可上下左右捲動，表頭固定"><table class="slate belt-table"><caption>${sheetName(k)}手板 · 記錄值（唯讀）${k==='impact'?'<small>垃圾顯示原始件數；右欄顯示各段自動分級。</small>':''}</caption><colgroup><col class="row-name"><col><col><col><col><col class="sum-col"></colgroup><thead><tr><th scope="col">${k==='impact'?'項目／單位':'類群／體長'}</th>${starts.map((start,s)=>`<th scope="col">第 ${s+1} 段<small>${start}–${start+20} m</small></th>`).join('')}<th scope="col">${k==='impact'?'合計／換算':'合計'}<small>自動計算</small></th></tr></thead><tbody>${rowsFor(k).map(r=>{const applicable=rowApplicable(k,r.id),vals=starts.map((_,s)=>state[k][`${r.id}:${s+1}`]??''),total=applicable?rowSummary(k,r,vals):'未列';return `<tr class="${applicable?'':'row-not-applicable'}"><th class="row-label" scope="row">${esc(r.zh)} ${r.size?`<span class="mini-badge">${esc(r.size)}</span>`:''}<small>${esc(r.name)}${k==='impact'?' · '+(r.type==='count'?'原始件數':r.type==='percent'?'%':'分級'):''}</small></th>${applicable?vals.map(v=>`<td>${reviewValue(v,validNumber(v,r.type))}</td>`).join(''):`<td colspan="4"><span class="review-value">本手板未列</span></td>`}<td class="row-total">${total}</td></tr>`;}).join('')}</tbody></table></div>`;}
 function reviewLinePanel(){
   return `<div class="review-mode-tabs" role="tablist" aria-label="底質顯示方式"><button type="button" role="tab" aria-selected="${reviewMode==='raw'}" class="${reviewMode==='raw'?'active':''}" data-action="review-mode" data-mode="raw">原始數字</button><button type="button" role="tab" aria-selected="${reviewMode==='canonical'}" class="${reviewMode==='canonical'?'active':''}" data-action="review-mode" data-mode="canonical">轉換代碼（HC／SC）</button></div><p class="raw-board-hint">依手板表格核對所有位置；切換只改變顯示，不更動原始數字、白化標記或統計。空心表示未標記；完成核對後才記為未白化。</p><div role="tabpanel" aria-label="${reviewMode==='raw'?'原始數字':'轉換代碼'}手板">${substrateHandboard(reviewMode,true)}</div><div class="bleach-legend"><span><i class="bleach-dot" aria-hidden="true"></i> 未標記</span><span><i class="bleach-dot active" aria-hidden="true"></i> 已標記白化</span></div>`;
 }
@@ -427,7 +459,7 @@ async function submitRecord(){
 
   // Persist the draft first; reloading during request is recoverable.
   state.status='draft';delete state.simulatedSave;delete state.dbSave;persist(false);
-  saving=true;submitError=null;step=4;render();$('#main').focus();window.scrollTo({top:0});
+  saving=true;submitError=null;submitFailureKind='';step=4;render();$('#main').focus();window.scrollTo({top:0});
 
   try {
     const p = payload(false);
@@ -455,10 +487,14 @@ async function submitRecord(){
         if (errJson.error) errMsg = errJson.error;
       } catch (_) {}
       submitError = errMsg;
+      submitFailureKind = res.status===400||res.status===422?'validation':'server';
+      if(submitFailureKind==='validation'){step=3;state.ack=false;}
       state.status = 'draft';
+      persist(false);
       toast(`儲存未成功：${errMsg}`);
     }
   } catch (err) {
+    submitFailureKind='network';
     submitError = '網路連線失敗，請檢查網路連線後重試。草稿已安全保留在此裝置。';
     state.status = 'draft';
     toast('網路連線失敗，請先下載草稿或稍候重試。');
@@ -467,13 +503,14 @@ async function submitRecord(){
     saving=false;
     render();
     $('#main').focus();
+    if(submitFailureKind==='validation')$('#review-issues').scrollIntoView({block:'start'});
   }
 }
 function completeView(){
   if(DEBUG)return intro(4,'測試流程已走完','這是 Debug Mode 的完成頁預覽；沒有送出或寫入任何資料。')+`<section class="panel success-panel"><div class="success-icon debug-success" aria-hidden="true">✓</div><h2 role="status">完成頁預覽成功</h2><p>正式模式仍會檢查所有必填資料、逐格內容與核對聲明，通過後才會送入資料庫。</p><span class="badge debug-badge">DEBUG · 未儲存</span><div class="actions">${button('返回檢查頁','step','data-step="3"','primary')}${button('回到第一頁','step','data-step="0"')}</div></section>`;
   if(saving)return intro(4,'正在儲存這支氣瓶的記錄…','正在連線伺服器並寫入資料庫，請稍候。')+`<section class="panel success-panel" aria-busy="true"><div class="save-spinner" aria-hidden="true"></div><h2 role="status">資料庫儲存中</h2><p>整理氣瓶資訊、各段觀測與泥下底質代碼，寫入資料庫。<br>請勿關閉頁面或重複送出。</p><span class="badge">正在同步至資料庫</span></section>`;
   
-  if(submitError)return intro(4,'儲存至資料庫未成功','手板資料已完整保存在此瀏覽器，不會遺失。')+`<section class="panel success-panel"><h2 role="alert">未能存入資料庫</h2><p class="form-error" style="margin:1rem 0;font-size:1.05rem;">${esc(submitError)}</p><p>請確認網路連線正常後重試，或先下載草稿 JSON 備份。</p><div class="actions">${button('重新儲存至資料庫','complete','','primary')}${button('下載草稿備份','export-draft')}${button('返回檢查','step','data-step="3"')}</div></section>`;
+  if(submitError)return intro(4,'儲存至資料庫未成功','手板資料已完整保存在此瀏覽器，不會遺失。')+`<section class="panel success-panel"><h2 role="alert">未能存入資料庫</h2><p class="form-error" style="margin:1rem 0;font-size:1.05rem;">${esc(submitError)}</p><p>${submitFailureKind==='network'?'請確認網路連線正常後重試。':'伺服器未完成儲存，請稍後重試或聯絡管理員。'}可先下載草稿 JSON 備份，不必重新填寫。</p><div class="actions">${button('重新儲存至資料庫','complete','','primary')}${button('下載草稿備份','export-draft')}${button('返回檢查','step','data-step="3"')}</div></section>`;
 
   if(storageFailed)return intro(4,'這次還沒有儲存成功。','本機儲存空間或瀏覽器設定可能阻止了儲存。')+`<section class="panel success-panel"><h2 role="alert">請重試，或先下載備份</h2><p>記錄仍在目前頁面中，請先不要關閉。</p><div class="actions">${button('重新儲存','complete','','primary')}${button('下載草稿備份','export-draft')}${button('返回檢查','step','data-step="3"')}</div></section>`;
 
@@ -613,7 +650,7 @@ function deleteLocalRecord(id){
   if(!storageFailed)$('#save-status').classList.remove('storage-warning');toast('已刪除此瀏覽器的本機紀錄；資料庫資料未變更。');
 }
 function openDrafts(){modal('本機草稿與紀錄',`<p>只顯示此瀏覽器儲存的紀錄，不同瀏覽器或裝置不會自動同步。「刪除本機」只移除此瀏覽器的副本，不會刪除已送到資料庫的觀測資料。</p>${records.length?records.slice().reverse().map(r=>`<div class="draft-item"><div>${localRecordSummary(r)}<small>${r.methods.map(k=>C.methods[k].short).join('、')} · ${r.status==='draft'?'草稿':r.status==='needs_review'?'已存・待確認':r.uploaded||r.dbSave?'已存入資料庫':'已完成・本機'}</small></div><div class="draft-actions">${button('開啟','resume',`data-id="${esc(r.id)}"`,'small')}${button('刪除本機','delete-local-record',`data-id="${esc(r.id)}" aria-label="刪除此筆本機紀錄"`,'small danger')}</div></div>`).join(''):'<p>還沒有儲存的紀錄。</p>'}<div class="actions">${button('新增一支氣瓶','new','','primary')}</div>`);}
-function help(){modal('填寫說明',`<ol><li><b>先選探查，再填氣瓶資訊。</b>同一支氣瓶選多種探查，日期、時間、深度與水溫共用；能見度有範圍時填最低與最高，只有一個值時填任一格即可。</li><li><b>底質每次填 5 格：</b>一個子樣區有 40 格。先照手板輸入原始數字，第 5 格填完後不會自動跳轉；請先核對，再按「確認這 5 格，下一組」。系統會先檢查空白與無效代碼。</li><li><b>數字確認後才轉代碼：</b>可用 1–9、0／10、a–c 及 91–98；0、10 與 OT 都會記為 OT，a–c 會保留為 HC-a–HC-c。最後確認可在「原始數字／轉換代碼」切換。</li><li><b>有上下手板：</b>勾選「泥下底質」，切換上／下，依同位置配對。SI(SI) 會記為 SI。</li><li><b>數字確認後逐格標記白化：</b>HC／SC 格會出現圓點；按鈕顯示「點選標記白化」；看到白化時點成實心。完成整張核對並按「完成白化標記」後，其餘珊瑚格才確認為未白化。</li><li><b>Belt 照列填四段。</b>0 表示看過但沒看到；NA 或 - 表示未記錄；舊版手板沒有整列時勾「本手板未列」，不要補成 0。</li><li><b>珊瑚損害與垃圾一律填原始件數。</b>系統依每一段自動換算：0 件＝0 級、1 件＝1 級、2–4 件＝2 級、5 件以上＝3 級。</li><li><b>其他生物優先填實際名稱。</b>只有歷史手板真的只寫 Other 時，才使用「原表只寫 Other」。</li><li><b>檢查確認後存入系統資料庫。</b>若連線中斷仍可本機儲存與下載草稿；NA 需附原因。</li></ol>`);}
+function help(){modal('填寫說明',`<ol><li><b>先選探查，再填氣瓶資訊。</b>同一支氣瓶選多種探查，日期、時間、深度與水溫共用；能見度有範圍時填最低與最高，只有一個值時填任一格即可。</li><li><b>底質每次填 5 格：</b>一個子樣區有 40 格。先照手板輸入原始數字，第 5 格填完後不會自動跳轉；請先核對，再按「確認這 5 格，下一組」。系統會先檢查空白與無效代碼。</li><li><b>數字確認後才轉代碼：</b>可用 1–9、0／10、a–c 及 91–98；0、10 與 OT 都會記為 OT，a–c 會保留為 HC-a–HC-c。最後確認可在「原始數字／轉換代碼」切換。</li><li><b>有上下手板：</b>勾選「泥下底質」，切換上／下，依同位置配對。SI(SI) 會記為 SI。</li><li><b>數字確認後逐格標記白化：</b>HC／SC 格會出現圓點；按鈕顯示「點選標記白化」；看到白化時點成實心。完成整張核對並按「完成白化標記」後，其餘珊瑚格才確認為未白化。</li><li><b>Belt 照列填四段。</b>0 表示看過但沒看到；NA 或 - 表示未記錄；魚類與無脊椎每列都需核對；只有罕見生物與環境衝擊仍可勾「本手板未列」。補零按鈕在最後送出旁，只能用於確實調查但未發現的空格。</li><li><b>珊瑚損害與垃圾一律填原始件數。</b>系統依每一段自動換算：0 件＝0 級、1 件＝1 級、2–4 件＝2 級、5 件以上＝3 級。</li><li><b>其他生物優先填實際名稱。</b>只有歷史手板真的只寫 Other 時，才使用「原表只寫 Other」。</li><li><b>檢查確認後存入系統資料庫。</b>若連線中斷仍可本機儲存與下載草稿；NA 需附原因。</li></ol>`);}
 function setFieldFocus(html){
   const panel=$('#field-focus');if(!panel)return;
   if(!$('#focus-description'))panel.innerHTML=`<span id="focus-description"></span>${button('此格未記錄 NA','mark-na','','small')}`;
@@ -645,7 +682,7 @@ document.addEventListener('change',e=>{
   if(el.name==='method'){state.methods=[...document.querySelectorAll('[name="method"]:checked')].map(x=>x.value);persist();$('#selection-count').textContent=`已選 ${state.methods.length} 種探查`;}
   if(el.name==='fish-length-mode'){state.fishLengthMode=el.value;persist();toast('已切換體長模式；各模式原有數值仍保留於草稿。');}
   if(el.name==='coral-morphology'){state.coralMorphology=el.value;persist();}
-  if(el.hasAttribute('data-row-applicability')){const k=el.dataset.sheet,id=el.dataset.rowId,list=new Set(state.notApplicable[k]||[]);if(el.checked)list.add(id);else list.delete(id);state.notApplicable[k]=[...list];persist();render();toast(el.checked?'已標記為本手板未列，不會產生觀測值。':'已恢復這一列，請填寫四段數值。');}
+  if(el.hasAttribute('data-row-applicability')){const k=el.dataset.sheet,id=el.dataset.rowId;if(!rowCanBeExcluded(k))return;const list=new Set(state.notApplicable[k]||[]);if(el.checked)list.add(id);else list.delete(id);state.notApplicable[k]=[...list];persist();render();toast(el.checked?'已標記為本手板未列，不會產生觀測值。':'已恢復這一列，請填寫四段數值。');}
   if(el.dataset.cell)handleCell(el);
   if(el.dataset.toggle){const k=el.dataset.toggle;if(!el.checked&&(k==='mud'?Object.keys(state.down).length:Object.keys(state.bleach).length)){el.checked=true;modal('關閉這張附表？',`<p>已填的資料會保留在草稿，但關閉期間不會放進完成記錄。重新勾選後可以繼續核對。</p><div class="actions">${button('保留附表','close')}${button('確認關閉','disable-extra',`data-extra="${k}"`,'primary')}</div>`);}else{state[k]=el.checked;persist();render();}}
   if(el.id==='acknowledge'){state.ack=el.checked;persist(false);}
@@ -711,11 +748,12 @@ document.addEventListener('click',e=>{
   else if(a==='next-sheet'){const idx=sheetList().indexOf(sheet);if(idx<sheetList().length-1){sheet=sheetList()[idx+1];go(2);}else go(3);}
   else if(a==='export-draft')download(true);
   else if(a==='export'){if(issues().length){go(3);toast('還有需補充項目，請先檢查或下載草稿。');}else download(false);}
+  else if(a==='refresh-entry-board'){void refreshEntryBoard();}
   else if(a==='complete'){void submitRecord();}
   else if(a==='view-saved'){modal('已儲存的紀錄（資料庫／本機）',`<p>${esc(siteName())} · ${esc(state.meta.date)} · ${esc(state.meta.time)} · ${esc(state.meta.depth)} m</p>${reviewTables()}<div class="actions">${button('關閉','close')}${button('修改這份紀錄','edit-saved','','primary')}</div>`);}
   else if(a==='edit-saved'){$('#modal').close();$('#modal-content').innerHTML='';go(3);}
-  else if(a==='zero'){const k=el.dataset.sheet;if(k==='impact')return;const n=applicableRows(k).reduce((n,r)=>n+starts.filter((_,s)=>!state[k][`${r.id}:${s+1}`]).length,0);modal('確認空白格都是「未發現」',`<p>將${sheetName(k)}手板中適用項目的 ${n} 個空白格填成 0。只適用於確實調查過、但沒有看到的項目。本版手板沒有的整列，請先勾「本手板未列」；未記錄請填 NA。</p><div class="actions">${button('返回核對','close')}${button('確認填 0','confirm-zero',`data-sheet="${k}"`,'primary')}</div>`);}
-  else if(a==='confirm-zero'){const k=el.dataset.sheet;if(k==='impact')return;applicableRows(k).forEach(r=>starts.forEach((_,s)=>{const key=`${r.id}:${s+1}`;if(!state[k][key])state[k][key]='0';}));persist();$('#modal').close();render();}
+  else if(a==='zero'){const sheets=zeroFillSheets(el.dataset.sheet),n=sheets.reduce((sum,k)=>sum+zeroFillCount(k),0);if(!n){toast('沒有可補零的空白格；已填數字及 NA 都保持不變。');return;}modal('是否將空格都填入零？',`<p>將以下手板中適用項目的 <b>${n} 個空白格</b>填成 0：</p><ul>${sheets.filter(k=>zeroFillCount(k)).map(k=>`<li>${sheetName(k)}：${zeroFillCount(k)} 格</li>`).join('')}</ul><p>只適用於確實調查過、但沒有發現的項目。未進行調查或未記錄的格子請返回填 NA，不要補成 0。底質與環境衝擊不會補零；已填數字及 NA 都不會被覆寫。</p><div class="actions">${button('返回核對','close')}${button('確認填 0','confirm-zero',el.dataset.sheet?`data-sheet="${el.dataset.sheet}"`:'','primary')}</div>`);}
+  else if(a==='confirm-zero'){const sheets=zeroFillSheets(el.dataset.sheet),n=sheets.reduce((sum,k)=>sum+zeroFillCount(k),0);if(!n)return;sheets.forEach(k=>applicableRows(k).forEach(r=>starts.forEach((_,s)=>{const key=`${r.id}:${s+1}`;if(beltCellIsBlank(k,key))state[k][key]='0';})));persist();$('#modal').close();render();toast(`已將 ${n} 個空白格補成 0，請重新核對並勾選確認後送出。`);}
   else if(a==='add-custom'){const name=$('#custom-name').value.trim(),k=el.dataset.sheet;if(!name){toast('先填其他生物的實際名稱。');$('#custom-name').focus();return;}if(rowsFor(k).some(r=>r.zh.toLowerCase()===name.toLowerCase())){toast('這個類群已在表格內，請直接填寫原列。');return;}state.custom[k].push({id:'custom-'+Date.now().toString(36),name:`Other: ${name}`,zh:name});persist();render();toast('已新增一列，請填入四段數量。');}
   else if(a==='add-unspecified-other'){const k=el.dataset.sheet;if(rowsFor(k).some(r=>r.name==='Other')){toast('這張手板已有未註明的 Other 列。');return;}state.custom[k].push({id:`legacy-other-${k}`,name:'Other',zh:'其他（原表未註明）',legacy:true});persist();render();toast('已新增歷史 Other 列；請填四段數量。');}
   else if(a==='edit-custom'){const r=state.custom[el.dataset.sheet].find(r=>r.id===el.dataset.id);modal('修改其他類群',`<label class="field">生物名稱<input id="rename-custom" value="${esc(r.zh)}" maxlength="80"></label><p>修改名稱會保留已填數值；移除會一併刪除這一列的四段數值。</p><div class="actions">${button('移除此列','remove-custom',`data-sheet="${el.dataset.sheet}" data-id="${r.id}"`,'danger')}${button('儲存名稱','rename-custom',`data-sheet="${el.dataset.sheet}" data-id="${r.id}"`,'primary')}</div><p id="rename-error" class="form-error" role="alert"></p>`);}
@@ -760,4 +798,5 @@ async function initApp(){
       }
     }
   }catch(_){}
+  await refreshEntryBoard();
 }

@@ -9,24 +9,146 @@ const siteFixtures=[
  {id:2,is_active:true,region:'北海岸',name_zh:'另一樣點',name_en:'OtherSite',latitude:25.1,longitude:121.2},
  {id:3,is_active:true,region:'其他',name_zh:'缺座標樣點',name_en:'NoCoordinates',latitude:null,longitude:null}
 ]
+function boardFixture(w){return {format:'reefcheck-web-v4',taxa:['fish','invert','rare'].flatMap(k=>w.REEF[k].map((r,i)=>({id:i+1,taxon_group:k,name_en:r[0],name_zh:r[1],size_class:r[2]||'',entry_row_id:String(r[3]??i),is_active:true,is_aggregate:false}))),impacts:w.REEF.impact.map((r,i)=>({id:i+1,impact_group:r[3],name_en:r[0],name_zh:r[1],value_type:r[2]==='count'?'level':r[2],has_raw_count:r[2]==='count',entry_row_id:String(r[4]??i),is_active:true}))}}
 function setup({debug=false,local=false}={}){
  const dom=new JSDOM(fs.readFileSync(new URL('index.html',base),'utf8'),{url:(local?'file:///Users/mac/coral/coast-monitoring/web/public/reef-check/index.html':'https://example.invalid/public/reef-check/')+(debug?'?debug=1':''),runScripts:'outside-only'})
  const w=dom.window;w.structuredClone=structuredClone;w.scrollTo=()=>{};w.HTMLElement.prototype.scrollIntoView=()=>{};const requests=[]
  w.fetch=async(path,options)=>{
   if(path==='/api/session')return {ok:false}
   if(path==='/api/public/reef-check/entry-sites')return {ok:true,json:async()=>siteFixtures}
+  if(path==='/api/public/reef-check/config')return {ok:true,json:async()=>({entry_board:boardFixture(w)})}
   if(path==='/api/public/reef-check/entry-environment')return new Promise(resolve=>requests.push({input:JSON.parse(options.body),resolve}))
   throw Error('Unexpected request '+path)
  }
  w.eval(fs.readFileSync(new URL('catalog.js',base),'utf8'))
  w.eval(fs.readFileSync(new URL('app.js',base),'utf8').replace(/\nrender\(\);\ninitApp\(\);/,'\n')+'\nwindow.__entryRun=source=>eval(source);')
  const run=source=>w.__entryRun(source)
+ w.entryBoardFixture=boardFixture(w);run('applyEntryBoard(window.entryBoardFixture)')
  run(`state.activityCode='RC-FIXTURE';state.activity={name:'測試活動',site_ids:[1,2,3],start_date:'2026-11-06',end_date:'2026-11-08'};state.methods=['line'];state.meta.date='2026-11-06';step=1;render();`)
  const input=(selector,value,event='input')=>{const el=w.document.querySelector(selector);assert.ok(el,selector);el.value=value;el.dispatchEvent(new w.Event(event,{bubbles:true}));return el}
  const selectSite=value=>{input('[data-meta="site"]',value);input('[data-meta="site"]',value,'change')}
  return {dom,w,requests,run,input,selectSite}
 }
 const flush=()=>new Promise(resolve=>setTimeout(resolve,0))
+
+test('live entry loads its shared template, retains stable draft row keys and blocks mismatched configuration',async()=>{
+ const f=setup();try{
+  await f.run('initApp()');assert.equal(f.run('entryBoardStatus'),'ready')
+  const board=boardFixture(f.w);board.taxa.reverse();board.impacts.reverse()
+  f.w.reordered=board;f.run(`state.invert['0:1']='7';state.impact['0:1']='2';applyEntryBoard(window.reordered)`)
+  assert.equal(f.run(`rowsFor('invert').find(r=>r.name==='Banded coral shrimp').id`),'0')
+  assert.equal(f.run(`rowsFor('impact').find(r=>r.name==='Coral damage: boat/anchor').id`),'0')
+  assert.equal(f.run(`state.invert[rowsFor('invert').find(r=>r.name==='Banded coral shrimp').id+':1']`),'7')
+  const originalFetch=f.w.fetch
+  f.w.fetch=async p=>p==='/api/public/reef-check/config'?{ok:true,json:async()=>({taxa:[],impacts:[]})}:originalFetch(p)
+  await f.run('refreshEntryBoard()')
+  assert.equal(f.run('entryBoardStatus'),'error')
+  assert.ok(f.run('metaErrors().some(x=>x.includes("手板設定"))'))
+  assert.ok(f.w.document.querySelector('[data-action="refresh-entry-board"]'))
+  f.w.fetch=originalFetch;await f.run('refreshEntryBoard()');assert.equal(f.run('entryBoardStatus'),'ready')
+  assert.equal(f.w.document.querySelector('[data-action="refresh-entry-board"]'),null)
+ }finally{f.w.close()}
+})
+
+test('a complete browser entry handles validation, server and network failures differently without losing data',async()=>{
+ const f=setup();try{
+  await f.run('initApp()')
+  f.run(`state.methods=['fish'];state.fishLengthMode='combined';state.meta={...state.meta,site:'MeiRenDong',date:'2026-11-06',time:'09:30',depth:'5'};state.recorders.fish='Fixture';rowsFor('fish').forEach(r=>starts.forEach((_,s)=>state.fish[r.id+':'+(s+1)]='0'));state.fish['0:1']='11';state.ack=true;step=3;render()`)
+  assert.equal(f.run('issues().length'),0)
+  const originalFetch=f.w.fetch;let posts=0
+  f.w.fetch=async(p,o)=>{if(p==='/api/public/reef-check/surveys'){posts++;return {ok:false,status:400,json:async()=>({error:'魚類手板缺少「蝴蝶魚」：第 2 段'})}}return originalFetch(p,o)}
+  await f.run('submitRecord()')
+  assert.equal(posts,1);assert.equal(f.run('step'),3);assert.equal(f.run('state.ack'),false)
+  assert.ok(f.w.document.querySelector('#complete-error').textContent.includes('蝴蝶魚'))
+  assert.ok(f.w.document.querySelector('#complete-error').textContent.includes('不是網路問題'))
+  assert.ok(f.w.document.querySelector('#review-issues [role="alert"]').textContent.includes('尚未儲存'))
+  assert.equal(f.w.document.querySelector('.review-ok'),null)
+  assert.equal(f.run(`state.fish['0:1']`),'11')
+  f.run('persist()');assert.equal(f.run('submitFailureKind'),'')
+  f.w.fetch=async()=>({ok:false,status:500,json:async()=>({error:'Temporary server error'})})
+  f.run('state.ack=true');await f.run('submitRecord()')
+  assert.equal(f.run('step'),4);assert.ok(f.w.document.querySelector('#main').textContent.includes('聯絡管理員'))
+  assert.ok(!f.w.document.querySelector('#main').textContent.includes('確認網路連線正常'))
+  f.w.fetch=async()=>{throw Error('Network offline')}
+  await f.run('submitRecord()')
+  assert.equal(f.run('submitFailureKind'),'network');assert.ok(f.w.document.querySelector('#main').textContent.includes('確認網路連線正常'))
+  assert.equal(f.run(`state.fish['0:1']`),'11')
+ }finally{f.w.close()}
+})
+
+test('excluding a required rare or impact row is surfaced before submission, not hidden by the progress counter',()=>{
+ const f=setup({debug:true});try{
+  f.run(`state.methods=['invert'];state.notApplicable.rare=['0'];state.notApplicable.impact=['0']`)
+  const text=f.run('extraEntryIssues().map(x=>x.text).join(";")')
+  assert.ok(text.includes('鯊魚'));assert.ok(text.includes('船錨'));assert.ok(text.includes('NA'))
+ }finally{f.w.close()}
+})
+
+test('fish and invert cannot exclude rows, including restored legacy drafts',()=>{
+ const f=setup({debug:true});try{
+  f.run(`state.methods=['fish','invert'];state.fishLengthMode='combined';state.notApplicable.fish=['0'];state.notApplicable.invert=['0'];step=2;sheet='fish';render()`)
+  for(const k of ['fish','invert']){
+   f.run(`sheet='${k}';render()`)
+   assert.equal(f.w.document.querySelectorAll('[data-row-applicability]').length,0)
+   assert.ok(!f.w.document.querySelector('.board-tools').textContent.includes('本手板未列'))
+   assert.equal(f.w.document.querySelectorAll('.belt-table input:disabled').length,0)
+   assert.equal(f.run(`excludedRows('${k}').length`),0)
+   assert.equal(f.run(`sheetStats('${k}').total`),f.run(`rowsFor('${k}').length*4`))
+   assert.equal(f.w.document.querySelector('[data-action="zero"]'),null)
+   assert.ok(f.w.document.querySelector('.table-scroll.belt-scroll[tabindex="0"]'))
+  }
+  f.run(`state.ack=true;state.fish['0:1']='7';state=migrateRecord(state)`)
+  assert.equal(f.run('state.ack'),false)
+  assert.equal(f.run('state.notApplicable.fish.length+state.notApplicable.invert.length'),0)
+  assert.equal(f.run(`state.fish['0:1']`),'7')
+  f.run(`sheet='rare';render()`)
+  assert.ok(f.w.document.querySelectorAll('[data-row-applicability]').length>0)
+ }finally{f.w.close()}
+})
+
+test('zero-fill sits beside submission, previews all active Belt sheets and preserves NA, numbers and excluded sheets',()=>{
+ const f=setup({debug:true});try{
+  f.w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','')}
+  f.w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open')}
+  f.run(`state.methods=['line','fish','invert'];state.fishLengthMode='combined';state.line['0']='1';state.fish['0:1']='7';state.fish['0:2']='NA';state.fish['8:1']='9';state.invert['0:1']='2';state.invert['0:2']='-';state.notApplicable.rare=[rowsFor('rare')[0].id];state.ack=true;step=3;render()`)
+  const blank=f.run(`zeroFillSheets().reduce((n,k)=>n+zeroFillCount(k),0)`)
+  const zero=f.w.document.querySelector('.review-submit-actions .right [data-action="zero"]')
+  assert.ok(zero);assert.equal(zero.nextElementSibling.dataset.action,'complete')
+  zero.click()
+  const dialog=f.w.document.querySelector('#modal')
+  assert.equal(dialog.open,true)
+  assert.ok(dialog.textContent.includes(blank+' 個空白格'))
+  for(const text of ['魚類','無脊椎','罕見生物','不要補成 0','已填數字及 NA 都不會被覆寫'])assert.ok(dialog.textContent.includes(text))
+  assert.equal(f.run(`zeroFillSheets().reduce((n,k)=>n+zeroFillCount(k),0)`),blank)
+  dialog.querySelector('[data-action="close"]').click()
+  assert.equal(f.run('state.ack'),true)
+  f.w.document.querySelector('[data-action="zero"]').click()
+  dialog.querySelector('[data-action="confirm-zero"]').click()
+  assert.equal(f.run(`zeroFillSheets().reduce((n,k)=>n+zeroFillCount(k),0)`),0)
+  assert.equal(f.run(`state.fish['0:1']`),'7');assert.equal(f.run(`state.fish['0:2']`),'NA')
+  assert.equal(f.run(`state.fish['8:1']`),'9');assert.equal(f.run(`state.invert['0:2']`),'-')
+  assert.equal(f.run(`state.line['0']`),'1');assert.equal(f.run(`Object.keys(state.line).length`),1)
+  assert.equal(f.run(`Object.keys(state.impact).length`),0)
+  assert.equal(f.run(`state.rare[rowsFor('rare')[0].id+':1']`),undefined)
+  assert.equal(f.run('state.ack'),false)
+  f.w.document.querySelector('[data-action="zero"]').click()
+  assert.equal(dialog.open,false)
+  assert.ok(f.w.document.querySelector('#toast').textContent.includes('沒有可補零'))
+  f.run(`state.methods=['line'];render()`)
+  assert.equal(f.w.document.querySelector('[data-action="zero"]'),null)
+ }finally{f.w.close()}
+})
+
+test('Belt scroll containers pin the segment header above sticky row labels',()=>{
+ const css=fs.readFileSync(new URL('styles.css',base),'utf8')
+ assert.match(css,/\.table-scroll\.belt-scroll\{[^}]*max-height:70dvh;[^}]*overflow:auto/)
+ assert.match(css,/\.belt-scroll \.belt-table thead th\{[^}]*position:sticky;top:0;z-index:3/)
+ assert.match(css,/\.belt-scroll \.belt-table thead th:first-child\{left:0;z-index:4/)
+ const f=setup({debug:true});try{
+  f.run(`state.methods=['fish'];state.fishLengthMode='split';step=3;render()`)
+  assert.ok(f.w.document.querySelector('.review-detail .belt-scroll'))
+ }finally{f.w.close()}
+})
 
 test('24-hour numeric fields preserve focus and produce canonical 15:40 without AM/PM',async()=>{
  const f=setup();try{

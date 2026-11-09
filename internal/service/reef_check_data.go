@@ -184,6 +184,7 @@ type ReefDataDiverInput struct {
 }
 
 type ReefDataTaxon struct {
+	EntryRowID  string `json:"entry_row_id,omitempty"`
 	ID          int    `json:"id"`
 	TaxonGroup  string `json:"taxon_group"`
 	NameZH      string `json:"name_zh"`
@@ -225,6 +226,7 @@ type ReefDataSubstrateTypeInput struct {
 }
 
 type ReefDataImpactType struct {
+	EntryRowID  string `json:"entry_row_id,omitempty"`
 	ID          int    `json:"id"`
 	ImpactGroup string `json:"impact_group"`
 	NameZH      string `json:"name_zh"`
@@ -560,8 +562,16 @@ type ReefCheckSubmissionResult struct {
 }
 
 type ReefCheckConfig struct {
-	Sites   []ReefDataSite       `json:"sites"`
-	Codes   []ReefDataCode       `json:"codes"`
+	Sites      []ReefDataSite       `json:"sites"`
+	Codes      []ReefDataCode       `json:"codes"`
+	Taxa       []ReefDataTaxon      `json:"taxa"`
+	Impacts    []ReefDataImpactType `json:"impacts"`
+	EntryBoard *ReefCheckEntryBoard `json:"entry_board,omitempty"`
+}
+
+// EntryBoard is the versioned volunteer template, not the historical catalog.
+type ReefCheckEntryBoard struct {
+	Format  string               `json:"format"`
 	Taxa    []ReefDataTaxon      `json:"taxa"`
 	Impacts []ReefDataImpactType `json:"impacts"`
 }
