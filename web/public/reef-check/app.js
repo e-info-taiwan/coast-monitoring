@@ -15,8 +15,9 @@ let timer, storageFailed = false, lastCell = null, saving = false;
 let currentUser = null, csrfToken = '', submitError = null;
 let activityBusy=false;
 const removedLocalIDs=new Set();
+let environmentPreview={key:'',status:'idle',data:null},environmentVersion=0,environmentDraft='';
 function fresh(meta = {}) {
-  return {id:globalThis.crypto?.randomUUID?.() || `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`,methods:[],activityCode:'',activity:null,meta:{site:'',date:'',time:'',depth:'',temperature:'',visibilityMin:'',visibilityMax:'',leader:'',scientist:'',weather:'',airTemperature:'',latitude:'',longitude:'',...meta},recorders:{line:'',fish:'',invert:''},fishLengthMode:'',coralMorphology:'',line:{},down:{},bleached:{},linePhase:'entry',mud:false,bleaching:false,bleach:{},fish:{},invert:{},rare:{},impact:{},custom:{fish:[],invert:[],rare:[]},rareDetails:{},notApplicable:{fish:[],invert:[],rare:[],impact:[]},rkcNote:'',otherDamageNote:'',notes:'',missingReason:'',status:'draft',step:0,updated:''};
+  return {id:globalThis.crypto?.randomUUID?.() || `draft-${Date.now()}-${Math.random().toString(36).slice(2)}`,methods:[],activityCode:'',activity:null,meta:{site:'',date:'',time:'',depth:'',temperature:'',visibilityMin:'',visibilityMax:'',leader:'',scientist:'',weather:'',airTemperature:'',latitude:'',longitude:'',...meta},recorders:{line:'',fish:'',invert:''},fishLengthMode:'',coralMorphology:'',line:{},down:{},healthStatus:{},linePhase:'entry',mud:false,bleaching:false,bleach:{},fish:{},invert:{},rare:{},impact:{},custom:{fish:[],invert:[],rare:[]},rareDetails:{},notApplicable:{fish:[],invert:[],rare:[],impact:[]},rkcNote:'',otherDamageNote:'',notes:'',missingReason:'',status:'draft',step:0,updated:''};
 }
 function migrateRecord(record){
   if(!record?.meta)return record;
@@ -25,7 +26,13 @@ function migrateRecord(record){
   delete record.meta.visibility;
   if(record.fishLengthMode!=='split'&&record.fishLengthMode!=='combined')record.fishLengthMode='';
   if(!['entry','number-review','bleaching','complete'].includes(record.linePhase))record.linePhase='entry';
-  record.bleached={...(record.bleached||{})};
+  record.healthStatus={...(record.healthStatus||{})};
+  for(const [key,value] of Object.entries(record.bleached||{})){
+    if(record.healthStatus[key]!=null||typeof value!=='boolean')continue;
+    if(value)record.healthStatus[key]='bleached';
+    else if(record.linePhase==='complete')record.healthStatus[key]='not_bleached';
+  }
+  delete record.bleached;
   record.activityCode=record.activityCode||'';record.activity=record.activity||null;
   record.coralMorphology=record.coralMorphology||'';record.rareDetails=record.rareDetails||{};
   record.rkcNote=record.rkcNote||'';record.otherDamageNote=record.otherDamageNote||'';
@@ -72,6 +79,7 @@ function button(text,action,extra='',kind=''){return `<button type="button" clas
 function intro(n,title,description){return `<section class="page-intro"><p class="eyebrow">REEF CHECK 志工填報</p><div class="intro-row"><h1>${title}</h1><span class="badge">步驟 ${String(Math.min(n,4)).padStart(2,'0')} / 04</span></div><p>${description}</p></section>`;}
 function render(){
   lastCell=null;
+  if(environmentDraft!==state.id){environmentDraft=state.id;invalidateEnvironment();}
   const debugLink=$('#debug-mode-link');
   debugLink.hidden=window.location.protocol!=='file:'&&!DEBUG;
   debugLink.href=DEBUG?'?':'?debug=1';
@@ -84,7 +92,7 @@ function render(){
     .replace('垃圾顯示原始件數', '珊瑚損害與垃圾顯示原始件數');
   $('#workflow').inert=saving;$('.topbar').inert=saving;
   updateCounters();
-  if(step===1)updateCoordinateFields();
+  if(step===1){updateCoordinateFields();void refreshEnvironment();}
 }
 function go(n){
   if(DEBUG&&n>0&&!state.methods.length){state.methods=['line'];sheet='line';}
@@ -144,6 +152,39 @@ function updateCoordinateFields(){
   for(const key of ['latitude','longitude']){const el=$(`[data-meta="${key}"]`);if(el)el.value=state.meta[key];}
   const hint=$('#coordinate-hint');if(hint)hint.textContent=state.coordinateOrigin?'已由樣點主檔帶入；若本次調查位置不同，可依現場紀錄修改。':selectedSiteDetails().latitude==null||selectedSiteDetails().longitude==null?'此樣點沒有完整座標，請依手板填寫；未記錄可兩格留白。':'目前使用自行填寫的座標；切換樣點時會重新帶入新樣點座標。';
 }
+function environmentRequest(){
+  if(DEBUG||window.location.protocol==='file:'||!state.activity||!state.activityCode||!siteId()||!/^\d{4}-\d{2}-\d{2}$/.test(state.meta.date)||!/^([01]\d|2[0-3]):[0-5]\d$/.test(state.meta.time))return null;
+  return {activity_code:state.activityCode,site_id:siteId(),survey_date:state.meta.date,event_time:state.meta.time};
+}
+function invalidateEnvironment(){environmentVersion++;environmentPreview={key:'',status:'idle',data:null};updateEnvironmentPanel();}
+function environmentMarkup(){
+  const ref=environmentPreview,reminder='若鄰近有測站但未抓到資料，請至後台確認樣點附近測站。';
+  if(DEBUG||window.location.protocol==='file:')return '<b>氣象署參考海溫</b><p>本機／測試模式不查詢正式海溫。</p><small>正式填報會依樣點、調查日期與開始時間查詢後台設定的測站。</small>';
+  if(ref.status==='loading')return '<b>氣象署參考海溫</b><p>正在查詢此樣點測站、調查日期與開始時間…</p>';
+  if(ref.status==='error')return `<b>氣象署參考海溫</b><p>暫時無法取得資料，可繼續填寫手板實測水溫，不影響存草稿。</p>${button('重新查詢','refresh-environment','','quiet small')}`;
+  const d=ref.data;
+  if(d){
+    const hasStation=Boolean(d.station_id),hasTemp=hasStation&&d.sea_temp_c!=null;
+    const name=d.station_name||d.station_id||'尚未對應測站';
+    return `<b>氣象署參考海溫${hasTemp?` · ${esc(d.sea_temp_c)} °C`:''}</b><p>${esc(name)}${hasTemp&&d.observed_at?` · 觀測時間：${esc(new Date(d.observed_at).toLocaleString('zh-TW',{timeZone:'Asia/Taipei',hour12:false}))}`:''}</p>${hasTemp?'<small>測站值不是本次潛水實測，不會填入實測欄。未填實測值時，後台會在送出時查詢並標記為自動來源；以手填實測值為優先。</small>':`<p>${hasStation?'此測站在調查當日沒有可用海溫，不改用其他日期。':'此樣點尚未對應氣象署測站。'}</p><small>${reminder}</small>`}`;
+  }
+  return '<b>氣象署參考海溫</b><p>填好樣點、日期與 24 小時制開始時間後，自動查詢後台設定的測站。</p><small>查無資料保持空白，不改用其他日期；手板實測水溫可自行填寫。</small>';
+}
+function updateEnvironmentPanel(){if(step!==1)return;const el=$('#environment-reference');if(el)el.innerHTML=environmentMarkup();}
+async function refreshEnvironment(force=false){
+  const input=environmentRequest();if(!input){if(environmentPreview.key)invalidateEnvironment();else updateEnvironmentPanel();return;}
+  const key=JSON.stringify(input),draft=state.id;
+  if(!force&&environmentPreview.key===key){updateEnvironmentPanel();return;}
+  const version=++environmentVersion;environmentPreview={key,status:'loading',data:null};updateEnvironmentPanel();
+  try{
+    const response=await fetch('/api/public/reef-check/entry-environment',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(input),credentials:'include'});
+    if(!response.ok)throw new Error('environment unavailable');const data=await response.json();
+    if(version!==environmentVersion||state.id!==draft||JSON.stringify(environmentRequest())!==key)return;
+    environmentPreview={key,status:'ready',data};
+  }catch(_){if(version!==environmentVersion||state.id!==draft||JSON.stringify(environmentRequest())!==key)return;environmentPreview={key,status:'error',data:null};}
+  updateEnvironmentPanel();
+}
+function temperatureFields(){return `${field('手板實測水溫（°C）','temperature','number',false,'請填手板實測的一個數值；沒有記錄可留白，手填值優先。','min="0" max="45" step="0.1" placeholder="例如 27.5"')}<aside id="environment-reference" class="environment-reference wide" aria-live="polite">${environmentMarkup()}</aside>`;}
 function depthChoice(){
   if(state.depthChoice==='other')return 'other';
   const v=state.meta.depth;
@@ -159,7 +200,7 @@ function selectDepth(choice){
 }
 function metaView(){return intro(2,'先確認，這是哪一支氣瓶。','請抄錄手板上的資料。多種探查共用同一支氣瓶的開始時間，避免把一趟潛水拆成兩份。')+
   `<form id="metadata-form" ${DEBUG?'novalidate':''}><section class="panel"><div class="panel-heading"><div><h2>潛水與樣點</h2><p>本次包含：${methodList().map(k=>C.methods[k].name).join('、')}</p></div><span class="badge">01 / 基本資料</span></div><div class="fields"><label class="field wide">調查樣點 <span class="required">必填</span><select required name="site" data-meta="site"><option value="">選擇手板上的樣點</option>${[...new Set(allowedSites().map(s=>s[0]))].map(region=>`<optgroup label="${region}">${allowedSites().filter(s=>s[0]===region).map(s=>`<option value="${esc(s[2])}" ${state.meta.site===s[2]?'selected':''}>${esc(s[1])} · ${esc(s[2])}</option>`).join('')}</optgroup>`).join('')}</select><small>依現有樣點清單；找不到時請先存草稿，與活動窗口確認名稱。</small></label>
-  ${field('調查日期','date','date',true,'以手板上的實際日期為準。',state.activity?`min="${esc(state.activity.start_date)}" max="${esc(state.activity.end_date)}"`:'')}${timeControl()}<div id="depth-control">${depthControl()}</div>${field('手板實測水溫（°C）<span class="field-note">（後台會自動查詢附近測站海溫，若有需要替換再填入）</span>','temperature','number',false,'','min="0" max="45" step="0.1" placeholder="例如 27.5"')}<div class="visibility-range"><p>能見度範圍（m）</p><div class="range-fields">${field('最低能見度','visibilityMin','number',false,'','min="0" max="100" step="0.1" placeholder="例如 8"')}${field('最高能見度','visibilityMax','number',false,'','min="0" max="100" step="0.1" placeholder="例如 12"')}</div><small>只記一個數值時填任一格即可，系統會視為最低＝最高；未記錄可兩格留白。</small></div>${field('天氣','weather','text',false,'未記錄可留白。')}${field('氣溫（°C）','airTemperature','number',false,'未記錄可留白。','min="-20" max="60" step="0.1"')}${field('調查緯度','latitude','number',false,'與經度一起填，未記錄可兩格留白。','min="-90" max="90" step="any"')}${field('調查經度','longitude','number',false,'請使用十進位座標。','min="-180" max="180" step="any"')}<p class="wide coordinate-hint" id="coordinate-hint"></p></div><div class="event-preview" id="event-preview">${eventId()?`氣瓶識別：${esc(eventId())}`:'填好樣點、日期、時間與深度後，自動產生氣瓶識別。'}</div></section>
+  ${field('調查日期','date','date',true,'以手板上的實際日期為準。',state.activity?`min="${esc(state.activity.start_date)}" max="${esc(state.activity.end_date)}"`:'')}${timeControl()}<div id="depth-control">${depthControl()}</div>${temperatureFields()}<div class="visibility-range"><p>能見度範圍（m）</p><div class="range-fields">${field('最低能見度','visibilityMin','number',false,'','min="0" max="100" step="0.1" placeholder="例如 8"')}${field('最高能見度','visibilityMax','number',false,'','min="0" max="100" step="0.1" placeholder="例如 12"')}</div><small>只記一個數值時填任一格即可，系統會視為最低＝最高；未記錄可兩格留白。</small></div>${field('天氣','weather','text',false,'未記錄可留白。')}${field('氣溫（°C）','airTemperature','number',false,'未記錄可留白。','min="-20" max="60" step="0.1"')}${field('調查緯度','latitude','number',false,'與經度一起填，未記錄可兩格留白。','min="-90" max="90" step="any"')}${field('調查經度','longitude','number',false,'請使用十進位座標。','min="-180" max="180" step="any"')}<p class="wide coordinate-hint" id="coordinate-hint"></p></div><div class="event-preview" id="event-preview">${eventId()?`氣瓶識別：${esc(eventId())}`:'填好樣點、日期、時間與深度後，自動產生氣瓶識別。'}</div></section>
   <section class="panel"><div class="panel-heading"><div><h2>這份手板，是誰記錄的？</h2><p>每種探查可填不同記錄者；多人請以「、」分隔。</p></div><span class="badge">02 / 記錄人員</span></div><div class="fields">${methodList().map(k=>`<label class="field">${C.methods[k].short}記錄者 <span class="required">必填</span><input name="recorder-${k}" data-recorder="${k}" value="${esc(state.recorders[k])}" required placeholder="姓名，可填多人"></label>`).join('')}${field('隊長','leader')}${field('科學指導員','scientist')}</div></section>${entrySettings()}<p class="form-error" id="meta-error" role="alert"></p><div class="actions">${button('← 選擇探查','step','data-step="0"')}<button class="button primary" type="submit">開始填寫手板 <span class="arrow">→</span></button></div></form>`;}
 function metaErrors(){const m=state.meta,e=[];if(!C.sites.some(s=>s[2]===m.site||s[1]===m.site))e.push('請選擇樣點');if(!/^\d{4}-\d{2}-\d{2}$/.test(m.date))e.push('請填調查日期');if(!/^([01]\d|2[0-3]):[0-5]\d$/.test(m.time))e.push('請填氣瓶開始時間');if(m.depth===''||!Number.isFinite(Number(m.depth))||Number(m.depth)<=0||Number(m.depth)>100)e.push('深度請填 0.1–100 m');for(const [k,n,max] of [['temperature','水溫',45],['visibilityMin','最低能見度',100],['visibilityMax','最高能見度',100]])if(m[k]!==''&&(!Number.isFinite(Number(m[k]))||Number(m[k])<0||Number(m[k])>max))e.push(`${n}請填 0–${max}`);if(m.visibilityMin!==''&&m.visibilityMax!==''&&Number(m.visibilityMin)>Number(m.visibilityMax))e.push('最低能見度不能大於最高能見度');methodList().forEach(k=>{if(!state.recorders[k].trim())e.push(`請填${C.methods[k].short}記錄者`);});return [...e,...extraMetaErrors()];}
 function strip(){return `<section class="survey-strip" aria-label="本支氣瓶"><div><small>樣點</small><b>${esc(siteName())}</b></div><div><small>日期</small><b>${esc(state.meta.date)}</b></div><div><small>氣瓶開始</small><b>${esc(state.meta.time)}</b></div><div><small>深度</small><b>${esc(state.meta.depth)} m</b></div>${button('修改資訊','step','data-step="1"','quiet small')}</section>`;}
@@ -231,13 +272,17 @@ function rkcStats(){const codes=points.map(canonical).filter(c=>c&&c!=='NA'&&val
 function needsOtherDamageNote(){return rowsFor('impact').filter(r=>r.name==='Coral damage: other').some(r=>starts.some((_,s)=>Number(state.impact[`${r.id}:${s+1}`])>0));}
 function investigationNotes(){if(step===2&&sheet==='line'&&state.linePhase!=='complete')return '';const rkc=rkcStats();return `<section class="panel investigation-notes" id="investigation-notes"><h2>現場補充資訊</h2>${state.methods.includes('line')?`<p>新死珊瑚 RKC：${rkc.percent===null?'尚無有效資料':`${rkc.count} / ${rkc.total} 個有效點 · ${Number(rkc.percent.toFixed(2))}%`}</p>${rkc.required?`<label class="field">新死珊瑚達 10%，請填可能原因 <span class="required">必填</span><textarea data-state="rkcNote" placeholder="例如觀察到白化、物理損害等；無法判斷可寫明無法判斷。">${esc(state.rkcNote)}</textarea></label>`:''}`:''}${state.methods.includes('invert')&&needsOtherDamageNote()?`<label class="field">其他珊瑚損害說明 <span class="required">必填</span><textarea data-state="otherDamageNote" placeholder="請說明手板中「珊瑚損害：其他」的種類或可能原因。">${esc(state.otherDamageNote)}</textarea></label>`:''}<label class="field">其他備註<textarea data-state="notes" placeholder="其他現場資訊，可留白。">${esc(state.notes)}</textarea></label></section>`;}
 function bleachingSummary(){
-  return `<section class="bleaching-summary" data-bleaching-summary><h3>白化數量 · 自動計算</h3><p>依標記位置分別加總 HC（含 a／b／c）與 SC，不需重複輸入。</p><table><thead><tr><th>底質</th>${starts.map((_,s)=>`<th>子樣區 ${s+1}</th>`).join('')}</tr></thead><tbody>${['HC','SC'].map(code=>`<tr><th>${code} 白化</th>${starts.map((_,s)=>{const ps=points.filter(p=>p.s===s+1&&(code==='HC'?/^HC(?:-[abc])?$/.test(canonical(p)||''):canonical(p)==='SC')),ready=points.filter(p=>p.s===s+1).every(p=>validCode(canonical(p)||''))&&ps.every(p=>typeof state.bleached[p.key]==='boolean'),n=ps.filter(p=>state.bleached[p.key]===true).length;return `<td>${ready?n:'待確認'}</td>`;}).join('')}</tr>`).join('')}</tbody></table></section>`;
+  const stats=['HC','SC'].map(code=>starts.map((_,s)=>{
+    const ps=points.filter(p=>p.s===s+1&&(code==='HC'?/^HC(?:-[abc])?$/.test(canonical(p)||''):canonical(p)==='SC'));
+    return {valid:points.filter(p=>p.s===s+1).every(p=>validCode(canonical(p)||'')),total:ps.length,bleached:ps.filter(p=>pointHealthStatus(p)==='bleached').length,pending:ps.filter(p=>pointHealthStatus(p)===null).length};
+  }));
+  return `<section class="bleaching-summary" data-bleaching-summary><h3>底質測點與白化標記 · 自動計算</h3><p>測點總數依底質紀錄計算；白化標記數是其中被點選的部分，不會取代測點總數。HC 含 a／b／c，尚未確認的格子不算成未白化。</p><table><thead><tr><th>統計項目</th>${starts.map((_,s)=>`<th>子樣區 ${s+1}</th>`).join('')}</tr></thead><tbody>${['HC','SC'].map((code,i)=>['total','bleached'].map(kind=>`<tr data-coral-group="${code}" data-summary-kind="${kind}"><th scope="row">${code} ${kind==='total'?'測點總數':'白化標記數'}</th>${stats[i].map(stat=>`<td>${stat.valid?`${stat[kind]}${kind==='bleached'&&stat.pending?`<small>待確認 ${stat.pending} 格</small>`:''}`:'待確認底質'}</td>`).join('')}</tr>`).join('')).join('')}</tbody></table></section>`;
 }
 function extraEntryIssues(){
   const list=[];
   if(state.methods.includes('line')){
     if(state.linePhase!=='complete')list.push({text:'請先完成原始數字核對與白化標記。',sheet:'line'});
-    const unmarked=points.find(p=>isBleachableCode(canonical(p))&&typeof state.bleached[p.key]!=='boolean');
+    const unmarked=points.find(p=>isBleachableCode(canonical(p))&&pointHealthStatus(p)===null);
     if(unmarked)list.push({text:`${unmarked.p} m 珊瑚點尚未核對白化。`,sheet:'line',key:unmarked.key});
     if(rkcStats().required&&!state.rkcNote.trim())list.push({text:'RKC 已達 10%，請填寫可能原因。',field:'rkcNote'});
   }
@@ -258,7 +303,7 @@ function sheetStats(k){
 function boardAdvanceButton(){
   if(sheet==='line'){
     if(state.linePhase==='entry')return button('檢查全部數字 →','review-line-numbers','','primary');
-    if(state.linePhase==='number-review')return button('數字正確，開始標記白化 →','confirm-line-numbers','','primary');
+    if(state.linePhase==='number-review')return button('數字正確，開始點選標記白化 →','confirm-line-numbers','','primary');
     if(state.linePhase==='bleaching')return button('完成白化標記 →','confirm-line-bleaching','','primary');
   }
   return button(sheetList().indexOf(sheet)<sheetList().length-1?'下一張手板 →':'檢查這份紀錄 →','next-sheet','','primary');
@@ -300,11 +345,12 @@ function substrateHandboard(mode='raw',marking=false){
 }
 function lineNumberReview(){
   const complete=state.linePhase==='complete';if(!state.mud)layer='surface';
+  if(complete)return `${linePhaseSteps()}<div class="number-review-head"><h3>最後確認</h3><p>切換原始數字與轉換代碼，核對底質及白化標記。</p></div>${bleachingSummary()}<div id="review-line-panel" data-review-line-panel>${reviewLinePanel()}</div>`;
   return `${linePhaseSteps()}<div class="number-review-head"><div><p class="eyebrow">${complete?'已完成白化標記':'步驟 2'}</p><h3>${complete?'回看原始數字':'確認所有原始數字'}</h3></div><p>按照手板排列；點數字可放大修改該組 5 格。</p></div>${state.mud?`<div class="layer-switch">${button('上：表面數字','layer','data-layer="surface"',layer==='surface'?'primary':'')}${button('下：泥下數字','layer','data-layer="down"',layer==='down'?'primary':'')}</div>`:''}<p class="raw-board-hint">保留手板原始數字，尚未轉換。每 5 列以粗線分隔；空白顯示「未填」。表格可左右滑動查看四個子樣區。</p>${substrateHandboard()}${complete?bleachingSummary():''}`;
 }
 function bleachingGroupIndexes(){return pointGroups.map((group,i)=>group.some(p=>isBleachableCode(canonical(p)))?i:-1).filter(i=>i>=0);}
 function lineBleachingBoard(){
-  return `${linePhaseSteps()}<div class="number-review-head"><h3>點選白化位置</h3><p>空心＝無白化；點成實心＝有白化。</p></div>${bleachingSummary()}${substrateHandboard('raw',true)}`;
+  return `${linePhaseSteps()}<div class="number-review-head"><h3>點選標記白化</h3><p>點選白化的珊瑚格；實心表示已標記。核對整張手板後按「完成白化標記」，其餘未標記的珊瑚格才會記為已確認未白化。</p></div>${bleachingSummary()}${substrateHandboard('raw',true)}`;
 }
 function lineBoard(){
   if(state.linePhase==='number-review'||state.linePhase==='complete')return lineNumberReview();
@@ -352,21 +398,27 @@ function issues(){const result=metaErrors().map(text=>({text,step:1}));for(const
 }
 function unknownCount(){let n=sheetList().reduce((n,k)=>n+sheetStats(k).na,0);if(state.methods.includes('line')){if(state.mud)n+=activeMudPoints().filter(p=>normalizeCode(state.down[p.key]||'')==='NA').length;if(state.bleaching)n+=Object.values(state.bleach).filter(v=>v==='NA').length;}return n;}
 function reviewView(){const list=issues(),total=sheetList().reduce((n,k)=>n+sheetStats(k).total,0),filled=sheetList().reduce((n,k)=>n+sheetStats(k).valid,0);return intro(4,'檢查紀錄','確認氣瓶資訊、段次與每張手板。若原始紀錄缺值，可標記 NA 並說明，交由窗口確認。')+strip()+investigationNotes()+
-  `<div class="review-grid"><div class="stat"><b>${methodList().length}</b><small>種探查 · ${sheetList().length} 個手板區段</small></div><div class="stat"><b>${filled}<small>/ ${total} 格通過檢查</small></b></div><div class="stat"><b>${unknownCount()}</b><small>格 NA · 未記錄</small></div></div><section class="panel"><h2>這支氣瓶的記錄</h2>${sheetList().map(k=>{const st=sheetStats(k),excluded=k==='line'?0:excludedRows(k).length;return `<div class="review-row"><div><b>${sheetName(k)} <span class="badge">${st.valid}/${st.total} 格</span></b><p>${k==='line'?'4 段 × 40 點'+(state.mud?' · 含泥下底質':''):applicableRows(k).length+' 個適用項目 × 4 段'}${excluded?' · '+excluded+' 列本手板未列':''} · 記錄者：${esc(state.recorders[k==='rare'||k==='impact'?'invert':k])}${st.na?' · '+st.na+' 格 NA':''}</p></div>${button('回手板檢查','sheet',`data-sheet="${k}"`,'small')}</div>`;}).join('')}<div class="event-preview">氣瓶識別：${esc(eventId())}</div><details class="review-detail"><summary>展開最後逐組確認（原始數字／轉換代碼／白化）</summary>${reviewTables()}</details></section>
+  `<div class="review-grid"><div class="stat"><b>${methodList().length}</b><small>種探查 · ${sheetList().length} 個手板區段</small></div><div class="stat"><b>${filled}<small>/ ${total} 格通過檢查</small></b></div><div class="stat"><b>${unknownCount()}</b><small>格 NA · 未記錄</small></div></div><section class="panel"><h2>這支氣瓶的記錄</h2>${sheetList().map(k=>{const st=sheetStats(k),excluded=k==='line'?0:excludedRows(k).length;return `<div class="review-row"><div><b>${sheetName(k)} <span class="badge">${st.valid}/${st.total} 格</span></b><p>${k==='line'?'4 段 × 40 點'+(state.mud?' · 含泥下底質':''):applicableRows(k).length+' 個適用項目 × 4 段'}${excluded?' · '+excluded+' 列本手板未列':''} · 記錄者：${esc(state.recorders[k==='rare'||k==='impact'?'invert':k])}${st.na?' · '+st.na+' 格 NA':''}</p></div>${button('回手板檢查','sheet',`data-sheet="${k}"`,'small')}</div>`;}).join('')}<div class="event-preview">氣瓶識別：${esc(eventId())}</div>${finalReviewTables()}</section>
   ${unknownCount()?`<label class="field panel">未記錄原因 <span class="required">必填</span><textarea data-state="missingReason" placeholder="請寫明手板哪一段、哪些位置為何未記錄。">${esc(state.missingReason)}</textarea><small>NA 保留為未知；不當成 0，也不列入底質有效觀測分母。</small></label>`:''}
-  ${state.methods.includes('line')?bleachingSummary():''}<section id="review-issues">${issueMarkup(list)}</section><label class="check-ack"><input id="acknowledge" type="checkbox" ${state.ack?'checked':''}><span>我已對照原始手板，確認樣點、日期、氣瓶時間、深度、各段數值與逐格白化標記。<br><small>送出後資料會先存為草稿，待活動窗口審核。</small></span></label><div class="actions">${button('← 返回手板','step','data-step="2"')}<div class="right">${button('下載草稿','export-draft','','quiet')}${button(DEBUG?'預覽完成頁':unknownCount()?'送出儲存・標示待確認':'送出儲存','complete','','primary')}</div></div><p id="complete-error" class="form-error" role="alert"></p>`;}
+  <section id="review-issues">${issueMarkup(list)}</section><label class="check-ack"><input id="acknowledge" type="checkbox" ${state.ack?'checked':''}><span>我已對照原始手板，確認樣點、日期、氣瓶時間、深度、各段數值與逐格白化標記。<br><small>送出後資料會先存為草稿，待活動窗口審核。</small></span></label><div class="actions">${button('← 返回手板','step','data-step="2"')}<div class="right">${button('下載草稿','export-draft','','quiet')}${button(DEBUG?'預覽完成頁':unknownCount()?'送出儲存・標示待確認':'送出儲存','complete','','primary')}</div></div><p id="complete-error" class="form-error" role="alert"></p>`;}
 function issueMarkup(list){return list.length?`<div class="callout warning"><div><b>有 ${list.length} 項需要補充</b><ul class="issue-list">${list.map((x,i)=>`<li><button class="issue-link" data-action="issue" data-index="${i}">${esc(x.text)}</button></li>`).join('')}</ul></div></div>`:`<div class="review-ok">✓ 所選手板的必填格與範圍檢查通過${unknownCount()?'；NA 已附原因，仍需窗口確認':''}。</div>`;}
 function canonical(p){const up=normalizeCode(state.line[p.key]||'');if(up!=='SI'||!state.mud)return up||null;const d=normalizeCode(state.down[p.key]||'');if(d==='SI')return 'SI';if(d==='NA')return 'NA';return validCode(d,true)?`SI(${d})`:null;}
 function reviewValue(value,valid=true){const empty=value===null||value===undefined||value==='';return `<span class="review-value ${empty||!valid?'review-invalid':value==='NA'?'review-na':''}">${esc(empty?'未填':value)}</span>`;}
 function isBleachableCode(code){return code==='SC'||code==='HC'||/^HC-[abc]$/.test(code||'');}
-function bleachMarker(p,code){if(!isBleachableCode(code))return '';const active=Boolean(state.bleached[p.key]);return `<button type="button" class="bleach-marker ${active?'active':''}" data-action="toggle-bleach-point" data-key="${p.key}" aria-pressed="${active}" aria-label="${p.p} m ${active?'有白化，點一下改為無白化':'無白化，點一下標記有白化'}"><span aria-hidden="true"></span><small>${active?'白化':'無白化'}</small></button>`;}
+function pointHealthStatus(p){if(!isBleachableCode(canonical(p)))return null;const status=state.healthStatus[p.key];return status==='bleached'||status==='not_bleached'?status:null;}
+function bleachMarkerAria(p,status){return `${p.p} m ${status==='bleached'?'已標記白化，點一下取消標記':status==='not_bleached'?'已確認未白化，點選標記白化':'尚未確認，點選標記白化'}`;}
+function bleachMarker(p,code){if(!isBleachableCode(code))return '';const status=pointHealthStatus(p),active=status==='bleached';return `<button type="button" class="bleach-marker ${active?'active':''}" data-action="toggle-bleach-point" data-key="${p.key}" data-health-status="${status||''}" aria-pressed="${active}" aria-label="${bleachMarkerAria(p,status)}"><span aria-hidden="true"></span><small>${active?'已標記白化':'點選標記白化'}</small></button>`;}
 function reviewLineCell(p){const code=canonical(p),shown=reviewMode==='raw'?(state.line[p.key]||null):code;return `<div class="review-cell"><span><small>${reviewMode==='raw'?'原始數字':'轉換代碼'}</small>${reviewValue(shown,reviewMode==='raw'?validCode(shown??''):validCode(code??''))}</span>${bleachMarker(p,code)}</div>`;}
 function reviewLineTable(){const group=pointGroups[reviewGroup]||pointGroups[0];return `<div class="final-zoom-list">${group.map(p=>`<div class="final-zoom-row"><b>${p.p} m</b>${reviewLineCell(p)}</div>`).join('')}</div>`;}
 function reviewBeltTable(k){return `<div class="table-scroll" tabindex="0" role="region" aria-label="${sheetName(k)}對照手板，可左右捲動"><table class="slate belt-table"><caption>${sheetName(k)}手板 · 記錄值（唯讀）${k==='impact'?'<small>垃圾顯示原始件數；右欄顯示各段自動分級。</small>':''}</caption><colgroup><col class="row-name"><col><col><col><col><col class="sum-col"></colgroup><thead><tr><th scope="col">${k==='impact'?'項目／單位':'類群／體長'}</th>${starts.map((start,s)=>`<th scope="col">第 ${s+1} 段<small>${start}–${start+20} m</small></th>`).join('')}<th scope="col">${k==='impact'?'合計／換算':'合計'}<small>自動計算</small></th></tr></thead><tbody>${rowsFor(k).map(r=>{const applicable=rowApplicable(k,r.id),vals=starts.map((_,s)=>state[k][`${r.id}:${s+1}`]??''),total=applicable?rowSummary(k,r,vals):'未列';return `<tr class="${applicable?'':'row-not-applicable'}"><th class="row-label" scope="row">${esc(r.zh)} ${r.size?`<span class="mini-badge">${esc(r.size)}</span>`:''}<small>${esc(r.name)}${k==='impact'?' · '+(r.type==='count'?'原始件數':r.type==='percent'?'%':'分級'):''}</small></th>${applicable?vals.map(v=>`<td>${reviewValue(v,validNumber(v,r.type))}</td>`).join(''):`<td colspan="4"><span class="review-value">本手板未列</span></td>`}<td class="row-total">${total}</td></tr>`;}).join('')}</tbody></table></div>`;}
 function reviewLinePanel(){
-  return `<div class="review-mode-tabs" role="tablist" aria-label="底質顯示方式"><button role="tab" aria-selected="${reviewMode==='raw'}" class="${reviewMode==='raw'?'active':''}" data-action="review-mode" data-mode="raw">原始數字</button><button role="tab" aria-selected="${reviewMode==='canonical'}" class="${reviewMode==='canonical'?'active':''}" data-action="review-mode" data-mode="canonical">轉換代碼</button></div><p class="raw-board-hint">依手板表格核對所有位置；可切換原始數字與最終代碼，並修正白化標記。</p>${substrateHandboard(reviewMode,true)}<div class="bleach-legend"><span><i class="bleach-dot" aria-hidden="true"></i> 無白化</span><span><i class="bleach-dot active" aria-hidden="true"></i> 有白化</span></div>`;
+  return `<div class="review-mode-tabs" role="tablist" aria-label="底質顯示方式"><button type="button" role="tab" aria-selected="${reviewMode==='raw'}" class="${reviewMode==='raw'?'active':''}" data-action="review-mode" data-mode="raw">原始數字</button><button type="button" role="tab" aria-selected="${reviewMode==='canonical'}" class="${reviewMode==='canonical'?'active':''}" data-action="review-mode" data-mode="canonical">轉換代碼（HC／SC）</button></div><p class="raw-board-hint">依手板表格核對所有位置；切換只改變顯示，不更動原始數字、白化標記或統計。空心表示未標記；完成核對後才記為未白化。</p><div role="tabpanel" aria-label="${reviewMode==='raw'?'原始數字':'轉換代碼'}手板">${substrateHandboard(reviewMode,true)}</div><div class="bleach-legend"><span><i class="bleach-dot" aria-hidden="true"></i> 未標記</span><span><i class="bleach-dot active" aria-hidden="true"></i> 已標記白化</span></div>`;
 }
-function reviewTables(){return sheetList().map(k=>k==='line'?`<div id="review-line-panel">${reviewLinePanel()}</div>`:reviewBeltTable(k)).join('');}
+function reviewTables(){return sheetList().map(k=>k==='line'?`<div id="review-line-panel" data-review-line-panel>${reviewLinePanel()}</div>`:reviewBeltTable(k)).join('');}
+function finalReviewTables(){
+  const others=sheetList().filter(k=>k!=='line');
+  return `${state.methods.includes('line')?`<section class="review-detail"><h3>底質最後確認</h3>${bleachingSummary()}<div id="review-line-panel" data-review-line-panel>${reviewLinePanel()}</div></section>`:''}${others.length?`<details class="review-detail"><summary>展開其他手板紀錄</summary>${others.map(reviewBeltTable).join('')}</details>`:''}`;
+}
 async function submitRecord(){
   if(saving)return;
   if(DEBUG){step=4;render();$('#main').focus();window.scrollTo({top:0});return;}
@@ -487,7 +539,7 @@ function payload(draft=false){
       position_m:p.p,
       substrate_code:canonical(p),
       substrate_layer:'surface',
-      is_bleached:isBleachableCode(canonical(p))?(typeof state.bleached[p.key]==='boolean'?state.bleached[p.key]:null):null
+      health_status:pointHealthStatus(p)
     }));
     if(state.mud)data.mud_audit=activeMudPoints().map(p=>({
       position_m:p.p,
@@ -561,7 +613,7 @@ function deleteLocalRecord(id){
   if(!storageFailed)$('#save-status').classList.remove('storage-warning');toast('已刪除此瀏覽器的本機紀錄；資料庫資料未變更。');
 }
 function openDrafts(){modal('本機草稿與紀錄',`<p>只顯示此瀏覽器儲存的紀錄，不同瀏覽器或裝置不會自動同步。「刪除本機」只移除此瀏覽器的副本，不會刪除已送到資料庫的觀測資料。</p>${records.length?records.slice().reverse().map(r=>`<div class="draft-item"><div>${localRecordSummary(r)}<small>${r.methods.map(k=>C.methods[k].short).join('、')} · ${r.status==='draft'?'草稿':r.status==='needs_review'?'已存・待確認':r.uploaded||r.dbSave?'已存入資料庫':'已完成・本機'}</small></div><div class="draft-actions">${button('開啟','resume',`data-id="${esc(r.id)}"`,'small')}${button('刪除本機','delete-local-record',`data-id="${esc(r.id)}" aria-label="刪除此筆本機紀錄"`,'small danger')}</div></div>`).join(''):'<p>還沒有儲存的紀錄。</p>'}<div class="actions">${button('新增一支氣瓶','new','','primary')}</div>`);}
-function help(){modal('填寫說明',`<ol><li><b>先選探查，再填氣瓶資訊。</b>同一支氣瓶選多種探查，日期、時間、深度與水溫共用；能見度有範圍時填最低與最高，只有一個值時填任一格即可。</li><li><b>底質每次填 5 格：</b>一個子樣區有 40 格。先照手板輸入原始數字，第 5 格填完後不會自動跳轉；請先核對，再按「確認這 5 格，下一組」。系統會先檢查空白與無效代碼。</li><li><b>數字確認後才轉代碼：</b>可用 1–9、0／10、a–c 及 91–98；0、10 與 OT 都會記為 OT，a–c 會保留為 HC-a–HC-c。最後確認可在「原始數字／轉換代碼」切換。</li><li><b>有上下手板：</b>勾選「泥下底質」，切換上／下，依同位置配對。SI(SI) 會記為 SI。</li><li><b>數字確認後逐格標記白化：</b>HC／SC 格會出現圓點；空心代表無白化，看到白化時點成實心。</li><li><b>Belt 照列填四段。</b>0 表示看過但沒看到；NA 或 - 表示未記錄；舊版手板沒有整列時勾「本手板未列」，不要補成 0。</li><li><b>珊瑚損害與垃圾一律填原始件數。</b>系統依每一段自動換算：0 件＝0 級、1 件＝1 級、2–4 件＝2 級、5 件以上＝3 級。</li><li><b>其他生物優先填實際名稱。</b>只有歷史手板真的只寫 Other 時，才使用「原表只寫 Other」。</li><li><b>檢查確認後存入系統資料庫。</b>若連線中斷仍可本機儲存與下載草稿；NA 需附原因。</li></ol>`);}
+function help(){modal('填寫說明',`<ol><li><b>先選探查，再填氣瓶資訊。</b>同一支氣瓶選多種探查，日期、時間、深度與水溫共用；能見度有範圍時填最低與最高，只有一個值時填任一格即可。</li><li><b>底質每次填 5 格：</b>一個子樣區有 40 格。先照手板輸入原始數字，第 5 格填完後不會自動跳轉；請先核對，再按「確認這 5 格，下一組」。系統會先檢查空白與無效代碼。</li><li><b>數字確認後才轉代碼：</b>可用 1–9、0／10、a–c 及 91–98；0、10 與 OT 都會記為 OT，a–c 會保留為 HC-a–HC-c。最後確認可在「原始數字／轉換代碼」切換。</li><li><b>有上下手板：</b>勾選「泥下底質」，切換上／下，依同位置配對。SI(SI) 會記為 SI。</li><li><b>數字確認後逐格標記白化：</b>HC／SC 格會出現圓點；按鈕顯示「點選標記白化」；看到白化時點成實心。完成整張核對並按「完成白化標記」後，其餘珊瑚格才確認為未白化。</li><li><b>Belt 照列填四段。</b>0 表示看過但沒看到；NA 或 - 表示未記錄；舊版手板沒有整列時勾「本手板未列」，不要補成 0。</li><li><b>珊瑚損害與垃圾一律填原始件數。</b>系統依每一段自動換算：0 件＝0 級、1 件＝1 級、2–4 件＝2 級、5 件以上＝3 級。</li><li><b>其他生物優先填實際名稱。</b>只有歷史手板真的只寫 Other 時，才使用「原表只寫 Other」。</li><li><b>檢查確認後存入系統資料庫。</b>若連線中斷仍可本機儲存與下載草稿；NA 需附原因。</li></ol>`);}
 function setFieldFocus(html){
   const panel=$('#field-focus');if(!panel)return;
   if(!$('#focus-description'))panel.innerHTML=`<span id="focus-description"></span>${button('此格未記錄 NA','mark-na','','small')}`;
@@ -575,15 +627,16 @@ function handleCell(el){
   const isSubstrate=k==='line'||k==='down',issue=isSubstrate?updateSubstrateField(el):null,valid=isSubstrate?!issue:validNumber(v,el.dataset.type||'count');
   if(!isSubstrate){el.classList.toggle('invalid',v!==''&&!valid);el.setAttribute('aria-invalid',String(v!==''&&!valid));}
   if(k==='line'&&normalizeCode(old)!==normalizeCode(v)&&state.down[key]){delete state.down[key];toast('上層已更改，該位置泥下值已清除，請重新核對。');}
-  if(k==='line'&&normalizeCode(old)!==normalizeCode(v))delete state.bleached[key];
+  if(k==='line'&&normalizeCode(old)!==normalizeCode(v))delete state.healthStatus[key];
   if(k==='line'||k==='down')state.linePhase='entry';
   if(explicitSilt)state.down[key]='SI';persist();updateCounters();
   setFieldFocus(`<b>${esc(el.getAttribute('aria-label'))}</b> ${issue?'· '+esc(issue.message):v&&!valid?'· 數量或範圍不符，請核對。':normalizeNumber(v)==='NA'?'· 未記錄，完成前請說明原因。':explicitSilt?'· 最終代碼將記為 SI，原始輸入與泥下 SI 仍保留。':isSubstrate?'· '+esc(v):''}`);
 }
 document.addEventListener('change',e=>{
   const el=e.target;
-  if(el.dataset.timePart){el.value=setTimePart(el.dataset.timePart,el.value,true);persist();return;}
-  if(el.dataset.meta==='site'){state.meta.site=el.value;applySiteCoordinates(true);persist();updateCoordinateFields();}
+  if(el.dataset.timePart){el.value=setTimePart(el.dataset.timePart,el.value,true);persist();void refreshEnvironment();return;}
+  if(el.dataset.meta==='site'){state.meta.site=el.value;applySiteCoordinates(true);persist();updateCoordinateFields();invalidateEnvironment();void refreshEnvironment();}
+  if(el.dataset.meta==='date')void refreshEnvironment();
   if(el.name==='depth-choice'){
     selectDepth(el.value);$('#depth-control').innerHTML=depthControl();
     $('#event-preview').textContent=eventId()?`氣瓶識別：${eventId()}`:'填好樣點、日期、時間與深度後，自動產生氣瓶識別。';
@@ -597,8 +650,9 @@ document.addEventListener('change',e=>{
   if(el.dataset.toggle){const k=el.dataset.toggle;if(!el.checked&&(k==='mud'?Object.keys(state.down).length:Object.keys(state.bleach).length)){el.checked=true;modal('關閉這張附表？',`<p>已填的資料會保留在草稿，但關閉期間不會放進完成記錄。重新勾選後可以繼續核對。</p><div class="actions">${button('保留附表','close')}${button('確認關閉','disable-extra',`data-extra="${k}"`,'primary')}</div>`);}else{state[k]=el.checked;persist();render();}}
   if(el.id==='acknowledge'){state.ack=el.checked;persist(false);}
 });
-document.addEventListener('input',e=>{const el=e.target;if(el.dataset.timePart){el.value=setTimePart(el.dataset.timePart,el.value);el.setAttribute('aria-invalid',String(el.value!==''&&Number(el.value)>(el.dataset.timePart==='hour'?23:59)));persist();$('#event-preview').textContent=eventId()?`氣瓶識別：${eventId()}`:'請填完整的 24 小時制開始時間。';return;}if(el.hasAttribute('data-activity-code')){state.activityCode=el.value;state.activity=null;persist();}if(el.dataset.rareDetail){state.rareDetails[el.dataset.rowId]={...(state.rareDetails[el.dataset.rowId]||{}),[el.dataset.rareDetail]:el.value};persist();}if(el.dataset.meta){state.meta[el.dataset.meta]=el.value;if(['latitude','longitude'].includes(el.dataset.meta)){state.coordinateOrigin=null;updateCoordinateFields();}persist();$('#event-preview').textContent=eventId()?`氣瓶識別：${eventId()}`:'填好樣點、日期、時間與深度後，自動產生氣瓶識別。';}if(el.dataset.recorder){state.recorders[el.dataset.recorder]=el.value;persist();}if(el.dataset.state){state[el.dataset.state]=el.value;persist();if(step===3){$('#review-issues').innerHTML=issueMarkup(issues());$('#acknowledge').checked=false;}}if(el.dataset.cell){const k=el.dataset.cell,key=el.dataset.key,old=state[k][key]||'',v=k==='line'||k==='down'?el.value.trim():normalizeNumber(el.value);state[k][key]=v;if(k==='line'&&validCode(v)&&normalizeCode(v)!==normalizeCode(old)&&state.down[key])delete state.down[key];if(k==='line'&&normalizeCode(old)!==normalizeCode(v))delete state.bleached[key];if(k==='line'||k==='down')state.linePhase='entry';if(k==='line'&&/^SI[（(]SI[）)]$/i.test(el.value.trim()))state.down[key]='SI';persist();updateCounters();}});
+document.addEventListener('input',e=>{const el=e.target;if(el.dataset.timePart){el.value=setTimePart(el.dataset.timePart,el.value);el.setAttribute('aria-invalid',String(el.value!==''&&Number(el.value)>(el.dataset.timePart==='hour'?23:59)));persist();$('#event-preview').textContent=eventId()?`氣瓶識別：${eventId()}`:'請填完整的 24 小時制開始時間。';return;}if(el.hasAttribute('data-activity-code')){state.activityCode=el.value;state.activity=null;persist();}if(el.dataset.rareDetail){state.rareDetails[el.dataset.rowId]={...(state.rareDetails[el.dataset.rowId]||{}),[el.dataset.rareDetail]:el.value};persist();}if(el.dataset.meta){state.meta[el.dataset.meta]=el.value;if(['latitude','longitude'].includes(el.dataset.meta)){state.coordinateOrigin=null;updateCoordinateFields();}persist();$('#event-preview').textContent=eventId()?`氣瓶識別：${eventId()}`:'填好樣點、日期、時間與深度後，自動產生氣瓶識別。';}if(el.dataset.recorder){state.recorders[el.dataset.recorder]=el.value;persist();}if(el.dataset.state){state[el.dataset.state]=el.value;persist();if(step===3){$('#review-issues').innerHTML=issueMarkup(issues());$('#acknowledge').checked=false;}}if(el.dataset.cell){const k=el.dataset.cell,key=el.dataset.key,old=state[k][key]||'',v=k==='line'||k==='down'?el.value.trim():normalizeNumber(el.value);state[k][key]=v;if(k==='line'&&validCode(v)&&normalizeCode(v)!==normalizeCode(old)&&state.down[key])delete state.down[key];if(k==='line'&&normalizeCode(old)!==normalizeCode(v))delete state.healthStatus[key];if(k==='line'||k==='down')state.linePhase='entry';if(k==='line'&&/^SI[（(]SI[）)]$/i.test(el.value.trim()))state.down[key]='SI';persist();updateCounters();}});
 document.addEventListener('input',e=>{const el=e.target;if(!['line','down'].includes(el.dataset.cell))return;const issue=updateSubstrateField(el);setFieldFocus(`<b>${esc(el.getAttribute('aria-label'))}</b> · ${esc(issue?issue.message:normalizeCode(el.value)==='NA'?'未記錄，完成前請說明原因。':el.value)}`);});
+document.addEventListener('input',e=>{const el=e.target;if(el.dataset.timePart||['site','date'].includes(el.dataset.meta)||el.hasAttribute('data-activity-code'))invalidateEnvironment();});
 document.addEventListener('focusin',e=>{const el=e.target;if(el.dataset.cell){lastCell=el;el.dataset.previous=state[el.dataset.cell][el.dataset.key]||'';const issue=el.value&&['line','down'].includes(el.dataset.cell)?substrateIssue(el.value,el.dataset.cell==='down'):null;setFieldFocus(`<b>${esc(el.getAttribute('aria-label'))}</b> · ${esc(issue?issue.message:el.dataset.cell==='down'?'對照上層 SI 的同一位置，填下層本身的底質。':el.dataset.cell==='line'?'照手板輸入數字或英文碼；10、0 都代表 OT。':'填 0 表示未發現，NA 表示未記錄。')}`);}});
 document.addEventListener('keydown',e=>{
   const el=e.target;if(!el.dataset.cell||!['Tab','Enter','ArrowUp','ArrowDown'].includes(e.key))return;
@@ -616,6 +670,7 @@ document.addEventListener('submit',e=>{if(e.target.id==='metadata-form'){e.preve
 document.addEventListener('click',e=>{
   const el=e.target.closest('[data-action]');if(!el)return;const a=el.dataset.action;e.preventDefault();
   if(saving)return;
+  if(a==='refresh-environment'){void refreshEnvironment(true);return;}
   if(a==='delete-local-record'){confirmLocalRecordDeletion(el.dataset.id);return;}
   if(a==='confirm-delete-local-record'){deleteLocalRecord(el.dataset.id);return;}
   if(a==='debug-line-phase'){
@@ -644,14 +699,14 @@ document.addEventListener('click',e=>{
   else if(a==='confirm-line-numbers'){
     const surfaceBad=points.find(p=>!validCode(state.line[p.key]||'')),downBad=state.mud&&activeMudPoints().find(p=>!validCode(state.down[p.key]||'',true)),bad=surfaceBad||downBad,isDownBad=!surfaceBad&&Boolean(downBad);
     if(bad&&!DEBUG){linePage=pointGroups.findIndex(group=>group.includes(bad));layer=isDownBad?'down':'surface';state.linePhase='entry';persist();render();const issue=substrateIssue((isDownBad?state.down:state.line)[bad.key]||'',isDownBad),cell=document.querySelector(`[data-cell="${isDownBad?'down':'line'}"][data-key="${CSS.escape(bad.key)}"]`);cell?.focus();if(cell)updateSubstrateField(cell,true);toast(`${isDownBad?'泥下':'表面'} ${bad.p} m：${issue.message}`);return;}
-    points.forEach(p=>{if(isBleachableCode(canonical(p))){if(typeof state.bleached[p.key]!=='boolean')state.bleached[p.key]=false;}else delete state.bleached[p.key];});state.linePhase='bleaching';linePage=bleachingGroupIndexes()[0]||0;persist();render();window.scrollTo({top:0});
+    points.forEach(p=>{if(!isBleachableCode(canonical(p)))delete state.healthStatus[p.key];});state.linePhase='bleaching';linePage=bleachingGroupIndexes()[0]||0;persist();render();window.scrollTo({top:0});
   }
-  else if(a==='confirm-line-bleaching'){state.linePhase='complete';persist();render();$('#investigation-notes')?.scrollIntoView({block:'center'});}
+  else if(a==='confirm-line-bleaching'){points.forEach(p=>{if(isBleachableCode(canonical(p))&&pointHealthStatus(p)===null)state.healthStatus[p.key]='not_bleached';});state.linePhase='complete';persist();render();$('#investigation-notes')?.scrollIntoView({block:'center'});}
   else if(a==='segment'){segment=Number(el.dataset.segment);render();}
   else if(a==='review-segment'){reviewSegment=Number(el.dataset.segment);$('#review-line-panel').innerHTML=reviewLinePanel();$(`[data-action="review-segment"][data-segment="${reviewSegment}"]`).focus({preventScroll:true});}
   else if(a==='review-group'){reviewGroup=Number(el.dataset.group);$('#review-line-panel').innerHTML=reviewLinePanel();$(`[data-action="review-group"][data-group="${reviewGroup}"]`)?.focus({preventScroll:true});}
-  else if(a==='review-mode'){reviewMode=el.dataset.mode;$('#review-line-panel').innerHTML=reviewLinePanel();$(`[data-action="review-mode"][data-mode="${reviewMode}"]`).focus({preventScroll:true});}
-  else if(a==='toggle-bleach-point'){const key=el.dataset.key,p=points.find(p=>p.key===key),code=p&&canonical(p);if(!p||!isBleachableCode(code))return;state.bleached[key]=!Boolean(state.bleached[key]);state.ack=false;persist();const active=state.bleached[key];el.classList.toggle('active',active);el.setAttribute('aria-pressed',String(active));el.setAttribute('aria-label',`${p.p} m ${active?'有白化，點一下改為無白化':'無白化，點一下標記有白化'}`);el.querySelector('small').textContent=active?'白化':'無白化';document.querySelectorAll('[data-bleaching-summary]').forEach(el=>el.outerHTML=bleachingSummary());const ack=$('#acknowledge');if(ack)ack.checked=false;}
+  else if(a==='review-mode'){if(!['raw','canonical'].includes(el.dataset.mode))return;reviewMode=el.dataset.mode;const panel=el.closest('[data-review-line-panel]')||$('#review-line-panel');panel.innerHTML=reviewLinePanel();panel.querySelector(`[data-action="review-mode"][data-mode="${reviewMode}"]`)?.focus({preventScroll:true});}
+  else if(a==='toggle-bleach-point'){const key=el.dataset.key,p=points.find(p=>p.key===key),code=p&&canonical(p);if(!p||!isBleachableCode(code))return;state.healthStatus[key]=pointHealthStatus(p)==='bleached'?(state.linePhase==='complete'?'not_bleached':null):'bleached';state.ack=false;persist();const status=pointHealthStatus(p),active=status==='bleached';el.classList.toggle('active',active);el.dataset.healthStatus=status||'';el.setAttribute('aria-pressed',String(active));el.setAttribute('aria-label',bleachMarkerAria(p,status));el.querySelector('small').textContent=active?'已標記白化':'點選標記白化';document.querySelectorAll('[data-bleaching-summary]').forEach(el=>el.outerHTML=bleachingSummary());const ack=$('#acknowledge');if(ack)ack.checked=false;}
   else if(a==='layer'){layer=el.dataset.layer;render();}
   else if(a==='next-sheet'){const idx=sheetList().indexOf(sheet);if(idx<sheetList().length-1){sheet=sheetList()[idx+1];go(2);}else go(3);}
   else if(a==='export-draft')download(true);

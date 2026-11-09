@@ -9,8 +9,8 @@ const siteFixtures=[
  {id:2,is_active:true,region:'北海岸',name_zh:'另一樣點',name_en:'OtherSite',latitude:25.1,longitude:121.2},
  {id:3,is_active:true,region:'其他',name_zh:'缺座標樣點',name_en:'NoCoordinates',latitude:null,longitude:null}
 ]
-function setup(){
- const dom=new JSDOM(fs.readFileSync(new URL('index.html',base),'utf8'),{url:'https://example.invalid/public/reef-check/',runScripts:'outside-only'})
+function setup({debug=false,local=false}={}){
+ const dom=new JSDOM(fs.readFileSync(new URL('index.html',base),'utf8'),{url:(local?'file:///Users/mac/coral/coast-monitoring/web/public/reef-check/index.html':'https://example.invalid/public/reef-check/')+(debug?'?debug=1':''),runScripts:'outside-only'})
  const w=dom.window;w.structuredClone=structuredClone;w.scrollTo=()=>{};w.HTMLElement.prototype.scrollIntoView=()=>{};const requests=[]
  w.fetch=async(path,options)=>{
   if(path==='/api/session')return {ok:false}
@@ -35,7 +35,7 @@ test('24-hour numeric fields preserve focus and produce canonical 15:40 without 
   const hour=f.w.document.querySelector('[data-time-part="hour"]');assert.equal(hour.value,'');assert.equal(hour.placeholder,'時');assert.equal(f.w.document.querySelector('[data-time-part="minute"]').placeholder,'分');hour.focus()
   f.input('[data-time-part="hour"]','15');assert.equal(f.w.document.activeElement,hour)
   f.input('[data-time-part="minute"]','40');f.input('[data-time-part="minute"]','40','change')
-  assert.equal(f.run('state.meta.time'),'15:40');assert.equal(f.requests.length,0)
+  assert.equal(f.run('state.meta.time'),'15:40');assert.equal(f.requests.length,1)
   assert.ok(f.w.document.querySelector('.time-control').textContent.includes('24 小時制'))
   f.input('[data-time-part="hour"]','24');assert.equal(f.run('state.meta.time'),'')
   f.input('[data-time-part="hour"]','0');f.input('[data-time-part="hour"]','0','change');f.input('[data-time-part="minute"]','5');f.input('[data-time-part="minute"]','5','change')
@@ -58,19 +58,69 @@ test('site coordinates autofill, switching clears missing coordinates, reload pr
  }finally{f.w.close()}
 })
 
-test('temperature keeps only the inline note and never fetches a preview or substitutes manual values',async()=>{
+test('temperature preview shows station, Taiwan time and reference without substituting manual values',async()=>{
  const f=setup();try{
   await f.run('initApp()');f.selectSite('MeiRenDong')
   f.input('[data-time-part="hour"]','15');f.input('[data-time-part="minute"]','40');f.input('[data-time-part="minute"]','40','change')
-  assert.equal(f.w.document.querySelector('#environment-reference'),null)
-  assert.ok(f.w.document.querySelector('[data-meta="temperature"]').closest('label').textContent.includes('後台會自動查詢附近測站海溫，若有需要替換再填入'))
+  assert.equal(f.requests.length,1);assert.deepEqual(f.requests[0].input,{activity_code:'RC-FIXTURE',site_id:1,survey_date:'2026-11-06',event_time:'15:40'})
+  f.requests[0].resolve({ok:true,json:async()=>({site_id:1,station_id:'ST01',station_name:'測試海溫站',sea_temp_c:27.2,observed_at:'2026-11-06T07:00:00Z'})});await flush()
+  const panel=f.w.document.querySelector('#environment-reference')
+  assert.ok(panel.textContent.includes('27.2 °C'));assert.ok(panel.textContent.includes('測試海溫站'));assert.ok(panel.textContent.includes('15:00:00'))
+  assert.equal(f.w.document.querySelector('[data-meta="temperature"]').value,'')
   assert.equal(f.run('payload().transects[0].water_temp_c'),null)
   f.input('[data-meta="temperature"]','25.5');f.selectSite('OtherSite')
-  assert.equal(f.run('payload().transects[0].water_temp_c'),25.5);assert.equal(f.requests.length,0)
+  assert.equal(f.run('payload().transects[0].water_temp_c'),25.5);assert.equal(f.requests.length,2)
   const css=fs.readFileSync(new URL('styles.css',base),'utf8')
   assert.ok(css.includes('.time-parts input::placeholder'))
   assert.ok(css.includes('.time-parts input:placeholder-shown'))
  }finally{f.w.close()}
+})
+
+test('missing station and missing same-day observation show the requested backend reminder, not a fake value',async()=>{
+ const f=setup();try{
+  await f.run('initApp()');f.selectSite('MeiRenDong');f.input('[data-time-part="hour"]','15');f.input('[data-time-part="minute"]','40','change')
+  const panel=()=>f.w.document.querySelector('#environment-reference'),reminder='若鄰近有測站但未抓到資料，請至後台確認樣點附近測站。'
+  f.requests[0].resolve({ok:true,json:async()=>({site_id:1,station_id:null,sea_temp_c:null,message:'舊版說明'})});await flush()
+  assert.ok(panel().textContent.includes('尚未對應氣象署測站'));assert.ok(panel().textContent.includes(reminder));assert.ok(!panel().textContent.includes('°C'))
+  const next=f.run('refreshEnvironment(true)');f.requests[1].resolve({ok:true,json:async()=>({site_id:1,station_id:'ST01',station_name:'測試海溫站',sea_temp_c:null})});await next
+  assert.ok(panel().textContent.includes('調查當日沒有可用海溫'));assert.ok(panel().textContent.includes('不改用其他日期'));assert.ok(panel().textContent.includes(reminder))
+  assert.equal(f.requests[1].input.survey_date,'2026-11-06');assert.equal(f.run('state.meta.temperature'),'')
+  const failed=f.run('refreshEnvironment(true)');f.requests[2].resolve({ok:false});await failed
+  assert.ok(panel().textContent.includes('暫時無法取得'));assert.ok(!panel().textContent.includes('尚未對應'))
+  panel().querySelector('[data-action="refresh-environment"]').click();assert.equal(f.requests.length,4)
+  f.requests[3].resolve({ok:true,json:async()=>({site_id:1,station_id:'ST01',sea_temp_c:0})});await flush()
+  assert.ok(panel().textContent.includes('0 °C'));assert.equal(f.run('state.meta.temperature'),'')
+ }finally{f.w.close()}
+})
+
+test('preview ignores late responses after site, incomplete time or draft changes',async()=>{
+ const f=setup();try{
+  await f.run('initApp()');f.selectSite('MeiRenDong');f.input('[data-time-part="hour"]','15');f.input('[data-time-part="minute"]','40','change')
+  f.selectSite('OtherSite');assert.equal(f.requests.length,2)
+  f.requests[1].resolve({ok:true,json:async()=>({site_id:2,station_id:'ST02',station_name:'目前測站',sea_temp_c:28})});await flush()
+  f.requests[0].resolve({ok:true,json:async()=>({site_id:1,station_id:'ST01',station_name:'舊測站',sea_temp_c:21})});await flush()
+  assert.ok(f.w.document.querySelector('#environment-reference').textContent.includes('目前測站'));assert.ok(!f.w.document.querySelector('#environment-reference').textContent.includes('舊測站'))
+  f.input('[data-time-part="minute"]','');assert.ok(!f.w.document.querySelector('#environment-reference').textContent.includes('28 °C'))
+  f.input('[data-time-part="minute"]','41','change');assert.equal(f.requests.length,3)
+  f.input('[data-time-part="minute"]','');f.requests[2].resolve({ok:true,json:async()=>({site_id:2,station_id:'ST02',sea_temp_c:29})});await flush()
+  assert.ok(!f.w.document.querySelector('#environment-reference').textContent.includes('29 °C'))
+  f.input('[data-time-part="minute"]','42','change');assert.equal(f.requests.length,4)
+  f.run('state={...state,id:"another-draft",meta:{...state.meta}};render()');assert.equal(f.requests.length,5)
+  f.requests[3].resolve({ok:true,json:async()=>({site_id:2,station_id:'ST02',sea_temp_c:19})});await flush()
+  assert.ok(!f.w.document.querySelector('#environment-reference').textContent.includes('19 °C'))
+  f.requests[4].resolve({ok:true,json:async()=>({site_id:2,station_id:'ST02',sea_temp_c:26})});await flush()
+  assert.ok(f.w.document.querySelector('#environment-reference').textContent.includes('26 °C'))
+ }finally{f.w.close()}
+})
+
+test('local and debug pages show an explanation but never request official reference temperatures',async()=>{
+ for(const options of [{debug:true},{local:true}]){
+  const f=setup(options);try{
+   await f.run('initApp()');f.selectSite('MeiRenDong');f.input('[data-time-part="hour"]','15');f.input('[data-time-part="minute"]','40','change')
+   await f.run('refreshEnvironment(true)');assert.equal(f.requests.length,0)
+   assert.ok(f.w.document.querySelector('#environment-reference').textContent.includes('本機／測試模式不查詢正式海溫'))
+  }finally{f.w.close()}
+ }
 })
 
 test('next group is directly below the five input rows, and numeric 10 stays raw but submits as OT',()=>{
@@ -171,5 +221,77 @@ test('empty fields stay empty and block normal navigation with a missing-value m
   const el=f.w.document.querySelector('[data-cell="line"][data-key="0"]')
   assert.equal(el.getAttribute('aria-invalid'),'true');assert.ok(f.w.document.querySelector('#substrate-feedback-line-0').textContent.includes('尚未填寫'))
   assert.ok(!f.w.document.querySelector('#toast').textContent.includes('未知代碼'))
+ }finally{f.w.close()}
+})
+
+test('bleaching uses health_status and leaves points unknown until an explicit completion confirmation',()=>{
+ const f=setup();try{
+  f.run('step=2;state.coralMorphology="classified";points.forEach(p=>state.line[p.key]="6");Object.assign(state.line,{"0":"1","0.5":"2","1":"a","1.5":"91"});state.linePhase="number-review";render()')
+  f.w.document.querySelector('[data-action="confirm-line-numbers"]').click()
+  assert.equal(f.run('state.linePhase'),'bleaching');assert.equal(f.run('Object.keys(state.healthStatus).length'),0)
+  const selector='[data-action="toggle-bleach-point"][data-key="0"]'
+  assert.equal(f.w.document.querySelector(selector).textContent.trim(),'點選標記白化')
+  assert.ok(f.w.document.querySelector(selector).getAttribute('aria-label').includes('尚未確認'))
+  assert.equal(f.w.document.querySelector('[data-action="toggle-bleach-point"][data-key="1.5"]'),null)
+  assert.equal(f.run('payload().substrate_points[0].health_status'),null)
+  f.w.document.querySelector(selector).click();assert.equal(f.run('state.healthStatus["0"]'),'bleached')
+  assert.equal(f.w.document.querySelector(selector).getAttribute('aria-pressed'),'true');assert.ok(f.w.document.querySelector('[data-bleaching-summary]').textContent.includes('待確認'))
+  f.w.document.querySelector(selector).click();assert.equal(f.run('pointHealthStatus(points[0])'),null)
+  f.w.document.querySelector(selector).click();f.w.document.querySelector('[data-action="confirm-line-bleaching"]').click()
+  assert.equal(f.run('state.healthStatus["0"]'),'bleached');assert.equal(f.run('state.healthStatus["0.5"]'),'not_bleached');assert.equal(f.run('state.healthStatus["1"]'),'not_bleached')
+  assert.equal(f.run('payload().substrate_points[3].health_status'),null);assert.equal(f.run('payload().substrate_points[4].health_status'),null)
+  assert.equal(f.run('payload().substrate_points[0].is_bleached'),undefined)
+  assert.ok(f.run('bleachingSummary()').includes('HC 白化標記數</th><td>1</td>'))
+  f.run('step=3;state.ack=true;render()');f.w.document.querySelector(selector).click()
+  assert.equal(f.run('state.healthStatus["0"]'),'not_bleached');assert.equal(f.run('state.ack'),false)
+  f.run('step=2;state.linePhase="entry";render()');f.input('[data-cell="line"][data-key="0"]','2','change')
+  assert.equal(f.run('pointHealthStatus(points[0])'),null)
+ }finally{f.w.close()}
+})
+
+test('legacy local marks migrate without promoting unfinished default negatives to confirmed health status',()=>{
+ const f=setup();try{
+  f.run('state.linePhase="bleaching";state.bleached={"0":true,"0.5":false};state=migrateRecord(state)')
+  assert.equal(f.run('state.healthStatus["0"]'),'bleached');assert.equal(f.run('state.healthStatus["0.5"]'),undefined);assert.equal(f.run('state.bleached'),undefined)
+  f.run('state.linePhase="complete";state.bleached={"0.5":false};state=migrateRecord(state)')
+  assert.equal(f.run('state.healthStatus["0.5"]'),'not_bleached')
+ }finally{f.w.close()}
+})
+
+test('both final review screens expose raw/canonical tabs without hiding them in a disclosure',()=>{
+ const f=setup();try{
+  f.run('state.coralMorphology="classified";state.linePhase="complete";points.forEach(p=>state.line[p.key]="6");state.line["0"]="1";state.healthStatus["0"]="bleached";state.ack=true;reviewMode="raw"')
+  const initial=f.run('JSON.stringify({line:state.line,health:state.healthStatus,points:payload().substrate_points})')
+  for(const screen of [2,3]){
+   f.run(`step=${screen};reviewMode="raw";render()`)
+   const panel=f.w.document.querySelector('[data-review-line-panel]')
+   assert.ok(panel);assert.equal(panel.closest('details'),null)
+   assert.equal(panel.querySelector('[data-review-key="0"]>b').textContent,'1')
+   panel.querySelector('[data-action="review-mode"][data-mode="canonical"]').click()
+   const current=f.w.document.querySelector('[data-review-line-panel]')
+   assert.equal(current.querySelector('[data-review-key="0"]>b').textContent,'HC')
+   assert.equal(current.querySelector('[data-mode="canonical"]').getAttribute('aria-selected'),'true')
+   assert.equal(current.querySelector('[data-key="0"][data-action="toggle-bleach-point"]').getAttribute('aria-pressed'),'true')
+   current.querySelector('[data-action="review-mode"][data-mode="raw"]').click()
+   assert.equal(current.querySelector('[data-review-key="0"]>b').textContent,'1')
+   assert.equal(f.run('state.ack'),true)
+   assert.equal(f.run('JSON.stringify({line:state.line,health:state.healthStatus,points:payload().substrate_points})'),initial)
+   assert.equal(f.w.document.querySelectorAll('[data-bleaching-summary]').length,1)
+  }
+ }finally{f.w.close()}
+})
+
+test('coral totals remain independent of bleaching marks, include morphology and exclude mud composites',()=>{
+ const f=setup();try{
+  f.run('step=3;state.coralMorphology="classified";state.linePhase="complete";state.mud=true;points.forEach(p=>state.line[p.key]="6");Object.assign(state.line,{"0":"1","0.5":"2","1":"a","1.5":"2","2":"9","2.5":"10","3":"NA","25":"1","35":"2"});state.down["2"]="1";points.forEach(p=>{if(isBleachableCode(canonical(p)))state.healthStatus[p.key]="not_bleached"});state.healthStatus["0"]="bleached";state.healthStatus["1.5"]="bleached";render()')
+  const values=(group,kind)=>[...f.w.document.querySelector(`[data-coral-group="${group}"][data-summary-kind="${kind}"]`).querySelectorAll('td')].map(td=>td.textContent)
+  assert.deepEqual(values('HC','total'),['2','1','0','0']);assert.deepEqual(values('SC','total'),['2','1','0','0'])
+  assert.deepEqual(values('HC','bleached'),['1','0','0','0']);assert.deepEqual(values('SC','bleached'),['1','0','0','0'])
+  f.w.document.querySelector('[data-action="toggle-bleach-point"][data-key="0"]').click()
+  assert.deepEqual(values('HC','total'),['2','1','0','0']);assert.deepEqual(values('SC','total'),['2','1','0','0'])
+  assert.deepEqual(values('HC','bleached'),['0','0','0','0']);assert.deepEqual(values('SC','bleached'),['1','0','0','0'])
+  assert.equal(f.run('payload().substrate_points.find(p=>p.position_m===2).substrate_code'),'SI(HC)')
+  f.run('delete state.line["0"];render()')
+  assert.equal(values('HC','total')[0],'待確認底質');assert.equal(values('HC','bleached')[0],'待確認底質')
  }finally{f.w.close()}
 })

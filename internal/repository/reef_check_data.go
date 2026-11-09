@@ -1493,13 +1493,14 @@ func (r ReefDataRepository) SubmitSurvey(ctx context.Context, sub service.ReefCh
 				code = "NA"
 			}
 			_, err = exec.Exec(ctx, `
-				INSERT INTO substrate_point (transect_id, segment, position_m, substrate_code, substrate_layer, is_bleached)
-				VALUES ($1, $2, $3, $4, $5::substrate_layer, $6)
+				INSERT INTO substrate_point (transect_id, segment, position_m, substrate_code, substrate_layer, is_bleached, health_status)
+				VALUES ($1, $2, $3, $4, $5::substrate_layer, $6, $7)
 				ON CONFLICT (transect_id, position_m, substrate_layer) DO UPDATE SET
 					substrate_code = EXCLUDED.substrate_code,
 					segment = EXCLUDED.segment,
-					is_bleached = EXCLUDED.is_bleached
-			`, lineID, p.Segment, p.PositionM, code, layer, p.IsBleached)
+					is_bleached = EXCLUDED.is_bleached,
+					health_status = EXCLUDED.health_status
+			`, lineID, p.Segment, p.PositionM, code, layer, p.IsBleached, p.HealthStatus)
 			if err != nil {
 				return service.ReefCheckSubmissionResult{}, translateError(err)
 			}

@@ -61,12 +61,13 @@ type ReefDataMetadata struct {
 }
 
 type ReefDataPoint struct {
-	ID         int64   `json:"id"`
-	Segment    int     `json:"segment"`
-	Position   float64 `json:"position_m"`
-	Layer      string  `json:"substrate_layer"`
-	Code       string  `json:"substrate_code"`
-	IsBleached *bool   `json:"is_bleached"`
+	ID           int64   `json:"id"`
+	Segment      int     `json:"segment"`
+	Position     float64 `json:"position_m"`
+	Layer        string  `json:"substrate_layer"`
+	Code         string  `json:"substrate_code"`
+	IsBleached   *bool   `json:"is_bleached"`
+	HealthStatus *string `json:"health_status"`
 }
 
 type ReefDataBleaching struct {
@@ -343,6 +344,7 @@ type ReefCheckSubstratePointInput struct {
 	SubstrateCode  string  `json:"substrate_code"`
 	SubstrateLayer string  `json:"substrate_layer"`
 	IsBleached     *bool   `json:"is_bleached"`
+	HealthStatus   *string `json:"health_status"`
 }
 
 type ReefCheckBleachingInput struct {
@@ -417,6 +419,9 @@ func (s *ReefCheckSurveySubmission) Validate() error {
 	}
 	for i := range s.SubstratePoints {
 		s.SubstratePoints[i].SubstrateCode = NormalizeEntrySubstrate(s.SubstratePoints[i].SubstrateCode)
+		if err := s.SubstratePoints[i].normalizeHealthStatus(); err != nil {
+			return err
+		}
 	}
 	if s.Event.SurveyDate == "" {
 		return bad("缺少調查日期")

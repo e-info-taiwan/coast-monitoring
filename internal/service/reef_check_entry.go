@@ -145,7 +145,7 @@ func (s *ReefCheckSurveySubmission) validateTabletEntry() error {
 			}
 			seen[key] = true
 			coral := p.SubstrateCode == "SC" || p.SubstrateCode == "HC" || strings.HasPrefix(p.SubstrateCode, "HC-")
-			if coral && p.IsBleached == nil {
+			if coral && p.HealthStatus == nil {
 				return bad("珊瑚點缺少白化核對")
 			}
 			if morphology == "general" && strings.HasPrefix(p.SubstrateCode, "HC-") {

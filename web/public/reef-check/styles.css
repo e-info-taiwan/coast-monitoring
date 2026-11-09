@@ -126,3 +126,14 @@
 .raw-review-board td.raw-warning{background:#fff6e6;color:#795016}
 .raw-review-board td.raw-warning small{color:#795016}
 .code-help-note{font-size:15px;color:var(--muted);line-height:1.7;padding:0 0 12px;overflow-wrap:anywhere}
+
+.environment-reference{padding:16px;border:1px solid #9bbcb8;border-radius:8px;background:#f0f7f6;min-width:0;overflow-wrap:anywhere}
+.environment-reference b{font-size:18px;color:var(--teal)}
+.environment-reference p{margin:8px 0;font-size:16px}
+.environment-reference small{display:block;font-size:15px;line-height:1.7;color:var(--muted)}
+.raw-review-board .bleach-marker{min-width:66px;max-width:100%;min-height:52px}
+.raw-review-board .bleach-marker small{font-size:12px;white-space:normal;line-height:1.4;max-width:6em}
+.bleaching-summary td small{display:block;font-size:13px;font-weight:400;color:var(--muted)}
+.review-detail>h3{margin:18px 18px 0;font-size:21px;color:var(--teal)}
+.bleaching-summary tr[data-summary-kind="bleached"] th{font-weight:500;background:#f5f9f8}
+.review-mode-tabs button{white-space:normal;padding:10px 8px;min-height:52px}

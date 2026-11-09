@@ -40,8 +40,11 @@ func TestPointEntryPreservesPublicationAndHistoricalTotals(t *testing.T) {
 	sub := service.ReefCheckSurveySubmission{Format: "reefcheck-web-v4", ActivityCode: code, BleachingMode: "point_marks", Event: service.ReefCheckEventInput{SiteID: site, SurveyDate: "2026-10-19", EventTime: "09:30", DepthM: 5}, Transects: []service.ReefCheckTransectInput{{TransectKey: "line", Method: "line", Recorders: []string{"Fixture recorder"}, CoralMorphology: "general"}}, EntryMetadata: service.ReefCheckEntryMetadata{Weather: "晴"}}
 	for seg := 1; seg <= 4; seg++ {
 		for i := 0; i < 40; i++ {
-			marked := seg == 1 && i == 0
-			sub.SubstratePoints = append(sub.SubstratePoints, service.ReefCheckSubstratePointInput{TransectKey: "line", Segment: seg, PositionM: float64((seg-1)*25) + float64(i)/2, SubstrateLayer: "surface", SubstrateCode: "HC", IsBleached: &marked})
+			status := service.HealthStatusNotBleached
+			if seg == 1 && i == 0 {
+				status = service.HealthStatusBleached
+			}
+			sub.SubstratePoints = append(sub.SubstratePoints, service.ReefCheckSubstratePointInput{TransectKey: "line", Segment: seg, PositionM: float64((seg-1)*25) + float64(i)/2, SubstrateLayer: "surface", SubstrateCode: "HC", HealthStatus: &status})
 		}
 	}
 	repo := NewReefDataRepository(tx)
@@ -62,6 +65,10 @@ func TestPointEntryPreservesPublicationAndHistoricalTotals(t *testing.T) {
 	}
 	if detail.Event.EntryMetadata == nil || detail.Event.EntryMetadata.Weather != "晴" || detail.Event.PublicationStatus != "draft" {
 		t.Fatalf("metadata/publication lost: %+v", detail.Event)
+	}
+	point := detail.Transects[0].Points[0]
+	if point.HealthStatus == nil || *point.HealthStatus != "bleached" || point.IsBleached == nil || !*point.IsBleached {
+		t.Fatalf("health status did not round trip: %+v", point)
 	}
 	var total int
 	if err = tx.QueryRow(ctx, `SELECT total FROM substrate_bleaching_summary WHERE transect_id=$1 AND code='HC'`, detail.Transects[0].ID).Scan(&total); err != nil || total != 1 {
