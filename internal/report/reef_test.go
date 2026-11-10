@@ -90,14 +90,14 @@ func TestSubstrateMappingAndStatistics(t *testing.T) {
 }
 func TestXLSXTextIsNeverExecutable(t *testing.T) {
 	d := templateFixture()
-	d.Event.SiteName = `=HYPERLINK("https://example.test","x")`
+	d.Event.SiteEnglish = `=HYPERLINK("https://example.test","x")`
 	data, err := TemplateWorkbook([]service.ReefDataDetail{d}, "line")
 	if err != nil {
 		t.Fatal(err)
 	}
 	files := readWorkbook(t, data)
 	cc := cells(t, files["xl/worksheets/sheet1.xml"])
-	if cc["C1"].Type != "inlineStr" || cc["C1"].Text != d.Event.SiteName {
+	if cc["D1"].Type != "inlineStr" || cc["D1"].Text != d.Event.SiteEnglish {
 		t.Fatal("user text became executable or corrupted")
 	}
 }

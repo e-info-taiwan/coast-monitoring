@@ -133,6 +133,7 @@ func TestReefTemplateDownloadTypes(t *testing.T) {
 	}{
 		{"/report.zip", "", "application/zip", 200},
 		{"/report.xlsx", "summary", "spreadsheetml", 200},
+		{"/report.xlsx", "site", "spreadsheetml", 200},
 		{"/report.xlsx", "line", "application/json", 400},
 		{"/report.xlsx", "invalid", "application/json", 400},
 	} {

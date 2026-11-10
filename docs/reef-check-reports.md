@@ -1,21 +1,25 @@
 # Reef Check 報告輸出
 
-後台報告改為填入提供的原始 Excel 範本，保留原有工作表、合併儲存格、欄寬、列高、字型、底色、邊框、數字格式、圖表錨點與列印設定。主要下載不再使用先前的七張正規化資料表版面。
-
 ## 後台操作
 
-場次詳情提供四種下載：
+單一場次可下載野柳交付格式的 Excel 活頁簿。
 
-- **下載報告套組 ZIP**：依已記錄方法產生 Line、Belt 與 Summary 三類 Excel。
-- **底質 Excel**：原始 LineTransect 範本，僅有底質記錄時顯示。
-- **魚類／無脊椎 Excel**：原始 BeltTransect 範本，僅有相關記錄時顯示。
-- **Summary**：原始統計製圖範本，包含該場次的資料。
+| 下載項目 | 工作表與資料 |
+| --- | --- |
+| 底質 Line Excel | DATA 依四段各 40 點列出標準表層代碼，另附 GRAPHS、INSTRUCTIONS、FIELD SHEET |
+| 生物 Belt Excel | DATA 按 S1～S4 列出魚類、無脊椎、衝擊與罕見生物，另附 GRAPHS、INSTRUCTIONS 及兩張現場手板 |
+| 樣點 Site Excel | DATA 包含日期、時間、度分秒座標、環境及調查團隊，FIELD SHEET SITE 可列印使用 |
+| 下載報告套組 ZIP | 每場一份 Site，另依該場記錄的方法產生 Line 和 Belt，並依樣點附上 Summary |
+
+樣點優先使用英文名稱。Line 以 HC 表示硬珊瑚型態，以 SI 表示表層泥沙複合代碼。NA 保留，計算各段覆蓋率時排除 NA 與空白點。Belt 百分比依 Excel 的百分比格式儲存。Site 資料庫未記錄的欄位留白，水溫依調查深度填到對應的 3 m 或 10 m 欄位。
+
+底質與生物的「詳細資料」下載保留台灣版原始記錄、尺寸與 EXPORT 附表，Summary 提供歷年比較。
 
 列表的 **下載篩選報告 ZIP** 依已套用的年份、樣點、方法、搜尋字串選取全部符合場次，跨分頁；選中場次保留全部方法。一次最多 100 場，超過會要求縮小範圍，不截斷。編輯期間停用下載，輸出只使用已儲存資料。
 
 報告僅供管理員下載，下載不變更資料或發布狀態。包含目前篩選中的草稿、已發布與封存場次。
 
-## 原始範本
+## 詳細資料與歷年 Summary 範本
 
 | 類型 | 來源檔案 | 保留的主要工作表 |
 | --- | --- | --- |
@@ -50,6 +54,9 @@ Summary 僅使用**這次選取的場次**，不混入範例歷史資料。要�
 GET /api/admin/reef-check-data/events/{id}/report.zip
 GET /api/admin/reef-check-data/events/{id}/report.xlsx?kind=line
 GET /api/admin/reef-check-data/events/{id}/report.xlsx?kind=belt
+GET /api/admin/reef-check-data/events/{id}/report.xlsx?kind=site
+GET /api/admin/reef-check-data/events/{id}/report.xlsx?kind=detail-line
+GET /api/admin/reef-check-data/events/{id}/report.xlsx?kind=detail-belt
 GET /api/admin/reef-check-data/events/{id}/report.xlsx?kind=summary
 GET /api/admin/reef-check-data/reports.zip?year=2026&site=2&method=line&search=合界
 ```
