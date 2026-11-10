@@ -2,7 +2,15 @@
 
 ## 後台操作
 
-單一場次可下載野柳交付格式的 Excel 活頁簿。
+單場與列表的篩選結果都可以依交付對象下載 ZIP。每次下載均讀取資料庫中已儲存的場次、穿越線及觀測紀錄，歷史匯入的場次也走相同流程。
+
+| 交付格式 | ZIP 內容 |
+| --- | --- |
+| 珊瑚礁體檢總部上傳格式 | 每場一份 Site。依實際調查方法提供 Line、Belt 工作簿 |
+| TaiBIF 上傳格式 | Line 匯出表層逐點底質長表 XLSX，保留原始輸入碼與底質分類。Belt 匯出 Event-Core、Occurance（沿用交付檔名）、MoF 及 eMoF 四份 CSV，依場次與子樣區關聯 |
+| 內部科導分析格式 | 依調查方法提供底質與生物分析工作簿，另按樣點與深度產生 Summary |
+
+展開「其他下載與單一工作簿」可個別下載下列工作簿。
 
 | 下載項目 | 工作表與資料 |
 | --- | --- |
@@ -51,14 +59,16 @@ Summary 僅使用**這次選取的場次**，不混入範例歷史資料。要�
 ## API
 
 ```
-GET /api/admin/reef-check-data/events/{id}/report.zip
+GET /api/admin/reef-check-data/events/{id}/report.zip?format=headquarters
+GET /api/admin/reef-check-data/events/{id}/report.zip?format=taibif
+GET /api/admin/reef-check-data/events/{id}/report.zip?format=internal
 GET /api/admin/reef-check-data/events/{id}/report.xlsx?kind=line
 GET /api/admin/reef-check-data/events/{id}/report.xlsx?kind=belt
 GET /api/admin/reef-check-data/events/{id}/report.xlsx?kind=site
 GET /api/admin/reef-check-data/events/{id}/report.xlsx?kind=detail-line
 GET /api/admin/reef-check-data/events/{id}/report.xlsx?kind=detail-belt
 GET /api/admin/reef-check-data/events/{id}/report.xlsx?kind=summary
-GET /api/admin/reef-check-data/reports.zip?year=2026&site=2&method=line&search=合界
+GET /api/admin/reef-check-data/reports.zip?format=internal&year=2026&site=2&method=line&search=合界
 ```
 
 舊 `.xlsx` 路徑保留，沒有 kind 時預設 Summary；多樣點或超過兩個深度需改用 ZIP。兩者沿用 admin session 權限，回傳 attachment、`Cache-Control: no-store`。無符合場次為 404，無效參數／沒有對應方法／超過數量上限為 400；不回傳部分工作簿。

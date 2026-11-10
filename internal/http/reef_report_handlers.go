@@ -170,7 +170,7 @@ func (h *AdminHandlers) writeReefWorkbook(w http.ResponseWriter, r *http.Request
 	contentType := "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 	filename := "reef-check-report.xlsx"
 	if strings.HasSuffix(r.URL.Path, ".zip") {
-		data, err = report.TemplateArchive(details)
+		data, err = report.FormatArchive(details, r.URL.Query().Get("format"))
 		contentType = "application/zip"
 		filename = "reef-check-reports.zip"
 	} else {

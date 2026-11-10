@@ -1,6 +1,10 @@
 
 
 const methods = { line: "底質 Line", belt_fish: "魚類 Belt", belt_invert: "無脊椎・罕見生物・環境影響" }
+const reportFormats = { headquarters: "珊瑚礁體檢總部上傳格式", taibif: "TaiBIF 上傳格式", internal: "內部科導分析格式" }
+const formatButtons = (busy, empty = false) => Object.entries(reportFormats).map(([format, label]) =>
+  `<button type="button" class="tiny-button rd-report-button" data-format="${format}" data-empty="${empty}" ${busy || empty ? "disabled" : ""}>${label}</button>`
+).join("")
 const roles = { member: "成員", team_leader: "隊長", team_scientist: "科學指導員" }
 const groups = { fish: "魚類", invert: "無脊椎", rare: "罕見生物" }
 const segments = ["0–20m", "25–45m", "50–70m", "75–95m"]
@@ -144,6 +148,7 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
           <p class="meta-line">依樣點、日期、時間與深度查看實際調查；未記錄的調查方法不補成零。</p>
         </div>
         <div class="rd-header-actions">
+          ${formatButtons(s.exporting, !filtered.length)}
           <button type="button" class="tiny-button rd-report-button" id="rd-export-filtered" data-empty="${!filtered.length}" ${s.exporting || !filtered.length ? "disabled" : ""}>下載篩選報告 ZIP（${filtered.length}）</button>
           <a class="tiny-button" id="rd-manage-activities" href="/admin/#public_content:activity" title="開啟活動行程，建立活動、產生或重發志工填報代碼">管理活動與志工填報代碼</a>
           <button type="button" class="primary-button" id="rd-create-event">＋ 新增調查場次</button>
@@ -207,9 +212,13 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
       await pending
       if (panel === current) render(current)
     }
-    panel.querySelector("#rd-export-filtered")?.addEventListener("click", event => {
-      const query = new URLSearchParams({ year: s.year, site: s.site, method: s.method, diver: s.diver, search: s.search,publication_status:s.publication_status,activity_id:s.activity_id,event_ids:s.event_ids,survey_date:s.survey_date,depth_m:s.depth_m })
-      downloadReport(`/admin/reef-check-data/reports.zip?${query}`, "ReefCheck-範本報告套組.zip", event.currentTarget)
+    panel.querySelectorAll("[data-format], #rd-export-filtered").forEach(button => {
+      button.onclick = () => {
+        const query = new URLSearchParams({year:s.year, site:s.site, method:s.method, diver:s.diver, search:s.search, publication_status:s.publication_status, activity_id:s.activity_id, event_ids:s.event_ids, survey_date:s.survey_date, depth_m:s.depth_m})
+        const format = button.dataset.format
+        if (format) query.set("format", format)
+        downloadReport(`/admin/reef-check-data/reports.zip?${query}`, `ReefCheck-${reportFormats[format] || "報告套組"}.zip`, button)
+      }
     })
     panel.querySelector("#rd-create-event")?.addEventListener("click", showCreateEventModal)
     panel.querySelector("#rd-manage-activities")?.addEventListener("click", event => {
@@ -296,8 +305,11 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
           <p class="rd-id">${esc(e.event_id)}</p>
         </div>
         <div class="rd-header-actions">
+          ${formatButtons(s.editing || s.exporting)}
+          <details><summary>其他下載與單一工作簿</summary>
           <button type="button" class="tiny-button rd-report-button" id="rd-export-event" ${s.editing || s.exporting ? "disabled" : ""}>下載報告套組 ZIP</button>
           ${[["site", "樣點 Site Excel"], ["summary", "Summary"], ...(s.detail.transects.some(tr => tr.method === "line") ? [["line", "底質 Line Excel"], ["detail-line", "底質詳細資料"]] : []), ...(s.detail.transects.some(tr => tr.method === "belt_fish" || tr.method === "belt_invert") ? [["belt", "生物 Belt Excel"], ["detail-belt", "生物詳細資料"]] : [])].map(([kind, label]) => `<button type="button" class="tiny-button rd-report-button" data-report-kind="${kind}" ${s.editing || s.exporting ? "disabled" : ""}>${label}</button>`).join("")}
+          </details>
           <button type="button" class="danger-button" id="rd-delete-event">刪除此場次</button>
         </div>
       </div>
@@ -338,8 +350,12 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
       s.detail = null
       renderList()
     }
-    panel.querySelector("#rd-export-event")?.addEventListener("click", event => {
-      downloadReport(`/admin/reef-check-data/events/${e.id}/report.zip`, `${e.site_name}-${e.survey_date}-${e.depth_m}m-報告套組.zip`, event.currentTarget)
+    panel.querySelectorAll("[data-format], #rd-export-event").forEach(button => {
+      button.onclick = () => {
+        const format = button.dataset.format
+        const query = format ? `?format=${format}` : ""
+        downloadReport(`/admin/reef-check-data/events/${e.id}/report.zip${query}`, `${e.site_name}-${e.survey_date}-${e.depth_m}m-${reportFormats[format] || "報告套組"}.zip`, button)
+      }
     })
     panel.querySelectorAll("[data-report-kind]").forEach(button => {
       button.onclick = () => downloadReport(`/admin/reef-check-data/events/${e.id}/report.xlsx?kind=${button.dataset.reportKind}`, `${e.site_name}-${e.survey_date}-${e.depth_m}m-${button.dataset.reportKind}.xlsx`, button)

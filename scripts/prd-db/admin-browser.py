@@ -1,6 +1,7 @@
 """Exercise the admin UI in Chrome against the CI server and its disposable PostgreSQL database."""
 import xml.etree.ElementTree as ET
 from zipfile import ZipFile
+from io import BytesIO
 
 import json
 import os
@@ -58,7 +59,40 @@ def verify(code, expected_status):
     assert status == expected_status, (status, expected_status)
 
 
+def check_recipient_downloads(page, code):
+    ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    for label, expected in (
+        ("珊瑚礁體檢總部上傳格式", ("_Site.xlsx", "_LineTransect.xlsx", "_BeltTransect.xlsx")),
+        ("TaiBIF 上傳格式", ("_Substrate-long.xlsx", "_Event-Core.csv", "_Occurance.csv", "_MoF.csv", "_eMoF.csv")),
+        ("內部科導分析格式", ("_LineAnalysis.xlsx", "_BeltAnalysis.xlsx", "_Summary_5m.xlsx")),
+    ):
+        with page.expect_download() as download:
+            page.get_by_role("button", name=label, exact=True).click()
+        with ZipFile(download.value.path()) as bundle:
+            members = bundle.namelist()
+            assert len(members) == len(expected), members
+            for suffix in expected:
+                name, = [m for m in members if m.endswith(suffix)]
+                if not name.endswith(".xlsx"):
+                    continue
+                with ZipFile(BytesIO(bundle.read(name))) as book:
+                    labels = book.read("xl/sharedStrings.xml").decode()
+                    assert "請填寫白色格子" not in labels and "white boxes" not in labels.lower(), name
+                    sheet = ET.fromstring(book.read("xl/worksheets/sheet1.xml"))
+                    if suffix == "_LineTransect.xlsx":
+                        assert sheet.find(".//s:c[@r='P34']/s:is/s:t", ns).text == code
+                    elif suffix == "_LineAnalysis.xlsx":
+                        assert sheet.find(".//s:c[@r='P34']/s:v", ns).text == {"OT": "10", "RB": "7"}[code]
+                    elif suffix == "_Substrate-long.xlsx":
+                        rows = sheet.findall(".//s:row", ns)
+                        values = [{c.get("r").rstrip("0123456789"): "".join(c.itertext())
+                                   for c in row.findall("s:c", ns)} for row in rows]
+                        assert [(r["D"], r["H"]) for r in values if r.get("F") == "94.5"] == [("browser-member", code)]
+
+
 def check_report_downloads(page):
+    check_recipient_downloads(page, "OT")
+    page.get_by_text("其他下載與單一工作簿", exact=True).click()
     ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     for kind, label, expected_cell, expected_value in (
         ("line", "底質 Line Excel", "L17", "OT"),
@@ -148,6 +182,7 @@ def check_substrate_board(page):
     expect(edited).to_have_value("RB")
     page.get_by_role("button", name="儲存修改").click()
     expect(rows.last.locator("td").last).to_have_text("7")
+    check_recipient_downloads(page, "RB")
     page.get_by_role("button", name="返回場次列表", exact=False).click()
     page.get_by_role("button", name="查看 browser-member", exact=True).click()
     page.get_by_role("button", name="底質 Line", exact=True).click()
