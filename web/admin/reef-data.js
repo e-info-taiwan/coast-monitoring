@@ -242,6 +242,7 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
       document.body.append(link)
       link.click()
       link.remove()
+      button.closest("[popover]")?.hidePopover()
       window.setTimeout(() => URL.revokeObjectURL(url), 60000)
     } catch (error) {
       window.alert(`報告下載失敗：${error.message}`)
@@ -306,10 +307,11 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
         </div>
         <div class="rd-header-actions">
           ${formatButtons(s.editing || s.exporting)}
-          <details><summary>其他下載與單一工作簿</summary>
+          <button type="button" class="tiny-button rd-more-downloads" popovertarget="rd-download-options">其他下載</button>
+          <div id="rd-download-options" popover="auto" role="group" aria-label="其他下載">
           <button type="button" class="tiny-button rd-report-button" id="rd-export-event" ${s.editing || s.exporting ? "disabled" : ""}>下載報告套組 ZIP</button>
           ${[["site", "樣點 Site Excel"], ["summary", "Summary"], ...(s.detail.transects.some(tr => tr.method === "line") ? [["line", "底質 Line Excel"], ["detail-line", "底質詳細資料"]] : []), ...(s.detail.transects.some(tr => tr.method === "belt_fish" || tr.method === "belt_invert") ? [["belt", "生物 Belt Excel"], ["detail-belt", "生物詳細資料"]] : [])].map(([kind, label]) => `<button type="button" class="tiny-button rd-report-button" data-report-kind="${kind}" ${s.editing || s.exporting ? "disabled" : ""}>${label}</button>`).join("")}
-          </details>
+          </div>
           <button type="button" class="danger-button" id="rd-delete-event">刪除此場次</button>
         </div>
       </div>
