@@ -14,6 +14,30 @@ const number = v => v === null || v === undefined ? "—" : Number(v).toLocaleSt
 const table = (headers, rows) => `<div class="rd-table-scroll"><table class="rd-table"><thead><tr>${headers.map(h => `<th scope="col">${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table></div>`
 const options = (values, selected, label) => `<option value="">${label}</option>${values.map(([value, title]) => `<option value="${esc(value)}" ${String(value) === selected ? "selected" : ""}>${esc(title)}</option>`).join("")}`
 
+function bindDownloadMenu(panel) {
+  const trigger = panel.querySelector(".rd-more-downloads")
+  const menu = trigger.popoverTargetElement
+  const position = () => {
+    const rect = trigger.getBoundingClientRect()
+    const below = window.innerHeight - rect.bottom
+    const above = below < 144 && rect.top > below
+    menu.style.setProperty("--rd-trigger-left", rect.left + "px")
+    menu.style.top = above ? "auto" : (rect.bottom + 4) + "px"
+    menu.style.bottom = above ? (window.innerHeight - rect.top + 4) + "px" : "auto"
+    menu.style.maxHeight = Math.max(0, (above ? rect.top : below) - 12) + "px"
+  }
+  menu.addEventListener("beforetoggle", event => {
+    if (event.newState === "open") {
+      position()
+      window.addEventListener("resize", position)
+      window.addEventListener("scroll", position, true)
+    } else {
+      window.removeEventListener("resize", position)
+      window.removeEventListener("scroll", position, true)
+    }
+  })
+}
+
 export function createReefData({ apiFetch, onCount, onManageActivities }) {
   const s = {
     events: [],
@@ -345,6 +369,7 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
         </form>
       ` : '<p class="empty-state">此場次沒有穿越線。</p>'}
     `
+    bindDownloadMenu(panel)
     panel.querySelector("#rd-back").onclick = () => {
       const current = panel
       if (!leave()) return

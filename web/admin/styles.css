@@ -3312,8 +3312,12 @@ body.no-scroll {
 }
 #rd-download-options {
   box-sizing: border-box;
-  width: min(13rem, calc(100vw - 1rem));
-  max-height: min(22rem, 70dvh);
+  --menu-width: min(13rem, calc(100% - 1rem));
+  position: fixed;
+  inset: auto;
+  left: clamp(0.5rem, var(--rd-trigger-left), calc(100% - var(--menu-width) - 0.5rem));
+  width: var(--menu-width);
+  margin: 0;
   overflow-y: auto;
   padding: 4px;
   border: 1px solid var(--border);
@@ -3323,16 +3327,6 @@ body.no-scroll {
 }
 #rd-download-options:popover-open {
   display: grid;
-}
-@supports (top: anchor(bottom)) {
-  #rd-download-options {
-    position: fixed;
-    inset: auto;
-    top: calc(anchor(bottom) + 4px);
-    left: clamp(0.5rem, calc(anchor(right) - 13rem), calc(100% - 13.5rem));
-    margin: 0;
-    position-try-fallbacks: flip-block;
-  }
 }
 #rd-download-options .tiny-button {
   justify-content: flex-start;

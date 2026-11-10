@@ -104,7 +104,14 @@ def check_report_downloads(page):
         expect(menu).to_be_visible()
         assert [item.bounding_box() for item in (header, trigger)] == before
         rect = menu.bounding_box()
-        assert rect["x"] >= 0 and rect["x"] + rect["width"] <= width
+        anchor = before[1]
+        expected_x = min(max(8, anchor["x"]), width - rect["width"] - 8)
+        assert abs(rect["x"] - expected_x) <= 1, (anchor, rect)
+        bottom = anchor["y"] + anchor["height"]
+        if 800 - bottom < 144 and anchor["y"] > 800 - bottom:
+            assert abs(rect["y"] + rect["height"] - anchor["y"] + 4) <= 1, (anchor, rect)
+        else:
+            assert abs(rect["y"] - bottom - 4) <= 1, (anchor, rect)
         trigger.press("Escape")
         expect(menu).to_be_hidden()
     page.set_viewport_size({"width": 1280, "height": 800})
