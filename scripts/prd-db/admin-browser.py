@@ -92,22 +92,40 @@ def check_recipient_downloads(page, code):
 
 def check_report_downloads(page):
     check_recipient_downloads(page, "OT")
-    page.get_by_text("其他下載與單一工作簿", exact=True).click()
+    trigger = page.get_by_role("button", name="其他下載", exact=True)
+    menu = page.get_by_role("group", name="其他下載", exact=True)
+    header = page.locator(".panel-header").filter(has=trigger)
+    for width in (1280, 390):
+        page.set_viewport_size({"width": width, "height": 800})
+        trigger.scroll_into_view_if_needed()
+        before = [item.bounding_box() for item in (header, trigger)]
+        trigger.focus()
+        trigger.press("Enter")
+        expect(menu).to_be_visible()
+        assert [item.bounding_box() for item in (header, trigger)] == before
+        rect = menu.bounding_box()
+        assert rect["x"] >= 0 and rect["x"] + rect["width"] <= width
+        trigger.press("Escape")
+        expect(menu).to_be_hidden()
+    page.set_viewport_size({"width": 1280, "height": 800})
     ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
     for kind, label, expected_cell, expected_value in (
         ("line", "底質 Line Excel", "L17", "OT"),
         ("belt", "生物 Belt Excel", "B1", "BrowserFixture"),
         ("site", "樣點 Site Excel", "B3", "BrowserFixture"),
     ):
+        trigger.click()
         with page.expect_download() as download:
-            page.get_by_role("button", name=label, exact=True).click()
+            menu.get_by_role("button", name=label, exact=True).click()
+        expect(menu).to_be_hidden()
         assert download.value.suggested_filename.endswith("-" + kind + ".xlsx")
         with ZipFile(download.value.path()) as workbook:
             data = ET.fromstring(workbook.read("xl/worksheets/sheet1.xml"))
             cell = data.find(f".//s:c[@r='{expected_cell}']/s:is/s:t", ns)
             assert cell is not None and cell.text == expected_value, (kind, expected_cell)
+    trigger.click()
     with page.expect_download() as archive:
-        page.get_by_role("button", name="下載報告套組 ZIP", exact=True).click()
+        menu.get_by_role("button", name="下載報告套組 ZIP", exact=True).click()
     with ZipFile(archive.value.path()) as bundle:
         for suffix in ("_Site.xlsx", "_LineTransect.xlsx", "_BeltTransect.xlsx"):
             assert sum(name.endswith(suffix) for name in bundle.namelist()) == 1, suffix
