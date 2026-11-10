@@ -61,6 +61,7 @@ type ReefDataMetadata struct {
 }
 
 type ReefDataPoint struct {
+	RawInputCode *string `json:"raw_input_code,omitempty"`
 	ID           int64   `json:"id"`
 	Segment      int     `json:"segment"`
 	Position     float64 `json:"position_m"`

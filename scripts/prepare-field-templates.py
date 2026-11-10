@@ -1,5 +1,7 @@
 """Build the three blank field workbooks from the specified 2025 Yeliu XLS files."""
 
+from report_labels import clean_report_labels
+
 import argparse
 import hashlib
 from datetime import datetime
@@ -244,6 +246,7 @@ def make(kind, source_path, output_dir):
         if kind == "line" or s.name == "GRAPHS":
             sheet.set_landscape()
     target.close()
+    clean_report_labels(output_dir / ("field-" + kind + ".xlsx"))
 
 
 if __name__ == "__main__":
