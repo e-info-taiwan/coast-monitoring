@@ -31,9 +31,9 @@ def seed():
           (:transect_id,3,61,'surface','OT'),(:transect_id,4,94.5,'surface','OT'),(:transect_id,1,10,'surface','NA'),
           (:transect_id,1,0,'surface','RC'),(:transect_id,1,0,'down','HC');
         INSERT INTO substrate_point(transect_id,segment,position_m,substrate_layer,substrate_code) VALUES
-          (:transect_id,2,25,'surface','HC-a'),(:transect_id,2,25.5,'surface','HC');
+          (:transect_id,2,25,'surface','HC-a'),(:transect_id,2,25.5,'surface','HC'),(:transect_id,3,50,'surface','HC-b');
         INSERT INTO substrate_bleaching(transect_id,segment,hc_bleached_count,sc_bleached_count) VALUES
-          (:transect_id,2,1,0),(:transect_id,4,NULL,0);
+          (:transect_id,2,1,0),(:transect_id,3,0,0),(:transect_id,4,NULL,0);
         UPDATE event SET submission_snapshot='{"format":"reefcheck-web-v4","bleaching_mode":"point_marks"}'
           WHERE event_id='browser-other';
         INSERT INTO substrate_point(transect_id,segment,position_m,substrate_code,is_bleached)
@@ -82,10 +82,13 @@ def check_substrate_board(page):
     expect(down.locator("tbody td").nth(1)).to_have_text("1")
 
     bleaching = page.get_by_role("region", name="底質白化", exact=True)
-    expect(bleaching.get_by_role("table")).to_have_count(1)
+    expect(bleaching.get_by_role("table")).to_have_count(2)
     expect(bleaching).to_contain_text("依各段填報")
-    expect(bleaching.locator("tbody tr").nth(1).locator("td")).to_have_text(["1", "50%（1／2）", "0", "無表層 SC 點"])
-    expect(bleaching.locator("tbody tr").last.locator("td").first).to_have_text("NA（未記錄）")
+    summary = bleaching.get_by_role("region", name="穿越線白化統計")
+    expect(summary.get_by_role("row", name="硬珊瑚", exact=False).locator("td")).to_have_text(["1", "33.33%（1／3）", "0.5", "0.71", "0.5", "2/4"])
+    expect(summary.get_by_role("row", name="軟珊瑚", exact=False).locator("td")).to_have_text(["0", "無法計算", "0", "0", "0", "3/4"])
+    expect(bleaching.get_by_role("table").first.locator("tbody tr").nth(1).locator("td")).to_have_text(["1", "50%（1／2）", "0", "無表層 SC 點"])
+    expect(bleaching.get_by_role("table").first.locator("tbody tr").last.locator("td").first).to_have_text("NA（未記錄）")
 
     page.set_viewport_size({"width": 390, "height": 844})
     region = page.get_by_role("region", name="表層底質手板")
@@ -95,7 +98,7 @@ def check_substrate_board(page):
     page.set_viewport_size({"width": 1280, "height": 800})
 
     page.get_by_role("button", name="編輯這條穿越線").click()
-    expect(surface.get_by_role("combobox")).to_have_count(6)
+    expect(surface.get_by_role("combobox")).to_have_count(7)
     page.get_by_label("表層第 4 段 94.5 m 底質", exact=True).select_option("RB")
     page.get_by_role("button", name="儲存修改").click()
     expect(rows.last.locator("td").last).to_have_text("7")
@@ -106,12 +109,15 @@ def check_substrate_board(page):
     expect(down.locator("tbody td").nth(1)).to_have_text("1")
     page.get_by_role("button", name="返回場次列表", exact=False).click()
     page.get_by_role("button", name="查看 browser-other", exact=True).click()
-    expect(bleaching.get_by_role("table")).to_have_count(1)
+    expect(bleaching.get_by_role("table")).to_have_count(2)
     expect(bleaching).to_contain_text("依逐格白化標記")
-    expect(bleaching.locator("tbody tr").first.locator("td")).to_have_text(["1", "50%（1／2）", "0", "0%（0／1）"])
-    expect(bleaching.locator("tbody tr").nth(1)).to_contain_text("白化標記未齊")
-    expect(bleaching.locator("tbody tr").nth(2)).to_contain_text("無有效底質點")
-    expect(bleaching.locator("tbody tr").last).to_contain_text("本段未記錄")
+    summary = bleaching.get_by_role("region", name="穿越線白化統計")
+    expect(summary.get_by_role("row", name="硬珊瑚", exact=False).locator("td")).to_have_text(['1', '50%（1／2）', '1', '—', '—', '1/4'])
+    expect(summary.get_by_role("row", name="軟珊瑚", exact=False).locator("td")).to_have_text(['0', '0%（0／1）', '0', '0', '0', '2/4'])
+    expect(bleaching.get_by_role("table").first.locator("tbody tr").first.locator("td")).to_have_text(["1", "50%（1／2）", "0", "0%（0／1）"])
+    expect(bleaching.get_by_role("table").first.locator("tbody tr").nth(1)).to_contain_text("白化標記未齊")
+    expect(bleaching.get_by_role("table").first.locator("tbody tr").nth(2)).to_contain_text("無有效底質點")
+    expect(bleaching.get_by_role("table").first.locator("tbody tr").last).to_contain_text("本段未記錄")
     page.get_by_role("button", name="返回場次列表", exact=False).click()
     print("Chrome passed: historical totals and point marks, subtype denominator, valid zero and missing reasons.")
     print("Chrome passed: four-segment handboard, layer isolation, mobile scrolling and persisted point edit.")

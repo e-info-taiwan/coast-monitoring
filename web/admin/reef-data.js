@@ -521,10 +521,22 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
       const row = bySegment.get(segment)
       return `<tr><th scope="row">S${segment}</th>${row ? cells(row, "hc") + cells(row, "sc") : '<td colspan="4">本段未記錄</td>'}</tr>`
     })
+    const stats = t.summaries?.bleaching || []
+    const summaryRows = stats.map(r => {
+      const rate = r.bleaching_percent == null ? "無法計算"
+        : `${percent(r.bleaching_percent)}（${number(r.rate_count)}／${number(r.rate_points)}）`
+      return `<tr><th scope="row">${r.code === "HC" ? "硬珊瑚（HC）" : "軟珊瑚（SC）"}</th><td>${number(r.total)}</td><td>${rate}</td><td>${number(r.mean)}</td><td>${number(r.sd)}</td><td>${number(r.se)}</td><td>${number(r.n)}/4</td></tr>`
+    }).join("")
     return `<section class="rd-section" aria-label="底質白化">
       <h3>底質白化</h3>
       <p class="meta-line">${pointMarks ? "依逐格白化標記自動統計。" : "依各段填報的白化總點數計算。"}白化率為該段白化點數除以同類表層珊瑚點數；硬珊瑚（HC）含 a、b、c 分型。</p>
       ${table(["段落", "HC 白化點數", "HC 白化率", "SC 白化點數", "SC 白化率"], rows.join(""))}
+      <section aria-label="穿越線白化統計">
+        <h4>穿越線白化統計</h4>
+        ${summaryRows ? table(["珊瑚類別", "合計白化點數", "整線白化率", "平均每段白化點數", "SD（點）", "SE（點）", "已記錄段數"], summaryRows)
+          : '<p class="meta-line">本條穿越線沒有已記錄的白化點數。</p>'}
+        ${summaryRows ? '<p class="meta-line">整線白化率使用有白化紀錄且有同類表層珊瑚的段落，將白化點數加總後除以珊瑚點數。SD 與 SE 至少需要兩段點數紀錄。</p>' : ""}
+      </section>
     </section>`
   }
 

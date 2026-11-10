@@ -134,6 +134,25 @@ func (r ReefDataRepository) Transect(ctx context.Context, id int, lock bool) (se
  SELECT segment, count(*) FILTER (WHERE substrate_code IN ('HC','HC-a','HC-b','HC-c')) AS hc_points,
  count(*) FILTER (WHERE substrate_code='SC') AS sc_points
  FROM substrate_point WHERE transect_id=$1 AND substrate_layer='surface' AND substrate_code<>'NA' GROUP BY segment
+ ), point_bleaching AS (
+ SELECT b.* FROM substrate_bleaching_point_summary b JOIN source t ON t.id=b.transect_id WHERE t.point_marks
+ ), bleaching_counts AS (
+ SELECT b.segment,
+   CASE WHEN b.hc_record_status='recorded' THEN b.hc_bleached_count END AS hc,
+   CASE WHEN b.sc_record_status='recorded' THEN b.sc_bleached_count END AS sc
+ FROM substrate_bleaching b JOIN source t ON t.id=b.transect_id WHERE NOT t.point_marks
+ UNION ALL
+ SELECT p.segment, p.derived_hc_bleached_point_count, p.derived_sc_bleached_point_count
+ FROM point_bleaching p JOIN denominators d USING(segment)
+ ), bleaching_stats AS (
+ SELECT code, count(bleached) AS n, sum(bleached) AS total, avg(bleached) AS mean,
+   stddev_samp(bleached) AS sd, stddev_samp(bleached)/sqrt(NULLIF(count(bleached),0)) AS se,
+   sum(bleached) FILTER (WHERE points>0) AS rate_count,
+   sum(points) FILTER (WHERE points>0 AND bleached IS NOT NULL) AS rate_points,
+   100.0*sum(bleached) FILTER (WHERE points>0)/NULLIF(sum(points) FILTER (WHERE points>0 AND bleached IS NOT NULL),0) AS bleaching_percent
+ FROM bleaching_counts b LEFT JOIN denominators d USING(segment)
+ CROSS JOIN LATERAL (VALUES ('HC', b.hc, d.hc_points), ('SC', b.sc, d.sc_points)) coral(code,bleached,points)
+ GROUP BY code
  ) SELECT jsonb_build_object(
  'id',t.id,'event_id',t.event_id,'method',t.method,'fish_length_mode',t.fish_size_mode,'start_time',t.start_time,
  'water_temp_c',t.water_temp_c,'visibility_min_m',t.visibility_min_m,'visibility_max_m',t.visibility_max_m,
@@ -146,10 +165,10 @@ func (r ReefDataRepository) Transect(ctx context.Context, id int, lock bool) (se
    'sc_percent',100.0*b.derived_sc_bleached_point_count/NULLIF(d.sc_points,0),
    'derived_hc_bleached_point_count',CASE WHEN d.segment IS NOT NULL THEN b.derived_hc_bleached_point_count END,
    'derived_sc_bleached_point_count',CASE WHEN d.segment IS NOT NULL THEN b.derived_sc_bleached_point_count END) ORDER BY b.segment)
-   FROM substrate_bleaching_point_summary b LEFT JOIN denominators d USING(segment)
-   WHERE t.point_marks AND b.transect_id=t.id),'[]'::jsonb),
+   FROM point_bleaching b LEFT JOIN denominators d USING(segment)),'[]'::jsonb),
  'fish_size_mode',t.fish_size_mode,'classify_hard_coral',t.classify_hard_coral,'points',COALESCE((SELECT jsonb_agg(to_jsonb(p) ORDER BY p.substrate_layer,p.position_m,p.id) FROM substrate_point p WHERE p.transect_id=t.id),'[]'::jsonb),
- 'summaries',jsonb_build_object('substrate',COALESCE((SELECT jsonb_agg(to_jsonb(s)) FROM substrate_summary s WHERE s.transect_id=t.id),'[]'::jsonb),'belt',COALESCE((SELECT jsonb_agg(to_jsonb(s)) FROM belt_summary s WHERE s.transect_id=t.id),'[]'::jsonb),'impact',COALESCE((SELECT jsonb_agg(to_jsonb(s)) FROM impact_summary s WHERE s.transect_id=t.id),'[]'::jsonb)),
+ 'summaries',jsonb_build_object('bleaching',COALESCE((SELECT jsonb_agg(to_jsonb(s) ORDER BY s.code) FROM bleaching_stats s),'[]'::jsonb),
+ 'substrate',COALESCE((SELECT jsonb_agg(to_jsonb(s)) FROM substrate_summary s WHERE s.transect_id=t.id),'[]'::jsonb),'belt',COALESCE((SELECT jsonb_agg(to_jsonb(s)) FROM belt_summary s WHERE s.transect_id=t.id),'[]'::jsonb),'impact',COALESCE((SELECT jsonb_agg(to_jsonb(s)) FROM impact_summary s WHERE s.transect_id=t.id),'[]'::jsonb)),
  'bleaching',COALESCE((SELECT jsonb_agg(to_jsonb(b)||jsonb_build_object(
    'hc_points',d.hc_points,'sc_points',d.sc_points,
    'hc_record_status',CASE WHEN b.hc_bleached_count IS NULL THEN 'not_recorded' ELSE b.hc_record_status END,
