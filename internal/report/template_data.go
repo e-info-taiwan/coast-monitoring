@@ -96,12 +96,14 @@ func buildEventData(detail service.ReefDataDetail) *eventData {
 					d.put("count_"+key, seg+1, num(sum))
 				}
 			}
-			for _, b := range t.Bleaching {
-				if observed(b.HCStatus) {
-					d.put("hc_bleach", b.Segment, num(float64(b.HC)))
-				}
-				if observed(b.SCStatus) {
-					d.put("sc_bleach", b.Segment, num(float64(b.SC)))
+			if !t.PointMarks {
+				for _, b := range t.Bleaching {
+					if observed(b.HCStatus) {
+						d.put("hc_bleach", b.Segment, num(float64(b.HC)))
+					}
+					if observed(b.SCStatus) {
+						d.put("sc_bleach", b.Segment, num(float64(b.SC)))
+					}
 				}
 			}
 			// Point-derived summaries are authoritative when supplied; otherwise retain legacy manual counts.

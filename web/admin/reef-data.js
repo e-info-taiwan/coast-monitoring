@@ -297,7 +297,7 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
         </div>
         <div class="rd-header-actions">
           <button type="button" class="tiny-button rd-report-button" id="rd-export-event" ${s.editing || s.exporting ? "disabled" : ""}>下載報告套組 ZIP</button>
-          ${[["summary", "Summary"], ...(s.detail.transects.some(tr => tr.method === "line") ? [["line", "底質 Excel"]] : []), ...(s.detail.transects.some(tr => tr.method === "belt_fish" || tr.method === "belt_invert") ? [["belt", "魚類／無脊椎 Excel"]] : [])].map(([kind, label]) => `<button type="button" class="tiny-button rd-report-button" data-report-kind="${kind}" ${s.editing || s.exporting ? "disabled" : ""}>${label}</button>`).join("")}
+          ${[["site", "樣點 Site Excel"], ["summary", "Summary"], ...(s.detail.transects.some(tr => tr.method === "line") ? [["line", "底質 Line Excel"], ["detail-line", "底質詳細資料"]] : []), ...(s.detail.transects.some(tr => tr.method === "belt_fish" || tr.method === "belt_invert") ? [["belt", "生物 Belt Excel"], ["detail-belt", "生物詳細資料"]] : [])].map(([kind, label]) => `<button type="button" class="tiny-button rd-report-button" data-report-kind="${kind}" ${s.editing || s.exporting ? "disabled" : ""}>${label}</button>`).join("")}
           <button type="button" class="danger-button" id="rd-delete-event">刪除此場次</button>
         </div>
       </div>
