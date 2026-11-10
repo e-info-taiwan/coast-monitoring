@@ -32,6 +32,7 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
     search: "",
     page: 0,
     editing: false,
+    boardMode: "raw",
     saving: false,
     exporting: false,
     notice: "",
@@ -253,6 +254,7 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
       const detail = await apiFetch(`/admin/reef-check-data/events/${id}`)
       if (request !== requestID || current !== panel) return
       s.detail = detail
+      s.boardMode = "raw"
       s.transectID = detail.transects?.[0]?.id || null
       s.notice = ""
       renderDetail()
@@ -363,6 +365,8 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
       panel = current
       renderDetail()
     })
+    const surfaceBoard = panel.querySelector("#rd-surface-board")
+    if (surfaceBoard) bindBoardTabs(surfaceBoard)
     panel.querySelector("#rd-form")?.addEventListener("submit", save)
     panel.querySelectorAll(".rd-remove-participant").forEach(btn => {
       btn.onclick = () => removeParticipant(t, Number(btn.dataset.participantId))
@@ -422,9 +426,49 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
  return `<input class="rd-number" type="text" inputmode="decimal" data-kind="${kind}" data-id="${row.id}" aria-label="${esc(label)}" value="${na?"NA":esc(value)}" min="0" ${max != null ? `max="${max}"` : ""} step="${integer ? "1" : "any"}" required>`
   }
 
-  function substrateBoard(points, layer) {
+  function bindBoardTabs(board) {
+    const tabs = [...panel.querySelectorAll("[data-board-mode]")]
+    function select(tab) {
+      s.boardMode = tab.dataset.boardMode
+      const showCode = s.boardMode === "code"
+      for (const item of tabs) {
+        item.setAttribute("aria-selected", String(item === tab))
+        item.tabIndex = item === tab ? 0 : -1
+      }
+      board.setAttribute("aria-labelledby", tab.id)
+      board.querySelectorAll("[data-board-heading]").forEach(cell => {
+        cell.textContent = showCode ? "代碼" : "數字"
+      })
+      board.querySelectorAll("[data-board-raw]").forEach(cell => {
+        cell.textContent = showCode ? cell.dataset.boardCode : cell.dataset.boardRaw
+      })
+    }
+    for (const tab of tabs) {
+      tab.onclick = () => select(tab)
+      tab.onkeydown = event => {
+        let next
+        switch (event.key) {
+          case "ArrowRight":
+          case "ArrowLeft": next = tabs.find(item => item !== tab); break
+          case "Home": next = tabs[0]; break
+          case "End": next = tabs[tabs.length - 1]; break
+          default: return
+        }
+        event.preventDefault()
+        select(next)
+        next.focus()
+      }
+    }
+  }
+
+  function substrateBoard(points, layer, pointMarks) {
     const starts = [0, 25, 50, 75]
-    const layerName = layer === "surface" ? "表層" : "下層"
+    const surface = layer === "surface"
+    const showCode = surface && s.boardMode === "code"
+    const layerName = surface ? "表層" : "下層"
+    function displayAttrs(raw, code) {
+      return surface ? `data-board-raw="${esc(raw)}" data-board-code="${esc(code)}"` : ""
+    }
     const cells = new Map(points.map(p => [`${p.segment}:${p.position_m}`, p]))
     const codes = new Map(s.codes.map(c => [c.code, c]))
     const letterTokens = { "HC-a": "a", "HC-b": "b", "HC-c": "c", "SI(HC-a)": "9a", "SI(HC-b)": "9b", "SI(HC-c)": "9c" }
@@ -442,11 +486,18 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
         if (!codes.has(code)) available.push(code)
         return `<select data-kind="point" data-id="${esc(point.id)}" aria-label="${esc(label)}">${available.map(c => {
           const mark = token(c)
-          return `<option value="${esc(c)}" ${c === code ? "selected" : ""}>${esc(mark === c ? c : mark + " " + c)}</option>`
+          const rawLabel = mark === c ? c : mark + " " + c
+          return `<option value="${esc(c)}" ${displayAttrs(rawLabel, c)} ${c === code ? "selected" : ""}>${esc(showCode ? c : rawLabel)}</option>`
         }).join("")}</select>`
       }
       const desc = [code, codes.get(code)?.name_zh].filter(Boolean).join(" · ")
-      return `<span title="${esc(desc)}" aria-label="${esc(label + "：" + desc)}">${esc(token(code))}</span>`
+      const raw = token(code)
+      let health = ""
+      if (pointMarks && surface && ["HC", "HC-a", "HC-b", "HC-c", "SC"].includes(code)) {
+        const status = point.health_status ?? (point.is_bleached == null ? null : point.is_bleached ? "bleached" : "not_bleached")
+        health = `<small>${status === "bleached" ? "已白化" : status === "not_bleached" ? "未白化" : "未標記"}</small>`
+      }
+      return `<span title="${esc(desc)}" aria-label="${esc(label + "：" + desc)}" ${displayAttrs(raw, code)}>${esc(showCode ? code : raw)}</span>${health}`
     }
 
     const rows = Array.from({ length: 20 }, (_, row) => {
@@ -461,14 +512,20 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
     })
     // Historical observations outside the printed positions must remain accessible for editing.
     const extra = [...cells.values()]
-    return `<div class="rd-table-scroll" role="region" tabindex="0" aria-label="${layerName}底質手板">
+    const board = `<div class="rd-table-scroll" role="region" tabindex="0" aria-label="${layerName}底質手板">
       <table class="rd-board" aria-label="${layerName}逐點底質">
         ${starts.map(() => '<colgroup span="4"></colgroup>').join("")}
         <thead><tr>${starts.map((start, i) => `<th colspan="4" scope="colgroup">第 ${i + 1} 段<small>${start}–${start + 19.5} m</small></th>`).join("")}</tr>
-        <tr>${starts.map(() => '<th scope="col">m</th><th scope="col">底質</th>'.repeat(2)).join("")}</tr></thead>
+        ${surface ? `<tr>${starts.map(start => `<th colspan="2">左欄 · ${start}–${start + 9.5} m</th><th colspan="2">右欄 · ${start + 10}–${start + 19.5} m</th>`).join("")}</tr>` : ""}
+        <tr>${starts.map(() => `<th scope="col">m</th><th scope="col" ${surface ? "data-board-heading" : ""}>${surface ? (showCode ? "代碼" : "數字") : "底質"}</th>`.repeat(2)).join("")}</tr></thead>
         <tbody>${rows.join("")}</tbody>
       </table></div>
       ${extra.length ? table(["表外點位", "距離（m）", "底質"], extra.map(p => `<tr><td>第 ${esc(p.segment)} 段</td><td>${esc(p.position_m)}</td><td>${reading(p)}</td></tr>`).join("")) : ""}`
+    if (!surface) return board
+    return `<div class="rd-board-tabs" role="tablist" aria-label="表層底質顯示方式">
+      ${[["raw", "原始數字"], ["code", "轉換代碼（HC／SC）"]].map(([mode, title]) =>
+        `<button type="button" role="tab" id="rd-mode-${mode}" data-board-mode="${mode}" aria-selected="${s.boardMode === mode}" aria-controls="rd-surface-board" tabindex="${s.boardMode === mode ? 0 : -1}">${title}</button>`).join("")}
+    </div><div id="rd-surface-board" role="tabpanel" aria-labelledby="rd-mode-${s.boardMode}">${board}</div>`
   }
 
   function line(t) {
@@ -480,7 +537,7 @@ export function createReefData({ apiFetch, onCount, onManageActivities }) {
         <section class="rd-section">
           <h3>逐點底質 · ${layer === "surface" ? "表層（含泥沙複合代碼）" : "下層"}</h3>
           <p class="meta-line">${summary.recorded} 個位置 · ${summary.valid} 個有效觀測 · ${summary.unknown} 個 NA（未記錄／未知）。NA 不列入覆蓋率分母；OT 為其他。</p>
-          ${substrateBoard(selected, layer)}
+          ${substrateBoard(selected, layer, t.point_marks)}
           <details class="rd-summary">
             <summary>底質統計（已儲存資料）</summary>
             ${summary.rows.length ? table(["底質", "合計點數", "覆蓋率", "平均段覆蓋率", "SD", "SE", "有效段數"], summary.rows.map(r => `<tr><th scope="row">${esc(r.code)}</th><td>${number(r.total)}</td><td>${percent(r.coverage_percent)}</td><td>${percent(r.mean)}</td><td>${number(r.sd)}</td><td>${number(r.se)}</td><td>${r.n}/4</td></tr>`).join("")) : '<p>此層不提供覆蓋率統計；正式統計僅使用表層 canonical 位置。</p>'}

@@ -3135,6 +3135,12 @@ body.no-scroll {
 .rd-board .rd-distance { background:var(--surface); color:var(--fg-muted); }
 .rd-board thead tr:first-child th + th, .rd-board tr > :nth-child(4n + 5) { border-left:2px solid var(--border); }
 .rd-board thead, .rd-board tbody tr:nth-child(5n):not(:last-child) { border-bottom:1px solid var(--border); }
+.rd-board-tabs { display:flex; margin:.75rem 0; }
+.rd-board-tabs button { flex:1; padding:.65rem .5rem; background:var(--bg-elev); color:var(--fg); border:1px solid var(--border); font:inherit; font-weight:600; cursor:pointer; }
+.rd-board-tabs button:first-child { border-radius:var(--radius) 0 0 var(--radius); }
+.rd-board-tabs button:last-child { border-radius:0 var(--radius) var(--radius) 0; border-left:0; }
+.rd-board-tabs button[aria-selected="true"] { background:var(--primary); color:var(--primary-fg); }
+.rd-board-tabs button:focus-visible { outline:2px solid var(--primary); outline-offset:2px; z-index:1; }
 .rd-board select { width:auto; padding:.25rem; }
 .rd-number { min-width:72px; max-width:100px; }
 .rd-summary { margin-top:1.3rem; }
