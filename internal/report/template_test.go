@@ -55,11 +55,22 @@ func TestReferenceTemplateWorkbooks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if files["xl/styles.xml"] != string(base.parts["xl/styles.xml"]) {
+			beforeStyles, afterStyles := string(base.parts["xl/styles.xml"]), files["xl/styles.xml"]
+			if kind == "belt" {
+				beforeXF, afterXF := xmlElement(beforeStyles, "cellXfs"), xmlElement(afterStyles, "cellXfs")
+				xfs := regexpTag("xf")
+				old, updated := xfs.FindAllString(beforeXF, -1), xfs.FindAllString(afterXF, -1)
+				if len(updated) != len(old)+1 || strings.Join(old, "") != strings.Join(updated[:len(old)], "") || withoutElement(beforeStyles, "cellXfs") != withoutElement(afterStyles, "cellXfs") {
+					t.Fatal("wrapping the long-spined row changed existing template styles")
+				}
+			} else if beforeStyles != afterStyles {
 				t.Fatal("template styles were rewritten")
 			}
 			for _, s := range base.sheets {
 				for _, tag := range []string{"cols", "mergeCells", "pageMargins", "pageSetup", "headerFooter", "drawing"} {
+					if kind != "summary" && strings.HasPrefix(s.name, "GRAPHS") && (tag == "cols" || tag == "mergeCells") {
+						continue
+					}
 					re := regexpTag(tag)
 					before, after := re.FindString(s.raw), re.FindString(files[s.path])
 					if before != after {
@@ -299,7 +310,7 @@ func TestFieldReportWorkbooks(t *testing.T) {
 					t.Fatal("example observations retained")
 				}
 			}
-			if kind != "site" && !strings.Contains(parts["xl/charts/chart1.xml"], "測試海岸") {
+			if kind != "site" && !strings.Contains(parts["xl/charts/chart1.xml"], "Test Coast") {
 				t.Fatal("chart missing event title")
 			}
 			if dir := os.Getenv("REEF_REPORT_PREVIEW_DIR"); dir != "" {

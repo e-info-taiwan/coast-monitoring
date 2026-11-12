@@ -12,10 +12,15 @@ import (
 
 // The international forms use the English site name when it is available.
 func fieldSiteName(e service.ReefDataEvent) string {
-	if e.SiteEnglish != "" {
-		return e.SiteEnglish
+	if name := strings.TrimSpace(e.SiteEnglish); name != "" {
+		return name
 	}
 	return e.SiteName
+}
+
+func fieldEventTitle(e service.ReefDataEvent) string {
+	e.SiteName = fieldSiteName(e)
+	return eventTitle(e)
 }
 
 func fieldPeople(role string, transects ...*service.ReefDataTransect) []string {
@@ -28,9 +33,9 @@ func fieldPeople(role string, transects ...*service.ReefDataTransect) []string {
 			if p.Role != role {
 				continue
 			}
-			name := p.NameEN
+			name := strings.TrimSpace(p.NameEN)
 			if name == "" {
-				name = p.NameZH
+				name = strings.TrimSpace(p.NameZH)
 			}
 			if name == "" {
 				name = p.UserName
@@ -228,8 +233,11 @@ func lineFieldReport(d *eventData) ([]byte, error) {
 		_, m, _, _ := statsValues(vals)
 		fieldMean(s, "N"+strconv.Itoa(row), strings.Join(refs(row, "F", "H", "J", "L"), ","), m)
 	}
-	g.set("E6", "Substrate cover · "+eventTitle(e))
-	b.titles(eventTitle(e), map[int]string{1: "Substrate cover", 2: "Live reef cover", 3: "Non-living reef cover", 4: "Live reef cover", 5: "Non-living reef cover"})
+	g.set("E6", "Substrate cover · "+fieldEventTitle(e))
+	b.titles(fieldEventTitle(e), map[int]string{1: "Substrate cover", 2: "Live reef cover", 3: "Non-living reef cover", 4: "Live reef cover", 5: "Non-living reef cover"})
+	if err := b.presentCharts("field-line"); err != nil {
+		return nil, err
+	}
 	return b.bytes()
 }
 
@@ -315,8 +323,11 @@ func beltFieldReport(d *eventData) ([]byte, error) {
 		}
 	}
 	for row, label := range map[int]string{7: "Fish", 58: "Invertebrates", 77: "Impacts, bleaching and disease"} {
-		g.set(fmt.Sprintf("E%d", row), label+" · "+eventTitle(e))
+		g.set(fmt.Sprintf("E%d", row), label+" · "+fieldEventTitle(e))
 	}
-	b.titles(eventTitle(e), map[int]string{1: "Fish", 2: "Grouper", 3: "Invertebrates", 4: "Giant clam", 5: "Impacts", 6: "Bleaching – population", 7: "Bleaching – colony", 8: "Coral disease"})
+	b.titles(fieldEventTitle(e), map[int]string{1: "Fish", 2: "Grouper", 3: "Invertebrates", 4: "Giant clam", 5: "Impacts", 6: "Bleaching – population", 7: "Bleaching – colony", 8: "Coral disease"})
+	if err := b.presentCharts("field-belt"); err != nil {
+		return nil, err
+	}
 	return b.bytes()
 }

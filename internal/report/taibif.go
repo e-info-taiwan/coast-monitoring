@@ -17,6 +17,9 @@ func taiLine(d *eventData) ([]byte, error) {
 		return nil, err
 	}
 	s := b.sheets[0]
+	for i, header := range []string{"Site", "Site_en", "Date", "event_id", "Segment", "Distance_m", "Raw_Code", "Base_Substrate", "Morphology", "Under_Substrate", "Health_Status"} {
+		s.set(column(i+1)+"1", header)
+	}
 	e := d.detail.Event
 	row := 2
 	for _, p := range d.line.Points {
@@ -38,10 +41,7 @@ func taiLine(d *eventData) ([]byte, error) {
 				health = "Normal"
 			}
 		}
-		raw := inputToken(p.Code)
-		if p.RawInputCode != nil && *p.RawInputCode != "" {
-			raw = *p.RawInputCode
-		}
+		raw := taiRawCode(p)
 		s.copyStyle("C"+strconv.Itoa(row), "C2")
 		for i, v := range []any{e.SiteName, e.SiteEnglish, excelDate(e.SurveyDate), e.EventID, p.Segment, p.Position, raw, base, morph, under, health} {
 			s.set(column(i+1)+strconv.Itoa(row), v)
@@ -49,6 +49,20 @@ func taiLine(d *eventData) ([]byte, error) {
 		row++
 	}
 	return b.bytes()
+}
+
+// Raw input may contain a number, a morphology token, or a canonical code from
+// a historical import. Keep recorded numeric aliases (including 0 = OT) intact.
+// Missing observations remain NA; they are never converted to OT.
+func taiRawCode(p service.ReefDataPoint) any {
+	code := p.Code
+	if p.RawInputCode != nil && strings.TrimSpace(*p.RawInputCode) != "" {
+		code = strings.TrimSpace(*p.RawInputCode)
+	}
+	if n, err := strconv.Atoi(code); err == nil {
+		return n
+	}
+	return inputToken(code)
 }
 
 func taiSize(raw string) (string, string) {

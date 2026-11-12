@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/csv"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -53,7 +54,7 @@ func TestTaiBIFExchangeRows(t *testing.T) {
 		}
 		if strings.HasSuffix(f.Name, ".xlsx") {
 			sheet := cells(t, readWorkbook(t, body)["xl/worksheets/sheet1.xml"])
-			if sheet["G2"].Text != "0" || sheet["H2"].Text != "OT" || sheet["C2"].Number == "" || sheet["H3"].Text != "SI" || sheet["I3"].Text != "a" || sheet["J3"].Text != "HC" || sheet["K3"].Text != "Bleached" || sheet["D4"].Text != "" {
+			if sheet["G2"].Number != "0" || sheet["H2"].Text != "OT" || sheet["C2"].Number == "" || sheet["H3"].Text != "SI" || sheet["I3"].Text != "a" || sheet["J3"].Text != "HC" || sheet["K3"].Text != "Bleached" || sheet["D4"].Text != "" {
 				t.Fatal("unexpected substrate rows")
 			}
 			continue
@@ -79,5 +80,35 @@ func TestTaiBIFExchangeRows(t *testing.T) {
 	}
 	if _, err = FormatArchive([]service.ReefDataDetail{d}, "unknown"); !errors.Is(err, service.ErrValidation) {
 		t.Fatal(err)
+	}
+}
+
+func TestTaiBIFRawCodesAndExactHeaders(t *testing.T) {
+	d := templateFixture()
+	d.Transects[0].Points = nil
+	cases := []struct{ code, raw, number, text string }{
+		{"OT", "10", "10", ""}, {"OT", "0", "0", ""}, {"OT", "OT", "10", ""},
+		{"OT", "", "10", ""}, {"HC", "HC", "1", ""}, {"SC", "2", "2", ""},
+		{"NA", "NA", "", "NA"}, {"HC-a", "a", "", "a"}, {"SI(HC)", "SI(HC)", "91", ""},
+	}
+	for i, c := range cases {
+		raw := c.raw
+		d.Transects[0].Points = append(d.Transects[0].Points, service.ReefDataPoint{Segment: 1, Position: float64(i) / 2, Layer: "surface", Code: c.code, RawInputCode: &raw})
+	}
+	raw, err := taiLine(buildEventData(d))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sheet := cells(t, readWorkbook(t, raw)["xl/worksheets/sheet1.xml"])
+	for i, name := range []string{"Site", "Site_en", "Date", "event_id", "Segment", "Distance_m", "Raw_Code", "Base_Substrate", "Morphology", "Under_Substrate", "Health_Status"} {
+		if sheet[column(i+1)+"1"].Text != name {
+			t.Fatal("nonstandard header", name)
+		}
+	}
+	for i, c := range cases {
+		cell := sheet[fmt.Sprintf("G%d", i+2)]
+		if cell.Number != c.number || cell.Text != c.text {
+			t.Fatalf("raw %q / code %q: got %+v", c.raw, c.code, cell)
+		}
 	}
 }

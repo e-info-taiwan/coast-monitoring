@@ -171,6 +171,13 @@ p {
 /* ============================================================
  * Login view (split shell)
  * ============================================================ */
+.loading-view {
+  display: grid;
+  min-height: 70vh;
+  place-items: center;
+  color: var(--fg-muted);
+}
+
 .login-view {
   display: grid;
   place-items: center;

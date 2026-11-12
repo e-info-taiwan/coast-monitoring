@@ -36,6 +36,7 @@ type templateSheet struct {
 	name, path, raw string
 	cells           map[string]templateCell
 	patches         map[string]templateCell
+	rowLayouts      map[int]reportRowLayout
 }
 type templateBook struct {
 	parts  map[string][]byte
@@ -249,6 +250,18 @@ func (s *templateSheet) render() string {
 		}
 		cells[n][col] = cellXML(ref, c, cells[n][col])
 	}
+	for n, layout := range s.rowLayouts {
+		if cells[n] == nil {
+			cells[n] = map[int]string{}
+			attrs[n] = fmt.Sprintf(`<row r="%d">`, n)
+		}
+		attrs[n] = regexp.MustCompile(`\s+(?:ht|customHeight|hidden)="[^"]*"`).ReplaceAllString(attrs[n], "")
+		extra := fmt.Sprintf(` ht="%g" customHeight="1"`, layout.height)
+		if layout.hidden {
+			extra += ` hidden="1"`
+		}
+		attrs[n] = strings.TrimSuffix(attrs[n], ">") + extra + ">"
+	}
 	var nums []int
 	for n := range cells {
 		nums = append(nums, n)
@@ -319,13 +332,14 @@ func (b *templateBook) bytes() ([]byte, error) {
 	}
 	var out bytes.Buffer
 	z := zip.NewWriter(&out)
+	generatedAt := time.Now().UTC()
 	var names []string
 	for name := range b.parts {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		w, err := z.Create(name)
+		w, err := z.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate, Modified: generatedAt})
 		if err != nil {
 			return nil, err
 		}

@@ -141,6 +141,62 @@ def pg_env(user, password, database, port):
     return env
 
 
+def parse_database_connection(secret):
+    """Read PostgreSQL URI or libpq keyword syntax without exposing credentials.
+
+    Keyword values use single quotes and backslash escaping, not shell quoting.
+    Repeated parameters follow libpq's last-value-wins convention.
+    """
+    if secret.startswith(("postgres://", "postgresql://")):
+        try:
+            parsed = urlsplit(secret)
+            fields = {
+                "host": unquote(parsed.hostname or ""),
+                "user": unquote(parsed.username or ""),
+                "password": unquote(parsed.password or ""),
+                "dbname": unquote(parsed.path.lstrip("/")),
+            }
+            fields.update({k: values[-1] for k, values in parse_qs(parsed.query, keep_blank_values=True).items()})
+            return fields
+        except ValueError:
+            raise RuntimeError("invalid PostgreSQL connection URI") from None
+    fields = {}
+    offset = 0
+    while offset < len(secret):
+        if not secret[offset:].strip():
+            break
+        match = re.match(r"\s*([a-zA-Z_][a-zA-Z_0-9]*)\s*=\s*", secret[offset:])
+        require(match, "invalid PostgreSQL keyword connection string")
+        key = match.group(1)
+        offset += match.end()
+        quoted = offset < len(secret) and secret[offset] == "'"
+        if quoted:
+            offset += 1
+        value = []
+        closed = not quoted
+        while offset < len(secret):
+            char = secret[offset]
+            if char == "\\":
+                offset += 1
+                require(offset < len(secret), "unfinished escape in PostgreSQL connection string")
+                value.append(secret[offset])
+                offset += 1
+            elif quoted and char == "'":
+                offset += 1
+                closed = True
+                require(offset == len(secret) or secret[offset].isspace(), "invalid PostgreSQL quoted value")
+                break
+            elif not quoted and char.isspace():
+                break
+            else:
+                value.append(char)
+                offset += 1
+        require(closed, "unterminated quoted PostgreSQL connection value")
+        fields[key] = "".join(value)
+    require(fields, "empty PostgreSQL connection string")
+    return fields
+
+
 def cloud_target(app_commit=None):
     service = json.loads(run(["gcloud", "run", "services", "describe", SERVICE, "--project", PROJECT,
                               "--region", REGION, "--format=json"], capture=True))
@@ -177,17 +233,15 @@ def cloud_target(app_commit=None):
         secret_project = PROJECT
     secret = run(["gcloud", "secrets", "versions", "access", ref["key"], "--secret", secret_name,
                   "--project", secret_project], capture=True).strip()
-    parsed = urlsplit(secret)
-    require(parsed.scheme in ("postgres", "postgresql"), "DATABASE_URL must be a PostgreSQL URI")
-    query = parse_qs(parsed.query)
-    host = query.get("host", [parsed.hostname or ""])[0]
+    connection = parse_database_connection(secret)
+    host = connection.get("host", "")
     description = json.loads(run(["gcloud", "sql", "instances", "describe", instance.split(":")[-1],
                                   "--project", PROJECT, "--format=json"], capture=True))
     allowed = {"/cloudsql/" + instance} | {x["ipAddress"] for x in description.get("ipAddresses", [])}
     require(host in allowed, "secret host does not match the service's Cloud SQL instance")
-    user = query.get("user", [unquote(parsed.username or "")])[0]
-    password = query.get("password", [unquote(parsed.password or "")])[0]
-    database = unquote(parsed.path.lstrip("/"))
+    user = connection.get("user", "")
+    password = connection.get("password", "")
+    database = connection.get("dbname", "")
     require(user and password and database, "incomplete database credentials")
     print(f"Target: {PROJECT} / {SERVICE} / {instance} / database {database}", flush=True)
     return instance, user, password, database
