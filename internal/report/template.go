@@ -319,13 +319,14 @@ func (b *templateBook) bytes() ([]byte, error) {
 	}
 	var out bytes.Buffer
 	z := zip.NewWriter(&out)
+	generatedAt := time.Now().UTC()
 	var names []string
 	for name := range b.parts {
 		names = append(names, name)
 	}
 	sort.Strings(names)
 	for _, name := range names {
-		w, err := z.Create(name)
+		w, err := z.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate, Modified: generatedAt})
 		if err != nil {
 			return nil, err
 		}

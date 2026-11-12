@@ -8,6 +8,7 @@ const APP_API_BASE = `${API_BASE}/app`
 
 const $ = (selector) => document.querySelector(selector)
 
+const loadingView = $("#loading-view")
 const loginView = $("#login-view")
 const accessView = $("#access-view")
 const appView = $("#app-view")
@@ -508,6 +509,7 @@ function escapeHtml(value) {
 }
 
 function showView(mode) {
+  loadingView?.classList.toggle("hidden", mode !== "loading")
   loginView?.classList.toggle("hidden", mode !== "login")
   accessView?.classList.toggle("hidden", mode !== "access")
   appView?.classList.toggle("hidden", mode !== "app")
@@ -1865,8 +1867,7 @@ function clearDemoState() {
 }
 
 async function boot() {
-  showView("login")
-  setStatus("正在確認登入狀態…")
+  showView("loading")
   attachGlobalHandlers()
   renderProviderList()
   renderPasswordLogin()
@@ -1887,9 +1888,10 @@ async function boot() {
       state.activeKey = isAdmin() ? REEF_DATA_KEY : "species"
     }
     syncHash(state.activeKey)
-    showView("app")
+    showView("loading")
     await loadWorkspace()
     renderWorkspace()
+    showView("app")
   } catch (error) {
     console.error(error)
     showView("login")
@@ -1915,10 +1917,12 @@ passwordLoginForm?.addEventListener("submit", async (event) => {
       return
     }
     syncHash(state.activeKey)
-    showView("app")
+    showView("loading")
     await loadWorkspace()
     renderWorkspace()
+    showView("app")
   } catch (error) {
+    showView("login")
     setStatus(error?.message || "登入失敗。", "error")
   }
 })

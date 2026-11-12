@@ -235,6 +235,36 @@ def check_substrate_board(page):
     print("Chrome passed: four-segment handboard, layer isolation, mobile scrolling and persisted point edit.")
 
 
+def check_reload_loading(page):
+    # Pause the authenticated session response to expose the initial page.
+    sessions = []
+    page.route("**/api/session", lambda route: sessions.append(route))
+    page.reload(wait_until="domcontentloaded")
+    expect(page.locator("#loading-view")).to_be_visible()
+    expect(page.locator("#login-view")).to_be_hidden()
+    expect(page.locator("#app-view")).to_be_hidden()
+    for _ in range(50):
+        if sessions:
+            break
+        page.wait_for_timeout(20)
+    assert len(sessions) == 1
+    checked = []
+    def load_events(route):
+        expect(page.locator("#loading-view")).to_be_visible()
+        expect(page.locator("#login-view")).to_be_hidden()
+        expect(page.locator("#app-view")).to_be_hidden()
+        checked.append(True)
+        route.continue_()
+    page.route("**/api/admin/reef-check-data/events", load_events)
+    sessions[0].continue_()
+    expect(page.locator("#rd-filters")).to_be_visible()
+    expect(page.locator("#loading-view")).to_be_hidden()
+    expect(page.locator("#login-view")).to_be_hidden()
+    assert checked
+    page.unroute("**/api/session")
+    page.unroute("**/api/admin/reef-check-data/events")
+
+
 def test_ui():
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(channel="chrome", args=["--no-sandbox"])
@@ -245,6 +275,8 @@ def test_ui():
         page.locator("#dev-email").fill(EMAIL)
         page.locator("#dev-password").fill(PASSWORD)
         page.get_by_role("button", name="Sign in", exact=True).click()
+        expect(page.locator("#rd-filters")).to_be_visible()
+        check_reload_loading(page)
         filters = page.locator("#rd-filters")
         filters.get_by_label("潛水員").fill("RC-DIVER-TEST")
         filters.get_by_text("篩選", exact=True).click()

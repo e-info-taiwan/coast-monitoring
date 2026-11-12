@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var fishSummaryKeys = []string{"butterfly_total", "sweetlips_total", "snapper_total", "barramundi", "grouper_large", "grouper_small", "humphead", "bumphead", "parrot_large", "moray"}
@@ -362,8 +363,9 @@ func FormatArchive(details []service.ReefDataDetail, format string) ([]byte, err
 	data := sortedEvents(details)
 	var out bytes.Buffer
 	z := zip.NewWriter(&out)
+	generatedAt := time.Now().UTC()
 	write := func(name string, data []byte) error {
-		w, e := z.Create(name)
+		w, e := z.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate, Modified: generatedAt})
 		if e != nil {
 			return e
 		}
