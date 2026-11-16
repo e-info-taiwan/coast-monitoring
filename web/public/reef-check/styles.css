@@ -145,4 +145,5 @@
 .review-submit-actions,.review-submit-actions .right{flex-wrap:wrap}
 .review-submit-actions .right{justify-content:flex-end}
 #review-issues{scroll-margin-top:100px}
+.sr-only{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 @media(max-width:580px){.table-scroll.belt-scroll{margin:0 10px 16px}.review-submit-actions>.right{width:100%;display:grid;grid-template-columns:1fr}.review-submit-actions .right .button{width:100%;min-height:48px}}
