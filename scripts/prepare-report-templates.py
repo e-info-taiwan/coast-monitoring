@@ -2,6 +2,7 @@
 Usage: PYTHONPATH=<openpyxl> python3 scripts/prepare-report-templates.py line.xlsx belt.xlsx summary.xlsx
 openpyxl is used only to translate shared formulas, never to re-save a workbook.
 """
+from report_labels import clean_report_labels
 import sys,re,zipfile,xml.etree.ElementTree as E,posixpath
 from openpyxl.formula.translate import Translator
 M='http://schemas.openxmlformats.org/spreadsheetml/2006/main'
@@ -140,5 +141,6 @@ def prepare(src,kind):
  dst='internal/report/templates/'+kind+'.xlsx'
  with zipfile.ZipFile(dst,'w',zipfile.ZIP_DEFLATED)as out:
   for name,raw in parts.items():out.writestr(name,raw)
+ clean_report_labels(dst)
  print(dst,len(parts))
 for src,kind in zip(sys.argv[1:],['line','belt','summary']):prepare(src,kind)

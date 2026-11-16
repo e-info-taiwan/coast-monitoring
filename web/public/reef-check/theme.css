@@ -216,6 +216,35 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
   .board-head h2{font-size:18px}.survey-strip b{font-size:12px}.stat b{font-size:24px}
 }
 /* Tablet-first: reserve the full page width for the handboard, in both orientations. */
+/* Let the sheet and controls carry the workflow; reserve prose for exceptions. */
+.page-intro{margin-bottom:22px;padding-top:4px}
+.method-card{min-height:232px;gap:14px;padding-top:28px}
+.method-card:has(input:checked){padding-top:27px}
+.method-card h2{margin:0 30px 0 0}
+.method-card .mini-sheet{margin-top:8px;font-size:10px}
+.method-card .mini-caption{margin-top:auto;font-size:13px}
+.board-head{padding:16px 22px}.board-head h2{margin:0}
+.record-identifiers{margin-top:18px;font-size:14px;color:var(--muted)}
+.record-identifiers summary{cursor:pointer;min-height:44px;display:flex;align-items:center;gap:8px}
+.record-identifiers summary::before{content:'＋';color:var(--teal)}
+.record-identifiers[open] summary::before{content:'−'}
+.custom-row .legacy-options{flex-basis:100%;font-size:14px;color:var(--muted)}
+.legacy-options summary{cursor:pointer;min-height:44px;padding:8px 0}
+.legacy-options p{margin:6px 0}
+.review-count{font-size:15px;font-weight:400;color:var(--muted);margin-left:8px}
+.review-row p{margin-top:4px}
+.check-ack small{display:block;margin-top:6px}
+.success-panel .form-error{font-size:18px;margin:0 0 18px}
+.field-label{display:block}.field-label .required{display:inline;margin-left:6px;font-size:12px}
+.line-phase{padding:12px 18px;gap:8px}
+.line-phase button,.line-phase span{min-height:44px;padding:8px 10px;font-size:14px}
+.line-zoom-head{padding:16px 24px 10px}.line-zoom-head h3{font-size:24px}
+.line-zoom-head strong{display:inline-flex;align-items:baseline;gap:5px;font-size:26px}
+.line-zoom-head strong small{display:inline;font-size:13px}
+.line-entry-workspace .line-zoom-row{min-height:72px;padding:10px 14px}
+.line-entry-workspace .line-zoom-row input{min-height:56px;font-size:26px}
+.line-entry-workspace .line-zoom-row>span b{font-size:20px}
+.survey-strip{margin-bottom:14px;padding:10px 16px}.sheets-nav{margin-top:0}
 @media(min-width:581px) and (max-width:1366px){
   .app-shell{display:block}
   .workflow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;padding:14px 24px;border-right:0;border-bottom:1px solid #acd2cf;background:#dff1ef}

@@ -530,8 +530,8 @@ export function createPublicContent({ apiFetch, drawer, notify }) {
       bind(body) {
         body.querySelector("[data-pc-cancel]").onclick = () => drawer.close()
         const detailEl = body.querySelector("#pc-review-detail")
-        apiFetch(`/admin/reef-check-data/events/${item.id}`)
-          .then(detail => { detailEl.innerHTML = renderPublicationReview(detail) })
+        Promise.all([apiFetch(`/admin/reef-check-data/events/${item.id}`), apiFetch("/admin/reef-check-data/codes")])
+          .then(([detail, codes]) => { detailEl.innerHTML = renderPublicationReview(detail, codes) })
           .catch(error => { detailEl.innerHTML = `<p class="pc-form-error" role="alert">無法載入核對資料：${esc(error.message)}</p>` })
         const form = body.querySelector("#pc-publish-form")
         form.onsubmit = async event => {

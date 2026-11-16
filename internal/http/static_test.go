@@ -179,9 +179,10 @@ func TestVolunteerFormUsesV18EntryRules(t *testing.T) {
 		"fish_length_mode:k==='fish'&&state.fishLengthMode?state.fishLengthMode:undefined",
 		"r.group==='trash'||r.group==='coral_damage'",
 		"data-action=\"toggle-bleach-point\"",
-		"is_bleached:isBleachableCode",
+		"health_status:pointHealthStatus(p)",
+		"點選標記白化",
 		"new URLSearchParams(window.location.search).get('debug')==='1'",
-		"DEBUG · 未儲存",
+		"測試模式，未送出資料。",
 	} {
 		if !strings.Contains(app, want) {
 			t.Fatalf("volunteer app missing v1.8 rule %q", want)

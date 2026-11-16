@@ -9,24 +9,146 @@ const siteFixtures=[
  {id:2,is_active:true,region:'北海岸',name_zh:'另一樣點',name_en:'OtherSite',latitude:25.1,longitude:121.2},
  {id:3,is_active:true,region:'其他',name_zh:'缺座標樣點',name_en:'NoCoordinates',latitude:null,longitude:null}
 ]
-function setup(){
- const dom=new JSDOM(fs.readFileSync(new URL('index.html',base),'utf8'),{url:'https://example.invalid/public/reef-check/',runScripts:'outside-only'})
+function boardFixture(w){return {format:'reefcheck-web-v4',taxa:['fish','invert','rare'].flatMap(k=>w.REEF[k].map((r,i)=>({id:i+1,taxon_group:k,name_en:r[0],name_zh:r[1],size_class:r[2]||'',entry_row_id:String(r[3]??i),is_active:true,is_aggregate:false}))),impacts:w.REEF.impact.map((r,i)=>({id:i+1,impact_group:r[3],name_en:r[0],name_zh:r[1],value_type:r[2]==='count'?'level':r[2],has_raw_count:r[2]==='count',entry_row_id:String(r[4]??i),is_active:true}))}}
+function setup({debug=false,local=false}={}){
+ const dom=new JSDOM(fs.readFileSync(new URL('index.html',base),'utf8'),{url:(local?'file:///Users/mac/coral/coast-monitoring/web/public/reef-check/index.html':'https://example.invalid/public/reef-check/')+(debug?'?debug=1':''),runScripts:'outside-only'})
  const w=dom.window;w.structuredClone=structuredClone;w.scrollTo=()=>{};w.HTMLElement.prototype.scrollIntoView=()=>{};const requests=[]
  w.fetch=async(path,options)=>{
   if(path==='/api/session')return {ok:false}
   if(path==='/api/public/reef-check/entry-sites')return {ok:true,json:async()=>siteFixtures}
+  if(path==='/api/public/reef-check/config')return {ok:true,json:async()=>({entry_board:boardFixture(w)})}
   if(path==='/api/public/reef-check/entry-environment')return new Promise(resolve=>requests.push({input:JSON.parse(options.body),resolve}))
   throw Error('Unexpected request '+path)
  }
  w.eval(fs.readFileSync(new URL('catalog.js',base),'utf8'))
  w.eval(fs.readFileSync(new URL('app.js',base),'utf8').replace(/\nrender\(\);\ninitApp\(\);/,'\n')+'\nwindow.__entryRun=source=>eval(source);')
  const run=source=>w.__entryRun(source)
+ w.entryBoardFixture=boardFixture(w);run('applyEntryBoard(window.entryBoardFixture)')
  run(`state.activityCode='RC-FIXTURE';state.activity={name:'測試活動',site_ids:[1,2,3],start_date:'2026-11-06',end_date:'2026-11-08'};state.methods=['line'];state.meta.date='2026-11-06';step=1;render();`)
  const input=(selector,value,event='input')=>{const el=w.document.querySelector(selector);assert.ok(el,selector);el.value=value;el.dispatchEvent(new w.Event(event,{bubbles:true}));return el}
  const selectSite=value=>{input('[data-meta="site"]',value);input('[data-meta="site"]',value,'change')}
  return {dom,w,requests,run,input,selectSite}
 }
 const flush=()=>new Promise(resolve=>setTimeout(resolve,0))
+
+test('live entry loads its shared template, retains stable draft row keys and blocks mismatched configuration',async()=>{
+ const f=setup();try{
+  await f.run('initApp()');assert.equal(f.run('entryBoardStatus'),'ready')
+  const board=boardFixture(f.w);board.taxa.reverse();board.impacts.reverse()
+  f.w.reordered=board;f.run(`state.invert['0:1']='7';state.impact['0:1']='2';applyEntryBoard(window.reordered)`)
+  assert.equal(f.run(`rowsFor('invert').find(r=>r.name==='Banded coral shrimp').id`),'0')
+  assert.equal(f.run(`rowsFor('impact').find(r=>r.name==='Coral damage: boat/anchor').id`),'0')
+  assert.equal(f.run(`state.invert[rowsFor('invert').find(r=>r.name==='Banded coral shrimp').id+':1']`),'7')
+  const originalFetch=f.w.fetch
+  f.w.fetch=async p=>p==='/api/public/reef-check/config'?{ok:true,json:async()=>({taxa:[],impacts:[]})}:originalFetch(p)
+  await f.run('refreshEntryBoard()')
+  assert.equal(f.run('entryBoardStatus'),'error')
+  assert.ok(f.run('metaErrors().some(x=>x.includes("手板設定"))'))
+  assert.ok(f.w.document.querySelector('[data-action="refresh-entry-board"]'))
+  f.w.fetch=originalFetch;await f.run('refreshEntryBoard()');assert.equal(f.run('entryBoardStatus'),'ready')
+  assert.equal(f.w.document.querySelector('[data-action="refresh-entry-board"]'),null)
+ }finally{f.w.close()}
+})
+
+test('a complete browser entry handles validation, server and network failures differently without losing data',async()=>{
+ const f=setup();try{
+  await f.run('initApp()')
+  f.run(`state.methods=['fish'];state.fishLengthMode='combined';state.meta={...state.meta,site:'MeiRenDong',date:'2026-11-06',time:'09:30',depth:'5'};state.recorders.fish='Fixture';rowsFor('fish').forEach(r=>starts.forEach((_,s)=>state.fish[r.id+':'+(s+1)]='0'));state.fish['0:1']='11';state.ack=true;step=3;render()`)
+  assert.equal(f.run('issues().length'),0)
+  const originalFetch=f.w.fetch;let posts=0
+  f.w.fetch=async(p,o)=>{if(p==='/api/public/reef-check/surveys'){posts++;return {ok:false,status:400,json:async()=>({error:'魚類手板缺少「蝴蝶魚」：第 2 段'})}}return originalFetch(p,o)}
+  await f.run('submitRecord()')
+  assert.equal(posts,1);assert.equal(f.run('step'),3);assert.equal(f.run('state.ack'),false)
+  assert.ok(f.w.document.querySelector('#complete-error').textContent.includes('蝴蝶魚'))
+  assert.ok(f.w.document.querySelector('#complete-error').textContent.includes('不是網路問題'))
+  assert.ok(f.w.document.querySelector('#review-issues [role="alert"]').textContent.includes('尚未儲存'))
+  assert.equal(f.w.document.querySelector('.review-ok'),null)
+  assert.equal(f.run(`state.fish['0:1']`),'11')
+  f.run('persist()');assert.equal(f.run('submitFailureKind'),'')
+  f.w.fetch=async()=>({ok:false,status:500,json:async()=>({error:'Temporary server error'})})
+  f.run('state.ack=true');await f.run('submitRecord()')
+  assert.equal(f.run('step'),4);assert.ok(f.w.document.querySelector('#main').textContent.includes('聯絡管理員'))
+  assert.ok(!f.w.document.querySelector('#main').textContent.includes('確認網路連線正常'))
+  f.w.fetch=async()=>{throw Error('Network offline')}
+  await f.run('submitRecord()')
+  assert.equal(f.run('submitFailureKind'),'network');assert.ok(f.w.document.querySelector('#main').textContent.includes('確認網路連線正常'))
+  assert.equal(f.run(`state.fish['0:1']`),'11')
+ }finally{f.w.close()}
+})
+
+test('excluding a required rare or impact row is surfaced before submission, not hidden by the progress counter',()=>{
+ const f=setup({debug:true});try{
+  f.run(`state.methods=['invert'];state.notApplicable.rare=['0'];state.notApplicable.impact=['0']`)
+  const text=f.run('extraEntryIssues().map(x=>x.text).join(";")')
+  assert.ok(text.includes('鯊魚'));assert.ok(text.includes('船錨'));assert.ok(text.includes('NA'))
+ }finally{f.w.close()}
+})
+
+test('fish and invert cannot exclude rows, including restored legacy drafts',()=>{
+ const f=setup({debug:true});try{
+  f.run(`state.methods=['fish','invert'];state.fishLengthMode='combined';state.notApplicable.fish=['0'];state.notApplicable.invert=['0'];step=2;sheet='fish';render()`)
+  for(const k of ['fish','invert']){
+   f.run(`sheet='${k}';render()`)
+   assert.equal(f.w.document.querySelectorAll('[data-row-applicability]').length,0)
+   assert.ok(!f.w.document.querySelector('.board-tools').textContent.includes('本手板未列'))
+   assert.equal(f.w.document.querySelectorAll('.belt-table input:disabled').length,0)
+   assert.equal(f.run(`excludedRows('${k}').length`),0)
+   assert.equal(f.run(`sheetStats('${k}').total`),f.run(`rowsFor('${k}').length*4`))
+   assert.equal(f.w.document.querySelector('[data-action="zero"]'),null)
+   assert.ok(f.w.document.querySelector('.table-scroll.belt-scroll[tabindex="0"]'))
+  }
+  f.run(`state.ack=true;state.fish['0:1']='7';state=migrateRecord(state)`)
+  assert.equal(f.run('state.ack'),false)
+  assert.equal(f.run('state.notApplicable.fish.length+state.notApplicable.invert.length'),0)
+  assert.equal(f.run(`state.fish['0:1']`),'7')
+  f.run(`sheet='rare';render()`)
+  assert.ok(f.w.document.querySelectorAll('[data-row-applicability]').length>0)
+ }finally{f.w.close()}
+})
+
+test('zero-fill sits beside submission, previews all active Belt sheets and preserves NA, numbers and excluded sheets',()=>{
+ const f=setup({debug:true});try{
+  f.w.HTMLDialogElement.prototype.showModal=function(){this.setAttribute('open','')}
+  f.w.HTMLDialogElement.prototype.close=function(){this.removeAttribute('open')}
+  f.run(`state.methods=['line','fish','invert'];state.fishLengthMode='combined';state.line['0']='1';state.fish['0:1']='7';state.fish['0:2']='NA';state.fish['8:1']='9';state.invert['0:1']='2';state.invert['0:2']='-';state.notApplicable.rare=[rowsFor('rare')[0].id];state.ack=true;step=3;render()`)
+  const blank=f.run(`zeroFillSheets().reduce((n,k)=>n+zeroFillCount(k),0)`)
+  const zero=f.w.document.querySelector('.review-submit-actions .right [data-action="zero"]')
+  assert.ok(zero);assert.equal(zero.nextElementSibling.dataset.action,'complete')
+  zero.click()
+  const dialog=f.w.document.querySelector('#modal')
+  assert.equal(dialog.open,true)
+  assert.ok(dialog.textContent.includes(blank+' 個空白格'))
+  for(const text of ['魚類','無脊椎','罕見生物','不要補成 0','已填數字及 NA 都不會被覆寫'])assert.ok(dialog.textContent.includes(text))
+  assert.equal(f.run(`zeroFillSheets().reduce((n,k)=>n+zeroFillCount(k),0)`),blank)
+  dialog.querySelector('[data-action="close"]').click()
+  assert.equal(f.run('state.ack'),true)
+  f.w.document.querySelector('[data-action="zero"]').click()
+  dialog.querySelector('[data-action="confirm-zero"]').click()
+  assert.equal(f.run(`zeroFillSheets().reduce((n,k)=>n+zeroFillCount(k),0)`),0)
+  assert.equal(f.run(`state.fish['0:1']`),'7');assert.equal(f.run(`state.fish['0:2']`),'NA')
+  assert.equal(f.run(`state.fish['8:1']`),'9');assert.equal(f.run(`state.invert['0:2']`),'-')
+  assert.equal(f.run(`state.line['0']`),'1');assert.equal(f.run(`Object.keys(state.line).length`),1)
+  assert.equal(f.run(`Object.keys(state.impact).length`),0)
+  assert.equal(f.run(`state.rare[rowsFor('rare')[0].id+':1']`),undefined)
+  assert.equal(f.run('state.ack'),false)
+  f.w.document.querySelector('[data-action="zero"]').click()
+  assert.equal(dialog.open,false)
+  assert.ok(f.w.document.querySelector('#toast').textContent.includes('沒有可補零'))
+  f.run(`state.methods=['line'];render()`)
+  assert.equal(f.w.document.querySelector('[data-action="zero"]'),null)
+ }finally{f.w.close()}
+})
+
+test('Belt scroll containers pin the segment header above sticky row labels',()=>{
+ const css=fs.readFileSync(new URL('styles.css',base),'utf8')
+ assert.match(css,/\.table-scroll\.belt-scroll\{[^}]*max-height:70dvh;[^}]*overflow:auto/)
+ assert.match(css,/\.belt-scroll \.belt-table thead th\{[^}]*position:sticky;top:0;z-index:3/)
+ assert.match(css,/\.belt-scroll \.belt-table thead th:first-child\{left:0;z-index:4/)
+ const f=setup({debug:true});try{
+  f.run(`state.methods=['fish'];state.fishLengthMode='split';step=3;render()`)
+  assert.ok(f.w.document.querySelector('.review-detail .belt-scroll'))
+ }finally{f.w.close()}
+})
 
 test('24-hour numeric fields preserve focus and produce canonical 15:40 without AM/PM',async()=>{
  const f=setup();try{
@@ -35,7 +157,7 @@ test('24-hour numeric fields preserve focus and produce canonical 15:40 without 
   const hour=f.w.document.querySelector('[data-time-part="hour"]');assert.equal(hour.value,'');assert.equal(hour.placeholder,'時');assert.equal(f.w.document.querySelector('[data-time-part="minute"]').placeholder,'分');hour.focus()
   f.input('[data-time-part="hour"]','15');assert.equal(f.w.document.activeElement,hour)
   f.input('[data-time-part="minute"]','40');f.input('[data-time-part="minute"]','40','change')
-  assert.equal(f.run('state.meta.time'),'15:40');assert.equal(f.requests.length,0)
+  assert.equal(f.run('state.meta.time'),'15:40');assert.equal(f.requests.length,1)
   assert.ok(f.w.document.querySelector('.time-control').textContent.includes('24 小時制'))
   f.input('[data-time-part="hour"]','24');assert.equal(f.run('state.meta.time'),'')
   f.input('[data-time-part="hour"]','0');f.input('[data-time-part="hour"]','0','change');f.input('[data-time-part="minute"]','5');f.input('[data-time-part="minute"]','5','change')
@@ -58,19 +180,69 @@ test('site coordinates autofill, switching clears missing coordinates, reload pr
  }finally{f.w.close()}
 })
 
-test('temperature keeps only the inline note and never fetches a preview or substitutes manual values',async()=>{
+test('temperature preview shows station, Taiwan time and reference without substituting manual values',async()=>{
  const f=setup();try{
   await f.run('initApp()');f.selectSite('MeiRenDong')
   f.input('[data-time-part="hour"]','15');f.input('[data-time-part="minute"]','40');f.input('[data-time-part="minute"]','40','change')
-  assert.equal(f.w.document.querySelector('#environment-reference'),null)
-  assert.ok(f.w.document.querySelector('[data-meta="temperature"]').closest('label').textContent.includes('後台會自動查詢附近測站海溫，若有需要替換再填入'))
+  assert.equal(f.requests.length,1);assert.deepEqual(f.requests[0].input,{activity_code:'RC-FIXTURE',site_id:1,survey_date:'2026-11-06',event_time:'15:40'})
+  f.requests[0].resolve({ok:true,json:async()=>({site_id:1,station_id:'ST01',station_name:'測試海溫站',sea_temp_c:27.2,observed_at:'2026-11-06T07:00:00Z'})});await flush()
+  const panel=f.w.document.querySelector('#environment-reference')
+  assert.ok(panel.textContent.includes('27.2 °C'));assert.ok(panel.textContent.includes('測試海溫站'));assert.ok(panel.textContent.includes('15:00:00'))
+  assert.equal(f.w.document.querySelector('[data-meta="temperature"]').value,'')
   assert.equal(f.run('payload().transects[0].water_temp_c'),null)
   f.input('[data-meta="temperature"]','25.5');f.selectSite('OtherSite')
-  assert.equal(f.run('payload().transects[0].water_temp_c'),25.5);assert.equal(f.requests.length,0)
+  assert.equal(f.run('payload().transects[0].water_temp_c'),25.5);assert.equal(f.requests.length,2)
   const css=fs.readFileSync(new URL('styles.css',base),'utf8')
   assert.ok(css.includes('.time-parts input::placeholder'))
   assert.ok(css.includes('.time-parts input:placeholder-shown'))
  }finally{f.w.close()}
+})
+
+test('missing station and missing same-day observation show the requested backend reminder, not a fake value',async()=>{
+ const f=setup();try{
+  await f.run('initApp()');f.selectSite('MeiRenDong');f.input('[data-time-part="hour"]','15');f.input('[data-time-part="minute"]','40','change')
+  const panel=()=>f.w.document.querySelector('#environment-reference'),reminder='若鄰近有測站但未抓到資料，請至後台確認樣點附近測站。'
+  f.requests[0].resolve({ok:true,json:async()=>({site_id:1,station_id:null,sea_temp_c:null,message:'舊版說明'})});await flush()
+  assert.ok(panel().textContent.includes('尚未對應氣象署測站'));assert.ok(panel().textContent.includes(reminder));assert.ok(!panel().textContent.includes('°C'))
+  const next=f.run('refreshEnvironment(true)');f.requests[1].resolve({ok:true,json:async()=>({site_id:1,station_id:'ST01',station_name:'測試海溫站',sea_temp_c:null})});await next
+  assert.ok(panel().textContent.includes('調查當日沒有可用海溫'));assert.ok(panel().textContent.includes('不改用其他日期'));assert.ok(panel().textContent.includes(reminder))
+  assert.equal(f.requests[1].input.survey_date,'2026-11-06');assert.equal(f.run('state.meta.temperature'),'')
+  const failed=f.run('refreshEnvironment(true)');f.requests[2].resolve({ok:false});await failed
+  assert.ok(panel().textContent.includes('暫時無法取得'));assert.ok(!panel().textContent.includes('尚未對應'))
+  panel().querySelector('[data-action="refresh-environment"]').click();assert.equal(f.requests.length,4)
+  f.requests[3].resolve({ok:true,json:async()=>({site_id:1,station_id:'ST01',sea_temp_c:0})});await flush()
+  assert.ok(panel().textContent.includes('0 °C'));assert.equal(f.run('state.meta.temperature'),'')
+ }finally{f.w.close()}
+})
+
+test('preview ignores late responses after site, incomplete time or draft changes',async()=>{
+ const f=setup();try{
+  await f.run('initApp()');f.selectSite('MeiRenDong');f.input('[data-time-part="hour"]','15');f.input('[data-time-part="minute"]','40','change')
+  f.selectSite('OtherSite');assert.equal(f.requests.length,2)
+  f.requests[1].resolve({ok:true,json:async()=>({site_id:2,station_id:'ST02',station_name:'目前測站',sea_temp_c:28})});await flush()
+  f.requests[0].resolve({ok:true,json:async()=>({site_id:1,station_id:'ST01',station_name:'舊測站',sea_temp_c:21})});await flush()
+  assert.ok(f.w.document.querySelector('#environment-reference').textContent.includes('目前測站'));assert.ok(!f.w.document.querySelector('#environment-reference').textContent.includes('舊測站'))
+  f.input('[data-time-part="minute"]','');assert.ok(!f.w.document.querySelector('#environment-reference').textContent.includes('28 °C'))
+  f.input('[data-time-part="minute"]','41','change');assert.equal(f.requests.length,3)
+  f.input('[data-time-part="minute"]','');f.requests[2].resolve({ok:true,json:async()=>({site_id:2,station_id:'ST02',sea_temp_c:29})});await flush()
+  assert.ok(!f.w.document.querySelector('#environment-reference').textContent.includes('29 °C'))
+  f.input('[data-time-part="minute"]','42','change');assert.equal(f.requests.length,4)
+  f.run('state={...state,id:"another-draft",meta:{...state.meta}};render()');assert.equal(f.requests.length,5)
+  f.requests[3].resolve({ok:true,json:async()=>({site_id:2,station_id:'ST02',sea_temp_c:19})});await flush()
+  assert.ok(!f.w.document.querySelector('#environment-reference').textContent.includes('19 °C'))
+  f.requests[4].resolve({ok:true,json:async()=>({site_id:2,station_id:'ST02',sea_temp_c:26})});await flush()
+  assert.ok(f.w.document.querySelector('#environment-reference').textContent.includes('26 °C'))
+ }finally{f.w.close()}
+})
+
+test('local and debug pages show an explanation but never request official reference temperatures',async()=>{
+ for(const options of [{debug:true},{local:true}]){
+  const f=setup(options);try{
+   await f.run('initApp()');f.selectSite('MeiRenDong');f.input('[data-time-part="hour"]','15');f.input('[data-time-part="minute"]','40','change')
+   await f.run('refreshEnvironment(true)');assert.equal(f.requests.length,0)
+   assert.ok(f.w.document.querySelector('#environment-reference').textContent.includes('本機／測試模式不查詢正式海溫'))
+  }finally{f.w.close()}
+ }
 })
 
 test('next group is directly below the five input rows, and numeric 10 stays raw but submits as OT',()=>{
@@ -171,5 +343,77 @@ test('empty fields stay empty and block normal navigation with a missing-value m
   const el=f.w.document.querySelector('[data-cell="line"][data-key="0"]')
   assert.equal(el.getAttribute('aria-invalid'),'true');assert.ok(f.w.document.querySelector('#substrate-feedback-line-0').textContent.includes('尚未填寫'))
   assert.ok(!f.w.document.querySelector('#toast').textContent.includes('未知代碼'))
+ }finally{f.w.close()}
+})
+
+test('bleaching uses health_status and leaves points unknown until an explicit completion confirmation',()=>{
+ const f=setup();try{
+  f.run('step=2;state.coralMorphology="classified";points.forEach(p=>state.line[p.key]="6");Object.assign(state.line,{"0":"1","0.5":"2","1":"a","1.5":"91"});state.linePhase="number-review";render()')
+  f.w.document.querySelector('[data-action="confirm-line-numbers"]').click()
+  assert.equal(f.run('state.linePhase'),'bleaching');assert.equal(f.run('Object.keys(state.healthStatus).length'),0)
+  const selector='[data-action="toggle-bleach-point"][data-key="0"]'
+  assert.equal(f.w.document.querySelector(selector).textContent.trim(),'點選標記白化')
+  assert.ok(f.w.document.querySelector(selector).getAttribute('aria-label').includes('尚未確認'))
+  assert.equal(f.w.document.querySelector('[data-action="toggle-bleach-point"][data-key="1.5"]'),null)
+  assert.equal(f.run('payload().substrate_points[0].health_status'),null)
+  f.w.document.querySelector(selector).click();assert.equal(f.run('state.healthStatus["0"]'),'bleached')
+  assert.equal(f.w.document.querySelector(selector).getAttribute('aria-pressed'),'true');assert.ok(f.w.document.querySelector('[data-bleaching-summary]').textContent.includes('待確認'))
+  f.w.document.querySelector(selector).click();assert.equal(f.run('pointHealthStatus(points[0])'),null)
+  f.w.document.querySelector(selector).click();f.w.document.querySelector('[data-action="confirm-line-bleaching"]').click()
+  assert.equal(f.run('state.healthStatus["0"]'),'bleached');assert.equal(f.run('state.healthStatus["0.5"]'),'not_bleached');assert.equal(f.run('state.healthStatus["1"]'),'not_bleached')
+  assert.equal(f.run('payload().substrate_points[3].health_status'),null);assert.equal(f.run('payload().substrate_points[4].health_status'),null)
+  assert.equal(f.run('payload().substrate_points[0].is_bleached'),undefined)
+  assert.ok(f.run('bleachingSummary()').includes('HC 白化標記數</th><td>1</td>'))
+  f.run('step=3;state.ack=true;render()');f.w.document.querySelector(selector).click()
+  assert.equal(f.run('state.healthStatus["0"]'),'not_bleached');assert.equal(f.run('state.ack'),false)
+  f.run('step=2;state.linePhase="entry";render()');f.input('[data-cell="line"][data-key="0"]','2','change')
+  assert.equal(f.run('pointHealthStatus(points[0])'),null)
+ }finally{f.w.close()}
+})
+
+test('legacy local marks migrate without promoting unfinished default negatives to confirmed health status',()=>{
+ const f=setup();try{
+  f.run('state.linePhase="bleaching";state.bleached={"0":true,"0.5":false};state=migrateRecord(state)')
+  assert.equal(f.run('state.healthStatus["0"]'),'bleached');assert.equal(f.run('state.healthStatus["0.5"]'),undefined);assert.equal(f.run('state.bleached'),undefined)
+  f.run('state.linePhase="complete";state.bleached={"0.5":false};state=migrateRecord(state)')
+  assert.equal(f.run('state.healthStatus["0.5"]'),'not_bleached')
+ }finally{f.w.close()}
+})
+
+test('both final review screens expose raw/canonical tabs without hiding them in a disclosure',()=>{
+ const f=setup();try{
+  f.run('state.coralMorphology="classified";state.linePhase="complete";points.forEach(p=>state.line[p.key]="6");state.line["0"]="1";state.healthStatus["0"]="bleached";state.ack=true;reviewMode="raw"')
+  const initial=f.run('JSON.stringify({line:state.line,health:state.healthStatus,points:payload().substrate_points})')
+  for(const screen of [2,3]){
+   f.run(`step=${screen};reviewMode="raw";render()`)
+   const panel=f.w.document.querySelector('[data-review-line-panel]')
+   assert.ok(panel);assert.equal(panel.closest('details'),null)
+   assert.equal(panel.querySelector('[data-review-key="0"]>b').textContent,'1')
+   panel.querySelector('[data-action="review-mode"][data-mode="canonical"]').click()
+   const current=f.w.document.querySelector('[data-review-line-panel]')
+   assert.equal(current.querySelector('[data-review-key="0"]>b').textContent,'HC')
+   assert.equal(current.querySelector('[data-mode="canonical"]').getAttribute('aria-selected'),'true')
+   assert.equal(current.querySelector('[data-key="0"][data-action="toggle-bleach-point"]').getAttribute('aria-pressed'),'true')
+   current.querySelector('[data-action="review-mode"][data-mode="raw"]').click()
+   assert.equal(current.querySelector('[data-review-key="0"]>b').textContent,'1')
+   assert.equal(f.run('state.ack'),true)
+   assert.equal(f.run('JSON.stringify({line:state.line,health:state.healthStatus,points:payload().substrate_points})'),initial)
+   assert.equal(f.w.document.querySelectorAll('[data-bleaching-summary]').length,1)
+  }
+ }finally{f.w.close()}
+})
+
+test('coral totals remain independent of bleaching marks, include morphology and exclude mud composites',()=>{
+ const f=setup();try{
+  f.run('step=3;state.coralMorphology="classified";state.linePhase="complete";state.mud=true;points.forEach(p=>state.line[p.key]="6");Object.assign(state.line,{"0":"1","0.5":"2","1":"a","1.5":"2","2":"9","2.5":"10","3":"NA","25":"1","35":"2"});state.down["2"]="1";points.forEach(p=>{if(isBleachableCode(canonical(p)))state.healthStatus[p.key]="not_bleached"});state.healthStatus["0"]="bleached";state.healthStatus["1.5"]="bleached";render()')
+  const values=(group,kind)=>[...f.w.document.querySelector(`[data-coral-group="${group}"][data-summary-kind="${kind}"]`).querySelectorAll('td')].map(td=>td.textContent)
+  assert.deepEqual(values('HC','total'),['2','1','0','0']);assert.deepEqual(values('SC','total'),['2','1','0','0'])
+  assert.deepEqual(values('HC','bleached'),['1','0','0','0']);assert.deepEqual(values('SC','bleached'),['1','0','0','0'])
+  f.w.document.querySelector('[data-action="toggle-bleach-point"][data-key="0"]').click()
+  assert.deepEqual(values('HC','total'),['2','1','0','0']);assert.deepEqual(values('SC','total'),['2','1','0','0'])
+  assert.deepEqual(values('HC','bleached'),['0','0','0','0']);assert.deepEqual(values('SC','bleached'),['1','0','0','0'])
+  assert.equal(f.run('payload().substrate_points.find(p=>p.position_m===2).substrate_code'),'SI(HC)')
+  f.run('delete state.line["0"];render()')
+  assert.equal(values('HC','total')[0],'待確認底質');assert.equal(values('HC','bleached')[0],'待確認底質')
  }finally{f.w.close()}
 })

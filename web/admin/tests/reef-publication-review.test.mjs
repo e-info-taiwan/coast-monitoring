@@ -26,3 +26,12 @@ test('publication handboard preserves 10 and explicit 0 without relabelling eith
  assert.match(html,/>61.5<\/th><td>0<small>OT/)
  assert.match(html,/>62<\/th><td>NA（未記錄）<small>NA/)
 })
+
+test('BeautyCave 2019-10-30 5m S3 61m uses the handboard OT number and distinct NA label', () => {
+ const html = render({transects:[{method:'line',points:[
+   {segment:3,position_m:61,substrate_layer:'surface',substrate_code:'OT'},
+   {segment:3,position_m:61.5,substrate_layer:'surface',substrate_code:'NA'}
+ ]}]})
+ assert.match(html, />61<\/th><td>10<small>OT<\/small>/)
+ assert.match(html, />61\.5<\/th><td>NA（未記錄）<small>NA<\/small>/)
+})

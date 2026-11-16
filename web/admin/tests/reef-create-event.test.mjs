@@ -30,6 +30,7 @@ class Element {
   get innerHTML() { return this.html }
   querySelector(id) { if (!this.nodes.has(id)) this.nodes.set(id, new Element()); return this.nodes.get(id) }
   querySelectorAll() { return [] }
+  get popoverTargetElement() { return this.querySelector('#rd-download-options') }
   addEventListener(type, fn) { this.handlers[type] = fn }
   remove() { this.isConnected = false }
 }

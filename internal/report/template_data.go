@@ -96,12 +96,14 @@ func buildEventData(detail service.ReefDataDetail) *eventData {
 					d.put("count_"+key, seg+1, num(sum))
 				}
 			}
-			for _, b := range t.Bleaching {
-				if observed(b.HCStatus) {
-					d.put("hc_bleach", b.Segment, num(float64(b.HC)))
-				}
-				if observed(b.SCStatus) {
-					d.put("sc_bleach", b.Segment, num(float64(b.SC)))
+			if !t.PointMarks {
+				for _, b := range t.Bleaching {
+					if observed(b.HCStatus) {
+						d.put("hc_bleach", b.Segment, num(float64(b.HC)))
+					}
+					if observed(b.SCStatus) {
+						d.put("sc_bleach", b.Segment, num(float64(b.SC)))
+					}
 				}
 			}
 			// Point-derived summaries are authoritative when supplied; otherwise retain legacy manual counts.
@@ -340,8 +342,7 @@ func metadata(d *eventData) (weather string, air, lat, lon any) {
 	return
 }
 func inputToken(code string) any {
-	codes := map[string]string{"HC": "1", "SC": "2", "RKC": "3", "NIA": "4", "SP": "5", "RC": "6", "RB": "7", "SD": "8", "SI": "9", "OT": "0", "HC-a": "a", "HC-b": "b", "HC-c": "c", "SI(HC)": "91", "SI(SC)": "92", "SI(RKC)": "93", "SI(NIA)": "94", "SI(SP)": "95", "SI(RC)": "96", "SI(RB)": "97", "SI(SD)": "98", "SI(HC-a)": "9a", "SI(HC-b)": "9b", "SI(HC-c)": "9c"}
-	if v, ok := codes[code]; ok {
+	if v, ok := pointTokens[code]; ok {
 		if n, e := strconv.Atoi(v); e == nil {
 			return n
 		}
@@ -453,6 +454,7 @@ func lineTemplate(d *eventData) ([]byte, error) {
 		}
 		s.set(column(col)+strconv.Itoa(offset+15), inputToken(p.Code))
 	}
+	s.set("Q11", inputToken("OT"))
 	for i, morph := range []string{"a", "b", "c"} {
 		row := 23 + i
 		s.set("Q"+strconv.Itoa(row), "9"+morph)
@@ -619,6 +621,12 @@ func lineTemplate(d *eventData) ([]byte, error) {
 	}
 	fillLineExport(b.byName["EXPORT"], d)
 	b.titles(eventTitle(e), map[int]string{1: "底質覆蓋率", 2: "活底質覆蓋率", 3: "非生物底質覆蓋率", 4: "活底質比例", 5: "非生物底質比例", 6: "珊瑚白化比例", 7: "表層底質分類", 8: "硬珊瑚型態覆蓋率", 10: "硬珊瑚型態比例"})
+	for row := 86; row <= 125; row++ {
+		s.setRowLayout(row, 15, true)
+	}
+	if err := b.presentCharts("line"); err != nil {
+		return nil, err
+	}
 	return b.bytes()
 }
 func statsValues(vals segmentValues) (total, mean, sd, se any) {
@@ -936,7 +944,11 @@ func beltTemplate(d *eventData) ([]byte, error) {
 	g.set("E7", "Reef Check Fish Graphs for "+eventTitle(e))
 	g.set("E49", "Reef Check Invertebrates Graphs for "+eventTitle(e))
 	g.set("E81", "Reef Check Impacts, Bleaching and Disease for "+eventTitle(e))
-	s.set("A42", "Long-spined urchin 長刺海膽（魔鬼＋刺棘）")
+	s.set("A42", "Long-spined urchin\n長刺海膽（魔鬼＋刺棘）")
+	s.setRowLayout(42, 42, false)
+	if err := b.wrapCell(s, "A42"); err != nil {
+		return nil, err
+	}
 	setSeries(s, 42, []string{"B", "C", "D", "E"}, d.values["long_spined"])
 	for i, col := range []string{"B", "C", "D", "E"} {
 		guardedSum(s, col+"42", []string{col + "34", col + "35"}, value(d.values["long_spined"][i]))
@@ -949,6 +961,9 @@ func beltTemplate(d *eventData) ([]byte, error) {
 	b.parts["xl/charts/chart7.xml"] = []byte(strings.ReplaceAll(string(b.parts["xl/charts/chart7.xml"]), "$44", "$45"))
 	fillBeltExport(b.byName["EXPORT"], d)
 	b.titles(eventTitle(e), map[int]string{1: "魚類族群密度", 2: "環境衝擊程度", 3: "珊瑚總體白化比例", 4: "珊瑚群體白化比例", 5: "珊瑚疾病比例", 6: "魚類尺寸", 7: "無脊椎動物族群密度", 8: "硨磲貝尺寸"})
+	if err := b.presentCharts("belt"); err != nil {
+		return nil, err
+	}
 	return b.bytes()
 }
 func fillBeltExport(s *templateSheet, d *eventData) {
@@ -1029,7 +1044,7 @@ func sortedEvents(details []service.ReefDataDetail) []*eventData {
 	return out
 }
 
-var pointTokens = map[string]string{"HC": "1", "SC": "2", "RKC": "3", "NIA": "4", "SP": "5", "RC": "6", "RB": "7", "SD": "8", "SI": "9", "OT": "0", "HC-a": "a", "HC-b": "b", "HC-c": "c", "SI(HC)": "91", "SI(SC)": "92", "SI(RKC)": "93", "SI(NIA)": "94", "SI(SP)": "95", "SI(RC)": "96", "SI(RB)": "97", "SI(SD)": "98", "SI(HC-a)": "9a", "SI(HC-b)": "9b", "SI(HC-c)": "9c"}
+var pointTokens = map[string]string{"HC": "1", "SC": "2", "RKC": "3", "NIA": "4", "SP": "5", "RC": "6", "RB": "7", "SD": "8", "SI": "9", "OT": "10", "HC-a": "a", "HC-b": "b", "HC-c": "c", "SI(HC)": "91", "SI(SC)": "92", "SI(RKC)": "93", "SI(NIA)": "94", "SI(SP)": "95", "SI(RC)": "96", "SI(RB)": "97", "SI(SD)": "98", "SI(HC-a)": "9a", "SI(HC-b)": "9b", "SI(HC-c)": "9c"}
 
 func segmentRanges(seg int) (string, string) {
 	return fmt.Sprintf("%s15:%s34", column(seg*4+2), column(seg*4+2)), fmt.Sprintf("%s15:%s34", column(seg*4+4), column(seg*4+4))

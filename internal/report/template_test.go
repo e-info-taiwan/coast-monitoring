@@ -21,6 +21,9 @@ func templateFixture() service.ReefDataDetail {
 			if i < n {
 				code = "HC-c"
 			}
+			if seg == 2 && i == 22 { // 61 m, right column of the third segment
+				code = "OT"
+			}
 			line.Points = append(line.Points, service.ReefDataPoint{Segment: seg + 1, Position: float64(seg*25) + float64(i)/2, Layer: "surface", Code: code})
 		}
 	}
@@ -39,7 +42,11 @@ func TestReferenceTemplateWorkbooks(t *testing.T) {
 	d := templateFixture()
 	for _, kind := range []string{"line", "belt", "summary"} {
 		t.Run(kind, func(t *testing.T) {
-			raw, err := TemplateWorkbook([]service.ReefDataDetail{d}, kind)
+			downloadKind := kind
+			if kind != "summary" {
+				downloadKind = "detail-" + kind
+			}
+			raw, err := TemplateWorkbook([]service.ReefDataDetail{d}, downloadKind)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -48,11 +55,22 @@ func TestReferenceTemplateWorkbooks(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if files["xl/styles.xml"] != string(base.parts["xl/styles.xml"]) {
+			beforeStyles, afterStyles := string(base.parts["xl/styles.xml"]), files["xl/styles.xml"]
+			if kind == "belt" {
+				beforeXF, afterXF := xmlElement(beforeStyles, "cellXfs"), xmlElement(afterStyles, "cellXfs")
+				xfs := regexpTag("xf")
+				old, updated := xfs.FindAllString(beforeXF, -1), xfs.FindAllString(afterXF, -1)
+				if len(updated) != len(old)+1 || strings.Join(old, "") != strings.Join(updated[:len(old)], "") || withoutElement(beforeStyles, "cellXfs") != withoutElement(afterStyles, "cellXfs") {
+					t.Fatal("wrapping the long-spined row changed existing template styles")
+				}
+			} else if beforeStyles != afterStyles {
 				t.Fatal("template styles were rewritten")
 			}
 			for _, s := range base.sheets {
 				for _, tag := range []string{"cols", "mergeCells", "pageMargins", "pageSetup", "headerFooter", "drawing"} {
+					if kind != "summary" && strings.HasPrefix(s.name, "GRAPHS") && (tag == "cols" || tag == "mergeCells") {
+						continue
+					}
 					re := regexpTag(tag)
 					before, after := re.FindString(s.raw), re.FindString(files[s.path])
 					if before != after {
@@ -69,6 +87,9 @@ func TestReferenceTemplateWorkbooks(t *testing.T) {
 			}
 			if kind == "line" {
 				data := cells(t, files["xl/worksheets/sheet1.xml"])
+				if data["L17"].Number != "10" || data["Q11"].Number != "10" || data["F56"].Number != "1" {
+					t.Fatal("OT handboard value, legend or segment count wrong", data["L17"], data["Q11"], data["F56"])
+				}
 				if data["C1"].Text != "測試海岸" || data["C2"].Number != "5" {
 					t.Fatal("line metadata wrong")
 				}
@@ -130,7 +151,7 @@ func TestTemplateArchiveAndHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	line, belt, summary := 0, 0, 0
+	line, belt, site, summary := 0, 0, 0, 0
 	for _, f := range z.File {
 		if strings.Contains(f.Name, "_LineTransect.xlsx") {
 			line++
@@ -138,11 +159,14 @@ func TestTemplateArchiveAndHistory(t *testing.T) {
 		if strings.Contains(f.Name, "_BeltTransect.xlsx") {
 			belt++
 		}
+		if strings.HasSuffix(f.Name, "_Site.xlsx") {
+			site++
+		}
 		if strings.Contains(f.Name, "_Summary_") {
 			summary++
 		}
 	}
-	if line != 3 || belt != 3 || summary != 2 {
+	if line != 3 || belt != 3 || site != 3 || summary != 2 {
 		t.Fatal("missing report files", line, belt, summary)
 	}
 	raw, err = TemplateWorkbook([]service.ReefDataDetail{a, b}, "summary")
@@ -163,7 +187,7 @@ func TestTemplateChartReferencesAndBlankRecalculation(t *testing.T) {
 	d := templateFixture()
 	// A missing segment must stay absent in the cache and in the exported Excel formulas.
 	d.Transects[0].Points = d.Transects[0].Points[:120]
-	raw, err := TemplateWorkbook([]service.ReefDataDetail{d}, "line")
+	raw, err := TemplateWorkbook([]service.ReefDataDetail{d}, "detail-line")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +200,11 @@ func TestTemplateChartReferencesAndBlankRecalculation(t *testing.T) {
 		t.Fatal("SE recalculation still assumes four segments")
 	}
 	for _, kind := range []string{"line", "belt", "summary"} {
-		raw, err := TemplateWorkbook([]service.ReefDataDetail{d}, kind)
+		downloadKind := kind
+		if kind != "summary" {
+			downloadKind = "detail-" + kind
+		}
+		raw, err := TemplateWorkbook([]service.ReefDataDetail{d}, downloadKind)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -221,7 +249,7 @@ func TestSiltMorphologyAndCombinedFishDoNotInventSize(t *testing.T) {
 	if *m.values["count_SI"][0] != 1 || m.values["parrot_large"][0] != nil || *m.values["butterfly_total"][0] != 8 {
 		t.Fatal("silt/combined mapping wrong")
 	}
-	raw, err := TemplateWorkbook([]service.ReefDataDetail{d}, "belt")
+	raw, err := TemplateWorkbook([]service.ReefDataDetail{d}, "detail-belt")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -232,5 +260,64 @@ func TestSiltMorphologyAndCombinedFishDoNotInventSize(t *testing.T) {
 	}
 	if strings.Contains(parts["xl/worksheets/sheet1.xml"], `<c r="K17" s="`) && strings.Contains(regexp.MustCompile(`(?s)<c\b[^>]*r="K17"[^>]*>.*?</c>`).FindString(parts["xl/worksheets/sheet1.xml"]), "<f>") {
 		t.Fatal("combined parrotfish can recalculate as >=20cm")
+	}
+}
+
+func TestFieldReportWorkbooks(t *testing.T) {
+	d := templateFixture()
+	d.Event.Latitude = num(-25.125)
+	d.Event.Longitude = num(121.5)
+	d.Transects[0].PointMarks = true
+	d.Transects[0].Bleaching = []service.ReefDataBleaching{{Segment: 1, HC: 2}}
+	d.Transects[0].Points[0].Code = "NA"
+	d.Transects[0].Points[1].Code = "SI(HC-a)"
+	d.Transects[0].Points = d.Transects[0].Points[:120] // fourth segment not sampled
+	d.Transects[2].Impacts = append(d.Transects[2].Impacts, service.ReefDataImpact{Segment: 1, NameEN: "Bleaching (% of population)", ValueType: "percent", RawValue: 25})
+	for kind, sheets := range map[string][]string{
+		"line": {"DATA", "GRAPHS", "INSTRUCTIONS", "FIELD SHEET"},
+		"belt": {"DATA", "GRAPHS", "INSTRUCTIONS", "FIELD SHEET FISH", "FIELD SHEET INVERTS"},
+		"site": {"DATA", "FIELD SHEET SITE"},
+	} {
+		t.Run(kind, func(t *testing.T) {
+			raw, err := TemplateWorkbook([]service.ReefDataDetail{d}, kind)
+			if err != nil {
+				t.Fatal(err)
+			}
+			parts := readWorkbook(t, raw)
+			wb := parts["xl/workbook.xml"]
+			for _, sheet := range sheets {
+				if !strings.Contains(wb, `name="`+sheet+`"`) {
+					t.Fatal("missing worksheet", sheet)
+				}
+			}
+			data := cells(t, parts["xl/worksheets/sheet1.xml"])
+			switch kind {
+			case "line":
+				if data["F37"].Number != "" || data["D1"].Text != "Test Coast" || data["B15"].Text != "NA" || data["B16"].Text != "SI" || data["L17"].Text != "OT" || data["D15"].Text != "RC" || data["B62"].Number != "39" || data["H52"].Number != "" || data["B52"].Number != "0" {
+					t.Fatal("incorrect point grid or coverage", data["L17"], data["B62"])
+				}
+			case "belt":
+				if data["B10"].Number != "9" || data["F10"].Number != "37" || data["G10"].Number != "9.25" || data["B55"].Number != "0.25" || data["B29"].Number != "" || data["B54"].Number != "0" {
+					t.Fatal("incorrect belt measures", data["B10"], data["F10"], data["B55"])
+				}
+			case "site":
+				if data["B3"].Text != "Test Coast" || data["B8"].Number != "25" || data["D8"].Number != "7" || data["F8"].Number != "30" || data["H8"].Text != "S" || data["H9"].Text != "E" || data["H7"].Number != "" {
+					t.Fatal("incorrect site metadata", data["B3"], data["D8"])
+				}
+			}
+			for _, part := range parts {
+				if strings.Contains(part, "Yeliu") || strings.Contains(part, "Taiwan-124") {
+					t.Fatal("example observations retained")
+				}
+			}
+			if kind != "site" && !strings.Contains(parts["xl/charts/chart1.xml"], "Test Coast") {
+				t.Fatal("chart missing event title")
+			}
+			if dir := os.Getenv("REEF_REPORT_PREVIEW_DIR"); dir != "" {
+				if err = os.WriteFile(filepath.Join(dir, "field-"+kind+".xlsx"), raw, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+		})
 	}
 }

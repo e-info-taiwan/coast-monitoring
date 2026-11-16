@@ -9,7 +9,7 @@ async function board() {
   const context = vm.createContext({ substrateDisplay, window: {addEventListener() {}} })
   const testSource = source.replace(/^import .*substrate-display\.mjs.*$/m, '')
     .replace('export function createReefData', 'function createReefData')
-    .replace('return {\n    load,', 'return {\n    board(points, editing) { s.editing = editing; return substrateBoard(points, "surface") },\n    load,')
+    .replace('return {\n    load,', 'return {\n    board(points, editing, mode = "raw", pointMarks = false) { s.editing = editing; s.boardMode = mode; return substrateBoard(points, "surface", pointMarks) },\n    load,')
   vm.runInContext(testSource, context)
   const app = context.createReefData({onCount() {}, apiFetch: async path => path.endsWith('/codes') ? [
     {code: 'OT', numeric_code: 0, name_zh: '其他', is_active: true},
@@ -32,8 +32,33 @@ test('production handboard displays BeautyCave 61m as 10 even when dictionary OT
 test('edit selection remains canonical OT and preserves explicit original 0 or 10', async () => {
   const render = await board()
   for (const raw of ['0', '10', 'OT']) {
-    assert.match(render([point(raw)], true), new RegExp(`<option value="OT" selected>${raw === '0' ? '0' : '10'} OT</option>`))
+    assert.match(render([point(raw)], true), new RegExp(`<option value="OT"[^>]* selected>${raw === '0' ? '0' : '10'} OT</option>`))
   }
   const html = render([{...point('0'), substrate_code: 'NA'}], false)
   assert.match(html, /底質：NA[^>]*>NA<\/span>/)
+})
+
+test('raw/code tabs retain original tokens, canonical edit values and bleaching labels', async () => {
+  const render = await board()
+  const points = [point('0'), {...point('A'), id: 62, position_m: 61.5, substrate_code: 'HC-a', health_status: 'bleached'}]
+  const before = JSON.stringify(points)
+  for (const mode of ['raw', 'code']) {
+    const html = render(points, false, mode, true)
+    assert.match(html, /data-board-raw="0" data-board-code="OT"/)
+    assert.match(html, /data-board-raw="A" data-board-code="HC-a"/)
+    assert.match(html, mode === 'raw' ? />0<\/span>/ : />OT<\/span>/)
+    assert.match(html, mode === 'raw' ? />A<\/span><small>已白化<\/small>/ : />HC-a<\/span><small>已白化<\/small>/)
+    const edit = render(points, true, mode, true)
+    assert.match(edit, /<option value="OT" data-board-raw="0 OT" data-board-code="OT" selected>/)
+    assert.match(edit, mode === 'raw' ? /selected>0 OT<\/option>/ : /selected>OT<\/option>/)
+  }
+  assert.equal(JSON.stringify(points), before)
+})
+
+test('corrected categories ignore stale raw tokens and health states remain distinct', async () => {
+  const render = await board()
+  for (const [health, label] of [['bleached', '已白化'], ['not_bleached', '未白化'], [null, '未標記']]) {
+    const html = render([{...point('10'), substrate_code: 'HC', health_status: health}], false, 'raw', true)
+    assert.match(html, new RegExp(`data-board-raw="1" data-board-code="HC">1</span><small>${label}</small>`))
+  }
 })

@@ -1,4 +1,8 @@
 """Exercise the admin UI in Chrome against the CI server and its disposable PostgreSQL database."""
+import xml.etree.ElementTree as ET
+from zipfile import ZipFile
+from io import BytesIO
+
 import json
 import os
 import secrets
@@ -28,12 +32,12 @@ def seed():
         INSERT INTO transect(event_id,method) VALUES('browser-member','line') RETURNING id AS transect_id \\gset
         INSERT INTO transect(event_id,method) VALUES('browser-member','belt_invert'),('browser-other','line');
         INSERT INTO substrate_point(transect_id,segment,position_m,substrate_layer,substrate_code) VALUES
-          (:transect_id,4,94.5,'surface','OT'),(:transect_id,1,10,'surface','NA'),
+          (:transect_id,3,61,'surface','OT'),(:transect_id,4,94.5,'surface','OT'),(:transect_id,1,10,'surface','NA'),
           (:transect_id,1,0,'surface','RC'),(:transect_id,1,0,'down','HC');
         INSERT INTO substrate_point(transect_id,segment,position_m,substrate_layer,substrate_code) VALUES
-          (:transect_id,2,25,'surface','HC-a'),(:transect_id,2,25.5,'surface','HC');
+          (:transect_id,2,25,'surface','HC-a'),(:transect_id,2,25.5,'surface','HC'),(:transect_id,3,50,'surface','HC-b'),(:transect_id,1,5,'surface','SI(HC)');
         INSERT INTO substrate_bleaching(transect_id,segment,hc_bleached_count,sc_bleached_count) VALUES
-          (:transect_id,2,1,0),(:transect_id,4,NULL,0);
+          (:transect_id,2,1,0),(:transect_id,3,0,0),(:transect_id,4,NULL,0);
         UPDATE event SET submission_snapshot='{"format":"reefcheck-web-v4","bleaching_mode":"point_marks"}'
           WHERE event_id='browser-other';
         INSERT INTO substrate_point(transect_id,segment,position_m,substrate_code,is_bleached)
@@ -55,9 +59,89 @@ def verify(code, expected_status):
     assert status == expected_status, (status, expected_status)
 
 
+def check_recipient_downloads(page, code):
+    ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    for label, expected in (
+        ("珊瑚礁體檢總部上傳格式", ("_Site.xlsx", "_LineTransect.xlsx", "_BeltTransect.xlsx")),
+        ("TaiBIF 上傳格式", ("_Substrate-long.xlsx", "_Event-Core.csv", "_Occurance.csv", "_MoF.csv", "_eMoF.csv")),
+        ("內部科導分析格式", ("_LineAnalysis.xlsx", "_BeltAnalysis.xlsx", "_Summary_5m.xlsx")),
+    ):
+        with page.expect_download() as download:
+            page.get_by_role("button", name=label, exact=True).click()
+        with ZipFile(download.value.path()) as bundle:
+            members = bundle.namelist()
+            assert len(members) == len(expected), members
+            for suffix in expected:
+                name, = [m for m in members if m.endswith(suffix)]
+                if not name.endswith(".xlsx"):
+                    continue
+                with ZipFile(BytesIO(bundle.read(name))) as book:
+                    labels = book.read("xl/sharedStrings.xml").decode()
+                    assert "請填寫白色格子" not in labels and "white boxes" not in labels.lower(), name
+                    sheet = ET.fromstring(book.read("xl/worksheets/sheet1.xml"))
+                    if suffix == "_LineTransect.xlsx":
+                        assert sheet.find(".//s:c[@r='P34']/s:is/s:t", ns).text == code
+                    elif suffix == "_LineAnalysis.xlsx":
+                        assert sheet.find(".//s:c[@r='P34']/s:v", ns).text == {"OT": "10", "RB": "7"}[code]
+                    elif suffix == "_Substrate-long.xlsx":
+                        rows = sheet.findall(".//s:row", ns)
+                        values = [{c.get("r").rstrip("0123456789"): "".join(c.itertext())
+                                   for c in row.findall("s:c", ns)} for row in rows]
+                        assert [(r["D"], r["H"]) for r in values if r.get("F") == "94.5"] == [("browser-member", code)]
+
+
+def check_report_downloads(page):
+    check_recipient_downloads(page, "OT")
+    trigger = page.get_by_role("button", name="其他下載", exact=True)
+    menu = page.get_by_role("group", name="其他下載", exact=True)
+    header = page.locator(".panel-header").filter(has=trigger)
+    for width in (1280, 390):
+        page.set_viewport_size({"width": width, "height": 800})
+        trigger.scroll_into_view_if_needed()
+        before = [item.bounding_box() for item in (header, trigger)]
+        trigger.focus()
+        trigger.press("Enter")
+        expect(menu).to_be_visible()
+        assert [item.bounding_box() for item in (header, trigger)] == before
+        rect = menu.bounding_box()
+        anchor = before[1]
+        expected_x = min(max(8, anchor["x"]), width - rect["width"] - 8)
+        assert abs(rect["x"] - expected_x) <= 1, (anchor, rect)
+        bottom = anchor["y"] + anchor["height"]
+        if 800 - bottom < 144 and anchor["y"] > 800 - bottom:
+            assert abs(rect["y"] + rect["height"] - anchor["y"] + 4) <= 1, (anchor, rect)
+        else:
+            assert abs(rect["y"] - bottom - 4) <= 1, (anchor, rect)
+        trigger.press("Escape")
+        expect(menu).to_be_hidden()
+    page.set_viewport_size({"width": 1280, "height": 800})
+    ns = {"s": "http://schemas.openxmlformats.org/spreadsheetml/2006/main"}
+    for kind, label, expected_cell, expected_value in (
+        ("line", "底質 Line Excel", "L17", "OT"),
+        ("belt", "生物 Belt Excel", "B1", "BrowserFixture"),
+        ("site", "樣點 Site Excel", "B3", "BrowserFixture"),
+    ):
+        trigger.click()
+        with page.expect_download() as download:
+            menu.get_by_role("button", name=label, exact=True).click()
+        expect(menu).to_be_hidden()
+        assert download.value.suggested_filename.endswith("-" + kind + ".xlsx")
+        with ZipFile(download.value.path()) as workbook:
+            data = ET.fromstring(workbook.read("xl/worksheets/sheet1.xml"))
+            cell = data.find(f".//s:c[@r='{expected_cell}']/s:is/s:t", ns)
+            assert cell is not None and cell.text == expected_value, (kind, expected_cell)
+    trigger.click()
+    with page.expect_download() as archive:
+        menu.get_by_role("button", name="下載報告套組 ZIP", exact=True).click()
+    with ZipFile(archive.value.path()) as bundle:
+        for suffix in ("_Site.xlsx", "_LineTransect.xlsx", "_BeltTransect.xlsx"):
+            assert sum(name.endswith(suffix) for name in bundle.namelist()) == 1, suffix
+
+
 def check_substrate_board(page):
     page.get_by_role("button", name="查看 browser-member", exact=True).click()
     page.get_by_role("button", name="底質 Line", exact=True).click()
+    check_report_downloads(page)
     surface = page.get_by_role("table", name="表層逐點底質")
     down = page.get_by_role("table", name="下層逐點底質")
     rows = surface.locator("tbody tr")
@@ -70,14 +154,41 @@ def check_substrate_board(page):
     expect(rows.first.locator("td").nth(1)).to_have_text("6")
     expect(rows.first.locator("td").nth(3)).to_have_text("NA")
     expect(rows.first.locator("td").nth(7)).to_have_text("—")
-    expect(rows.last.locator("td").last).to_have_text("0")
+    ot_point = surface.get_by_label("表層第 3 段 61 m 底質：OT · 其他 · 手板代碼對照：10（未保存原始數字）", exact=True)
+    expect(ot_point).to_have_text("10")
+    expect(rows.last.locator("td").last).to_have_text("10")
+    raw_tab = page.get_by_role("tab", name="原始數字")
+    code_tab = page.get_by_role("tab", name="轉換代碼（HC／SC）")
+    expect(raw_tab).to_have_attribute("aria-selected", "true")
+    code_tab.click()
+    expect(page.get_by_role("tabpanel", name="轉換代碼（HC／SC）")).to_be_visible()
+    expect(surface.get_by_role("columnheader", name="代碼", exact=True)).to_have_count(8)
+    expect(rows.first.locator("td").nth(1)).to_have_text("RC")
+    expect(rows.first.locator("td").nth(3)).to_have_text("NA")
+    expect(rows.first.locator("td").nth(7)).to_have_text("—")
+    expect(rows.last.locator("td").last).to_have_text("OT")
+    expect(surface.get_by_text("SI(HC)", exact=True)).to_be_visible()
+    expect(down.locator("tbody td").nth(1)).to_have_text("1")
+    code_tab.press("ArrowLeft")
+    expect(raw_tab).to_be_focused()
+    expect(rows.last.locator("td").last).to_have_text("10")
+    session = page.request.get(BASE + "/api/session").json()
+    headers = {"X-CSRF-Token": session["csrfToken"]}
+    for path in ("reef-check-data/codes", "substrate-types"):
+        response = page.request.get(BASE + "/api/admin/" + path, headers=headers)
+        assert response.ok, (path, response.status)
+        numbers = {row["code"]: row["numeric_code"] for row in response.json()}
+        assert numbers["OT"] == 10 and numbers["NA"] == -1, path
     expect(down.locator("tbody td").nth(1)).to_have_text("1")
 
     bleaching = page.get_by_role("region", name="底質白化", exact=True)
-    expect(bleaching.get_by_role("table")).to_have_count(1)
+    expect(bleaching.get_by_role("table")).to_have_count(2)
     expect(bleaching).to_contain_text("依各段填報")
-    expect(bleaching.locator("tbody tr").nth(1).locator("td")).to_have_text(["1", "50%（1／2）", "0", "無表層 SC 點"])
-    expect(bleaching.locator("tbody tr").last.locator("td").first).to_have_text("NA（未記錄）")
+    summary = bleaching.get_by_role("region", name="穿越線白化統計")
+    expect(summary.get_by_role("row", name="硬珊瑚", exact=False).locator("td")).to_have_text(["1", "33.33%（1／3）", "0.5", "0.71", "0.5", "2/4"])
+    expect(summary.get_by_role("row", name="軟珊瑚", exact=False).locator("td")).to_have_text(["0", "無法計算", "0", "0", "0", "3/4"])
+    expect(bleaching.get_by_role("table").first.locator("tbody tr").nth(1).locator("td")).to_have_text(["1", "50%（1／2）", "0", "無表層 SC 點"])
+    expect(bleaching.get_by_role("table").first.locator("tbody tr").last.locator("td").first).to_have_text("NA（未記錄）")
 
     page.set_viewport_size({"width": 390, "height": 844})
     region = page.get_by_role("region", name="表層底質手板")
@@ -87,10 +198,17 @@ def check_substrate_board(page):
     page.set_viewport_size({"width": 1280, "height": 800})
 
     page.get_by_role("button", name="編輯這條穿越線").click()
-    expect(surface.get_by_role("combobox")).to_have_count(5)
+    expect(surface.get_by_role("combobox")).to_have_count(8)
     page.get_by_label("表層第 4 段 94.5 m 底質", exact=True).select_option("RB")
+    code_tab.click()
+    edited = page.get_by_label("表層第 4 段 94.5 m 底質", exact=True)
+    expect(edited).to_have_value("RB")
+    expect(edited.locator("option:checked")).to_have_text("RB")
+    raw_tab.click()
+    expect(edited).to_have_value("RB")
     page.get_by_role("button", name="儲存修改").click()
     expect(rows.last.locator("td").last).to_have_text("7")
+    check_recipient_downloads(page, "RB")
     page.get_by_role("button", name="返回場次列表", exact=False).click()
     page.get_by_role("button", name="查看 browser-member", exact=True).click()
     page.get_by_role("button", name="底質 Line", exact=True).click()
@@ -98,15 +216,54 @@ def check_substrate_board(page):
     expect(down.locator("tbody td").nth(1)).to_have_text("1")
     page.get_by_role("button", name="返回場次列表", exact=False).click()
     page.get_by_role("button", name="查看 browser-other", exact=True).click()
-    expect(bleaching.get_by_role("table")).to_have_count(1)
+    expect(bleaching.get_by_role("table")).to_have_count(2)
     expect(bleaching).to_contain_text("依逐格白化標記")
-    expect(bleaching.locator("tbody tr").first.locator("td")).to_have_text(["1", "50%（1／2）", "0", "0%（0／1）"])
-    expect(bleaching.locator("tbody tr").nth(1)).to_contain_text("白化標記未齊")
-    expect(bleaching.locator("tbody tr").nth(2)).to_contain_text("無有效底質點")
-    expect(bleaching.locator("tbody tr").last).to_contain_text("本段未記錄")
+    point = rows.first.locator("td").nth(1)
+    expect(point).to_have_text("a已白化")
+    code_tab.click()
+    expect(point).to_have_text("HC-a已白化")
+    expect(surface.get_by_text("未白化", exact=True)).to_have_count(2)
+    expect(surface.get_by_text("未標記", exact=True)).to_have_count(1)
+    summary = bleaching.get_by_role("region", name="穿越線白化統計")
+    expect(summary.get_by_role("row", name="硬珊瑚", exact=False).locator("td")).to_have_text(['1', '50%（1／2）', '1', '—', '—', '1/4'])
+    expect(summary.get_by_role("row", name="軟珊瑚", exact=False).locator("td")).to_have_text(['0', '0%（0／1）', '0', '0', '0', '2/4'])
+    expect(bleaching.get_by_role("table").first.locator("tbody tr").first.locator("td")).to_have_text(["1", "50%（1／2）", "0", "0%（0／1）"])
+    expect(bleaching.get_by_role("table").first.locator("tbody tr").nth(1)).to_contain_text("白化標記未齊")
+    expect(bleaching.get_by_role("table").first.locator("tbody tr").nth(2)).to_contain_text("無有效底質點")
+    expect(bleaching.get_by_role("table").first.locator("tbody tr").last).to_contain_text("本段未記錄")
     page.get_by_role("button", name="返回場次列表", exact=False).click()
     print("Chrome passed: historical totals and point marks, subtype denominator, valid zero and missing reasons.")
     print("Chrome passed: four-segment handboard, layer isolation, mobile scrolling and persisted point edit.")
+
+
+def check_reload_loading(page):
+    # Pause the authenticated session response to expose the initial page.
+    sessions = []
+    page.route("**/api/session", lambda route: sessions.append(route))
+    page.reload(wait_until="domcontentloaded")
+    expect(page.locator("#loading-view")).to_be_visible()
+    expect(page.locator("#login-view")).to_be_hidden()
+    expect(page.locator("#app-view")).to_be_hidden()
+    for _ in range(50):
+        if sessions:
+            break
+        page.wait_for_timeout(20)
+    assert len(sessions) == 1
+    checked = []
+    def load_events(route):
+        expect(page.locator("#loading-view")).to_be_visible()
+        expect(page.locator("#login-view")).to_be_hidden()
+        expect(page.locator("#app-view")).to_be_hidden()
+        checked.append(True)
+        route.continue_()
+    page.route("**/api/admin/reef-check-data/events", load_events)
+    sessions[0].continue_()
+    expect(page.locator("#rd-filters")).to_be_visible()
+    expect(page.locator("#loading-view")).to_be_hidden()
+    expect(page.locator("#login-view")).to_be_hidden()
+    assert checked
+    page.unroute("**/api/session")
+    page.unroute("**/api/admin/reef-check-data/events")
 
 
 def test_ui():
@@ -119,6 +276,8 @@ def test_ui():
         page.locator("#dev-email").fill(EMAIL)
         page.locator("#dev-password").fill(PASSWORD)
         page.get_by_role("button", name="Sign in", exact=True).click()
+        expect(page.locator("#rd-filters")).to_be_visible()
+        check_reload_loading(page)
         filters = page.locator("#rd-filters")
         filters.get_by_label("潛水員").fill("RC-DIVER-TEST")
         filters.get_by_text("篩選", exact=True).click()

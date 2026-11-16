@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 var fishSummaryKeys = []string{"butterfly_total", "sweetlips_total", "snapper_total", "barramundi", "grouper_large", "grouper_small", "humphead", "bumphead", "parrot_large", "moray"}
@@ -314,14 +315,22 @@ func TemplateWorkbook(details []service.ReefDataDetail, kind string) ([]byte, er
 			}
 		}
 		return summaryTemplate(data)
-	case "line", "belt":
+	case "line", "belt", "site", "detail-line", "detail-belt":
 		if len(data) != 1 {
 			return nil, fmt.Errorf("%w: 逐次範本需指定單一場次", service.ErrValidation)
 		}
-		if kind == "line" {
+		switch kind {
+		case "line":
+			return lineFieldReport(data[0])
+		case "belt":
+			return beltFieldReport(data[0])
+		case "site":
+			return siteFieldReport(data[0])
+		case "detail-line":
 			return lineTemplate(data[0])
+		default:
+			return beltTemplate(data[0])
 		}
-		return beltTemplate(data[0])
 	default:
 		return nil, fmt.Errorf("%w: 無效報告類型", service.ErrValidation)
 	}
@@ -342,11 +351,21 @@ func safeReportName(name string) string {
 
 // TemplateArchive returns separate original-format files, avoiding sheet-name collisions.
 func TemplateArchive(details []service.ReefDataDetail) ([]byte, error) {
+	return FormatArchive(details, "")
+}
+
+// FormatArchive generates the selected recipient’s files from the same saved event details.
+func FormatArchive(details []service.ReefDataDetail, format string) ([]byte, error) {
+	if format != "" && format != "headquarters" && format != "taibif" && format != "internal" {
+		return nil, fmt.Errorf("%w: 無效報表格式", service.ErrValidation)
+	}
+
 	data := sortedEvents(details)
 	var out bytes.Buffer
 	z := zip.NewWriter(&out)
+	generatedAt := time.Now().UTC()
 	write := func(name string, data []byte) error {
-		w, e := z.Create(name)
+		w, e := z.CreateHeader(&zip.FileHeader{Name: name, Method: zip.Deflate, Modified: generatedAt})
 		if e != nil {
 			return e
 		}
@@ -357,27 +376,59 @@ func TemplateArchive(details []service.ReefDataDetail) ([]byte, error) {
 	var siteIDs []int
 	for _, d := range data {
 		e := d.detail.Event
-		if _, ok := groups[e.SiteID]; !ok {
-			siteIDs = append(siteIDs, e.SiteID)
+		if format == "" || format == "internal" {
+			if _, ok := groups[e.SiteID]; !ok {
+				siteIDs = append(siteIDs, e.SiteID)
+			}
+			groups[e.SiteID] = append(groups[e.SiteID], d)
 		}
-		groups[e.SiteID] = append(groups[e.SiteID], d)
 		base := safeReportName(fmt.Sprintf("%s_%s_%s_%gm_%d", e.SiteName, e.SurveyDate, e.EventTime, e.DepthM, e.ID))
-		if d.line != nil {
-			raw, err := lineTemplate(d)
+		workbook := func(suffix string, generate func(*eventData) ([]byte, error)) error {
+			raw, err := generate(d)
 			if err != nil {
-				return nil, err
+				return err
 			}
-			if err = write(base+"_LineTransect.xlsx", raw); err != nil {
-				return nil, err
-			}
+			return write(base+suffix+".xlsx", raw)
 		}
-		if d.fish != nil || d.invert != nil {
-			raw, err := beltTemplate(d)
-			if err != nil {
+		switch format {
+		case "taibif":
+			if d.line != nil {
+				if err := workbook("_Substrate-long", taiLine); err != nil {
+					return nil, err
+				}
+			}
+			if d.fish != nil || d.invert != nil {
+				if err := taiBelt(d, write, base); err != nil {
+					return nil, err
+				}
+			}
+			if d.line == nil && d.fish == nil && d.invert == nil {
+				return nil, fmt.Errorf("%w: %s 尚無穿越線紀錄", service.ErrValidation, e.EventID)
+			}
+		case "internal":
+			if d.line != nil {
+				if err := workbook("_LineAnalysis", lineTemplate); err != nil {
+					return nil, err
+				}
+			}
+			if d.fish != nil || d.invert != nil {
+				if err := workbook("_BeltAnalysis", beltTemplate); err != nil {
+					return nil, err
+				}
+			}
+		default:
+			if err := workbook("_Site", siteFieldReport); err != nil {
 				return nil, err
 			}
-			if err = write(base+"_BeltTransect.xlsx", raw); err != nil {
-				return nil, err
+			if d.line != nil {
+				if err := workbook("_LineTransect", lineFieldReport); err != nil {
+					return nil, err
+				}
+			}
+			if d.fish != nil || d.invert != nil {
+				if err := workbook("_BeltTransect", beltFieldReport); err != nil {
+					return nil, err
+				}
 			}
 		}
 	}
@@ -416,8 +467,10 @@ func TemplateArchive(details []service.ReefDataDetail) ([]byte, error) {
 			}
 		}
 	}
-	if err := write("報告說明.txt", []byte("各檔使用原始 Line、Belt、Summary 範本。Summary 僅包含本次選取場次，每份最多比較兩個深度。\n空白＝未記錄；0＝觀察到零。SD 使用樣本標準差，SE=SD/√有效段數。\n底質不輸出泥下模式。魚類與無脊椎 EXPORT 另含子樣區 TaiBIF_event_id。\n範本沒有欄位的完整原始記錄保留在 EXPORT 附表，未分體長者不推估體型。\n")); err != nil {
-		return nil, err
+	if format == "" {
+		if err := write("報告說明.txt", []byte("每場次包含 Site，依調查方法附 Line、Belt。Summary 使用本次選取場次，每份最多比較兩個深度。\n空白＝未記錄；0＝觀察到零。Line 表層以標準底質代碼呈現，NA 不列入覆蓋率分母。詳細資料可由單場次下載。\n")); err != nil {
+			return nil, err
+		}
 	}
 	if err := z.Close(); err != nil {
 		return nil, err

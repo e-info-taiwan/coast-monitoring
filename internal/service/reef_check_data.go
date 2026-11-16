@@ -61,12 +61,14 @@ type ReefDataMetadata struct {
 }
 
 type ReefDataPoint struct {
-	ID         int64   `json:"id"`
-	Segment    int     `json:"segment"`
-	Position   float64 `json:"position_m"`
-	Layer      string  `json:"substrate_layer"`
-	Code       string  `json:"substrate_code"`
-	IsBleached *bool   `json:"is_bleached"`
+	RawInputCode *string `json:"raw_input_code,omitempty"`
+	ID           int64   `json:"id"`
+	Segment      int     `json:"segment"`
+	Position     float64 `json:"position_m"`
+	Layer        string  `json:"substrate_layer"`
+	Code         string  `json:"substrate_code"`
+	IsBleached   *bool   `json:"is_bleached"`
+	HealthStatus *string `json:"health_status"`
 }
 
 type ReefBleachingRate struct {
@@ -183,6 +185,7 @@ type ReefDataDiverInput struct {
 }
 
 type ReefDataTaxon struct {
+	EntryRowID  string `json:"entry_row_id,omitempty"`
 	ID          int    `json:"id"`
 	TaxonGroup  string `json:"taxon_group"`
 	NameZH      string `json:"name_zh"`
@@ -224,6 +227,7 @@ type ReefDataSubstrateTypeInput struct {
 }
 
 type ReefDataImpactType struct {
+	EntryRowID  string `json:"entry_row_id,omitempty"`
 	ID          int    `json:"id"`
 	ImpactGroup string `json:"impact_group"`
 	NameZH      string `json:"name_zh"`
@@ -349,6 +353,7 @@ type ReefCheckSubstratePointInput struct {
 	SubstrateCode  string  `json:"substrate_code"`
 	SubstrateLayer string  `json:"substrate_layer"`
 	IsBleached     *bool   `json:"is_bleached"`
+	HealthStatus   *string `json:"health_status"`
 }
 
 type ReefCheckBleachingInput struct {
@@ -423,6 +428,9 @@ func (s *ReefCheckSurveySubmission) Validate() error {
 	}
 	for i := range s.SubstratePoints {
 		s.SubstratePoints[i].SubstrateCode = NormalizeEntrySubstrate(s.SubstratePoints[i].SubstrateCode)
+		if err := s.SubstratePoints[i].normalizeHealthStatus(); err != nil {
+			return err
+		}
 	}
 	if s.Event.SurveyDate == "" {
 		return bad("缺少調查日期")
@@ -555,8 +563,16 @@ type ReefCheckSubmissionResult struct {
 }
 
 type ReefCheckConfig struct {
-	Sites   []ReefDataSite       `json:"sites"`
-	Codes   []ReefDataCode       `json:"codes"`
+	Sites      []ReefDataSite       `json:"sites"`
+	Codes      []ReefDataCode       `json:"codes"`
+	Taxa       []ReefDataTaxon      `json:"taxa"`
+	Impacts    []ReefDataImpactType `json:"impacts"`
+	EntryBoard *ReefCheckEntryBoard `json:"entry_board,omitempty"`
+}
+
+// EntryBoard is the versioned volunteer template, not the historical catalog.
+type ReefCheckEntryBoard struct {
+	Format  string               `json:"format"`
 	Taxa    []ReefDataTaxon      `json:"taxa"`
 	Impacts []ReefDataImpactType `json:"impacts"`
 }
